@@ -1,0 +1,53 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Install dependencies (pnpm)",
+      "type": "shell",
+      "command": "pnpm install",
+      "problemMatcher": []
+    },
+    {
+      "label": "Push DB schema",
+      "type": "shell",
+      "command": "pnpm run db:push",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run all (API + student + admin)",
+      "type": "shell",
+      "command": "pnpm run dev",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Run API only",
+      "type": "shell",
+      "command": "pnpm run dev:api",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Run student app only",
+      "type": "shell",
+      "command": "pnpm run dev:student",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Run admin app only",
+      "type": "shell",
+      "command": "pnpm run dev:admin",
+      "isBackground": true,
+      "problemMatcher": []
+    }
+  ]
+}

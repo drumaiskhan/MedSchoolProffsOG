@@ -1,0 +1,1 @@
+- [Zod generator compatibility](zod-generator.md) — Orval output currently requires Zod 4 helpers.
