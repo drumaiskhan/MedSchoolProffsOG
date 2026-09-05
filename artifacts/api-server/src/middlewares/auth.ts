@@ -35,18 +35,49 @@ function extractToken(req: Request): string | null {
   return null;
 }
 
+// TEMPORARY: verbose diagnostic logging for a login redirect-loop bug in
+// production. Prints to the platform's log stream (Railway "Deploy Logs" /
+// stdout) so it can be read directly rather than caught live in browser
+// DevTools, which was infeasible here due to a hard-redirect on failure.
+// Safe to remove once the auth flow is confirmed working — it logs no
+// secrets, only which branch of the check was hit.
+function debugAuth(req: Request, reason: string, extra?: Record<string, unknown>): void {
+  // eslint-disable-next-line no-console
+  console.log("[auth-debug]", req.method, req.originalUrl, "-", reason, extra ?? "");
+}
+
 /** Populates req.user when a valid session is present, but never rejects the request. */
 export async function attachUser(req: Request, _res: Response, next: NextFunction): Promise<void> {
+  const hasCookieHeader = Boolean(req.headers.cookie);
+  const cookieToken = req.cookies?.[SESSION_COOKIE_NAME];
   const token = extractToken(req);
-  if (!token) return next();
+
+  if (!token) {
+    debugAuth(req, "no token found", { hasCookieHeader, cookieNamesSeen: req.cookies ? Object.keys(req.cookies) : [] });
+    return next();
+  }
+
   const payload = verifySession(token);
-  if (!payload) return next();
+  if (!payload) {
+    debugAuth(req, "token failed JWT verification (bad signature or expired)", { tokenSource: cookieToken ? "cookie" : "bearer" });
+    return next();
+  }
 
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, payload.sub));
-  if (!user) return next();
+  if (!user) {
+    debugAuth(req, "token valid but no matching user row", { userId: payload.sub });
+    return next();
+  }
 
   // if the password changed after this token was issued, the token is stale — reject it
-  if (Math.floor(user.passwordChangedAt.getTime() / 1000) > payload.passwordChangedAt) return next();
+  const userChangedAtSec = Math.floor(user.passwordChangedAt.getTime() / 1000);
+  if (userChangedAtSec > payload.passwordChangedAt) {
+    debugAuth(req, "token rejected: passwordChangedAt is newer than token", {
+      userChangedAtSec,
+      tokenIssuedForChangedAtSec: payload.passwordChangedAt,
+    });
+    return next();
+  }
 
   req.user = { id: user.id, role: user.role, status: user.status, email: user.email, name: user.name };
   next();
