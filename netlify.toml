@@ -1,7 +1,7 @@
 [build]
   base = "/"
   command = "pnpm --filter @workspace/frontend-admin run build"
-  publish = "frontend-admin/dist"
+  publish = "artifacts/frontend-admin/dist"
 
 [build.environment]
   NODE_VERSION = "22"
