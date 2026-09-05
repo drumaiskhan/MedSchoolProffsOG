@@ -8,6 +8,7 @@ minimumReleaseAgeExclude:
   - '@replit/*'
   - stripe-replit-sync
 
+
 # ============================================================================
 # WORKSPACE PACKAGES
 # ============================================================================
@@ -17,6 +18,7 @@ packages:
   - 'lib/*'
   - 'lib/integrations/*'
   - 'scripts'
+
 
 # ============================================================================
 # PACKAGE CATALOG
@@ -51,6 +53,7 @@ catalog:
   wouter: ^3.3.5
   zod: ^4.0.0
 
+
 # ============================================================================
 # PNPM SETTINGS
 # ============================================================================
@@ -58,7 +61,8 @@ catalog:
 autoInstallPeers: false
 
 # Allow required dependency installation/build scripts.
-# This fixes pnpm 11 blocking esbuild during Render builds.
+# Required for esbuild and other native dependencies.
+
 onlyBuiltDependencies:
   - '@swc/core'
   - esbuild
@@ -71,13 +75,17 @@ allowBuilds:
   msw: true
   unrs-resolver: true
 
+
 # ============================================================================
 # PLATFORM-SPECIFIC OPTIONAL DEPENDENCY OVERRIDES
 # ============================================================================
 
 overrides:
 
+  # --------------------------------------------------------------------------
   # esbuild
+  # --------------------------------------------------------------------------
+
   "esbuild>@esbuild/darwin-arm64": "-"
   "esbuild>@esbuild/darwin-x64": "-"
   "esbuild>@esbuild/freebsd-arm64": "-"
@@ -101,7 +109,10 @@ overrides:
   "esbuild>@esbuild/android-x64": "-"
   "esbuild>@esbuild/openharmony-arm64": "-"
 
+  # --------------------------------------------------------------------------
   # lightningcss
+  # --------------------------------------------------------------------------
+
   "lightningcss>lightningcss-android-arm64": "-"
   "lightningcss>lightningcss-darwin-arm64": "-"
   "lightningcss>lightningcss-darwin-x64": "-"
@@ -111,7 +122,10 @@ overrides:
   "lightningcss>lightningcss-linux-arm64-musl": "-"
   "lightningcss>lightningcss-linux-x64-musl": "-"
 
+  # --------------------------------------------------------------------------
   # Tailwind CSS oxide
+  # --------------------------------------------------------------------------
+
   "@tailwindcss/oxide>@tailwindcss/oxide-android-arm64": "-"
   "@tailwindcss/oxide>@tailwindcss/oxide-darwin-arm64": "-"
   "@tailwindcss/oxide>@tailwindcss/oxide-darwin-x64": "-"
@@ -121,7 +135,10 @@ overrides:
   "@tailwindcss/oxide>@tailwindcss/oxide-linux-arm64-musl": "-"
   "@tailwindcss/oxide>@tailwindcss/oxide-linux-x64-musl": "-"
 
+  # --------------------------------------------------------------------------
   # Rollup
+  # --------------------------------------------------------------------------
+
   "rollup>@rollup/rollup-android-arm-eabi": "-"
   "rollup>@rollup/rollup-android-arm64": "-"
   "rollup>@rollup/rollup-darwin-arm64": "-"
@@ -142,7 +159,10 @@ overrides:
   "rollup>@rollup/rollup-openbsd-x64": "-"
   "rollup>@rollup/rollup-openharmony-arm64": "-"
 
+  # --------------------------------------------------------------------------
   # Expo ngrok
+  # --------------------------------------------------------------------------
+
   "@expo/ngrok-bin>@expo/ngrok-bin-darwin-arm64": "-"
   "@expo/ngrok-bin>@expo/ngrok-bin-darwin-x64": "-"
   "@expo/ngrok-bin>@expo/ngrok-bin-freebsd-ia32": "-"
@@ -152,7 +172,9 @@ overrides:
   "@expo/ngrok-bin>@expo/ngrok-bin-linux-ia32": "-"
   "@expo/ngrok-bin>@expo/ngrok-bin-sunos-x64": "-"
 
-  # drizzle-kit uses esbuild internally.
-  # Force the safe/current esbuild version.
+  # --------------------------------------------------------------------------
+  # drizzle-kit / esbuild
+  # --------------------------------------------------------------------------
+
   "@esbuild-kit/esm-loader": "npm:tsx@^4.21.0"
   esbuild: "0.27.3"
