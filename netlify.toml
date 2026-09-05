@@ -1,7 +1,8 @@
 [build]
   base = "/"
-  command = "pnpm install --no-frozen-lockfile && pnpm --filter @workspace/medschoolproffs build"
+  command = "pnpm --filter @workspace/medschoolproffs build"
   publish = "artifacts/medschoolproffs/dist"
 
 [build.environment]
   NODE_VERSION = "22"
+  PNPM_FLAGS = "--no-frozen-lockfile"
