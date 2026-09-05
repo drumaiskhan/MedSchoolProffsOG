@@ -1,7 +1,7 @@
 [build]
   base = "/"
-  command = "pnpm --filter @workspace/frontend-admin run build && rm -rf dist && mkdir -p dist && cp -R frontend-admin/dist/public/. dist/"
-  publish = "dist"
+  command = "pnpm --filter @workspace/frontend-admin run build"
+  publish = "frontend-admin/dist"
 
 [build.environment]
   NODE_VERSION = "22"
