@@ -1,14 +1,11 @@
-# Deploys the ADMIN frontend only. Point a second Netlify site at this repo
-# with this file as its config (Site settings > Build & deploy > "Netlify
-# configuration file" -> netlify.admin.toml), and deploy it on a separate,
-# harder-to-guess subdomain rather than linking it from the student site.
-
 [build]
-  command = "pnpm install && pnpm run build:admin"
-  publish = "artifacts/frontend-admin/dist/public"
+  base = "/"
+  command = "pnpm --filter @workspace/frontend-admin run build"
+  publish = "frontend-admin/dist/public"
 
 [build.environment]
   NODE_VERSION = "22"
+  PNPM_FLAGS = "--no-frozen-lockfile"
 
 [[redirects]]
   from = "/*"
