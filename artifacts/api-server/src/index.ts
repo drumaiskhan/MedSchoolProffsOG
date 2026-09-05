@@ -8,6 +8,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { seedDefaultAdmin } from "./lib/seedAdmin";
 import { normalizeLegacyRoles } from "./lib/normalizeLegacyRoles";
+import { ensureSchema } from "@workspace/db";
 
 // Most hosts (Railway, Render, Fly, Replit) inject PORT automatically. For
 // local dev without a .env, default to 3001 instead of hard-failing.
@@ -18,6 +19,17 @@ if (Number.isNaN(port) || port <= 0) {
 }
 
 async function main(): Promise<void> {
+  // Creates any missing tables/indexes (idempotent, additive-only — see
+  // lib/db/ensure-schema.sql). Nothing else below this can work on a fresh
+  // database until the tables exist, so this runs first and its failure is
+  // logged loudly — a real connection/permissions problem here means the
+  // "[migrate]"/"[seed]" failures right after it are just downstream noise.
+  try {
+    await ensureSchema();
+  } catch (err) {
+    logger.error({ err }, "[schema] Failed to ensure baseline tables exist — the database connection or permissions are likely the real problem here; the migrate/seed errors that follow are probably just downstream of this.");
+  }
+
   try {
     await normalizeLegacyRoles();
   } catch (err) {
