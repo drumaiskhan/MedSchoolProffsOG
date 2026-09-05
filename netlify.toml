@@ -1,27 +1,21 @@
-# Single Netlify config shared by BOTH frontends.
-# Create two Netlify sites pointing at this same repo.
-# Set FRONTEND to "student" or "admin" on each site.
+# Single Netlify config shared by BOTH frontends. Create two Netlify sites
+# pointing at this same repo, and on each site set the environment variable
+# FRONTEND to either "student" or "admin" (Site settings > Environment
+# variables). Neither site needs a custom "Netlify configuration file"
+# setting — both just use this file.
+#
+# The backend (Express + Postgres) needs a separate host — Railway, Render,
+# or Fly.io all work well. Set VITE_API_BASE_URL (and VITE_ADMIN_URL /
+# VITE_STUDENT_URL) per site — see DEPLOY-SPLIT.md.
 
 [build]
-command = "pnpm install && pnpm run build:${FRONTEND:-student} && rm -rf netlify-publish && mkdir -p netlify-publish && cp -r artifacts/frontend-${FRONTEND:-student}/dist/public/. netlify-publish/"
-publish = "netlify-publish"
+  command = "pnpm install && pnpm run build:${FRONTEND:-student} && SRC=artifacts/frontend-${FRONTEND:-student}/dist && if [ -f \"$SRC/public/index.html\" ]; then SRC=\"$SRC/public\"; fi && rm -rf netlify-publish && mkdir -p netlify-publish && cp -r \"$SRC/.\" netlify-publish/"
+  publish = "netlify-publish"
 
 [build.environment]
-NODE_VERSION = "22"
-PNPM_FLAGS = "--no-frozen-lockfile"
+  NODE_VERSION = "22"
 
 [[redirects]]
-from = "/admin"
-to = "/admin/"
-status = 301
-force = true
-
-[[redirects]]
-from = "/admin/*"
-to = "/admin/index.html"
-status = 200
-
-[[redirects]]
-from = "/*"
-to = "/index.html"
-status = 200
+  from = "/*"
+  to = "/index.html"
+  status = 200

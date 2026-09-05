@@ -9,6 +9,21 @@ import { attachUser } from "./middlewares/auth";
 
 const app: Express = express();
 
+// Express auto-generates an ETag for every JSON response by default. For
+// dynamic, per-user endpoints like /api/auth/me and /api/site-content, that
+// means the browser can send `If-None-Match` on a later request and get back
+// a bodyless 304 — which crashes any frontend code that assumes the fetch
+// always resolves with real data (e.g. `user.name.split(...)`) rather than
+// treating 304 as "no new data available" and reusing the cached response
+// itself. Since none of these API responses are meant to be
+// browser-cacheable in the first place, disable etag generation entirely so
+// every request gets a fresh 200 with a real body.
+app.set("etag", false);
+app.use((_req: Request, res: Response, next: NextFunction) => {
+  res.set("Cache-Control", "no-store");
+  next();
+});
+
 app.use(
   pinoHttp({
     logger,
