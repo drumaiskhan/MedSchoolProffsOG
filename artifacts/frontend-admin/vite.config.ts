@@ -4,12 +4,11 @@ import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 import runtimeErrorOverlay from '@replit/vite-plugin-runtime-error-modal';
 
-// PORT/BASE_PATH are provided automatically on Replit.
-// Outside Replit, these fall back to sensible defaults.
 const port = Number(process.env.PORT) || 5174;
-const basePath = process.env.BASE_PATH || '/';
 
-// Express API target for local development.
+// Admin is served from /admin/
+const basePath = process.env.BASE_PATH || '/admin/';
+
 const apiProxyTarget =
   process.env.API_PROXY_TARGET ||
   `http://localhost:${Number(process.env.API_PORT) || 3001}`;
@@ -51,10 +50,8 @@ export default defineConfig({
     dedupe: ['react', 'react-dom'],
   },
 
-  // Netlify deployment output.
-  // This creates:
-  // frontend-admin/dist/index.html
-  // frontend-admin/dist/assets/...
+  root: path.resolve(import.meta.dirname),
+
   build: {
     outDir: path.resolve(import.meta.dirname, 'dist'),
     emptyOutDir: true,
