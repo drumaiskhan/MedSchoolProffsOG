@@ -5,8 +5,25 @@
 # setting — both just use this file.
 #
 # The backend (Express + Postgres) needs a separate host — Railway, Render,
-# or Fly.io all work well. Set VITE_API_BASE_URL (and VITE_ADMIN_URL /
-# VITE_STUDENT_URL) per site — see DEPLOY-SPLIT.md.
+# or Fly.io all work well.
+#
+# --- /api/* is proxied to the backend (see below) instead of called
+# directly cross-domain. Browsers treat a cookie set by a different domain
+# (Netlify vs Railway/Render) as third-party, and Safari/Firefox/many Chrome
+# configs block or drop third-party cookies outright — which silently broke
+# login (POST /auth/login succeeded and set the cookie, but the very next
+# GET /auth/me came back 401 because the cookie was never sent back). Routing
+# /api/* through this proxy makes every request same-origin from the
+# browser's point of view: the Set-Cookie header still comes through (Netlify
+# forwards response headers on a proxied redirect), but now it's a first-party
+# cookie for the Netlify domain, so it just works everywhere. This also means
+# CORS no longer applies to these requests at all.
+#
+# Because of this, VITE_API_BASE_URL should be LEFT UNSET (or emptied) on
+# both Netlify sites — the frontend code already defaults to relative "/api"
+# paths when it's unset, which is exactly what this proxy needs to catch.
+# Update BACKEND_ORIGIN below to your actual backend URL (no trailing slash,
+# no /api suffix).
 
 [build]
   command = "pnpm install && pnpm run build:${FRONTEND:-student} && SRC=artifacts/frontend-${FRONTEND:-student}/dist && if [ -f \"$SRC/public/index.html\" ]; then SRC=\"$SRC/public\"; fi && rm -rf netlify-publish && mkdir -p netlify-publish && cp -r \"$SRC/.\" netlify-publish/"
@@ -14,6 +31,16 @@
 
 [build.environment]
   NODE_VERSION = "22"
+
+# IMPORTANT: redirect order matters — Netlify matches top to bottom and stops
+# at the first match, so this specific /api/* proxy MUST come before the
+# catch-all SPA rewrite below (otherwise every /api/* call would just get
+# index.html back instead of reaching the backend).
+[[redirects]]
+  from = "/api/*"
+  to = "https://medschoolproffsog-production-d573.up.railway.app/api/:splat"
+  status = 200
+  force = true
 
 [[redirects]]
   from = "/*"

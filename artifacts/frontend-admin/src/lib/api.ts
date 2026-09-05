@@ -44,7 +44,18 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const isJson = res.headers.get('content-type')?.includes('application/json');
   const data = isJson ? await res.json().catch(() => null) : null;
   if (!res.ok) {
-    throw new ApiRequestError(res.status, (data && (data.error || data.message)) || `Request failed (${res.status})`, data);
+    // A non-JSON 404/error response here almost always means this request
+    // never reached the Express API at all — e.g. VITE_API_BASE_URL isn't
+    // set (or points at the wrong host) on a split deploy, so the fetch hit
+    // a static host (Netlify/Vercel) with no route for /api/*, or a
+    // same-origin deploy with no backend behind it. A real API error from
+    // our own server always comes back as JSON (see app.ts's catch-all and
+    // error handler), so surface that distinction instead of a bare status
+    // code that looks like an app bug.
+    const fallback = !isJson
+      ? `Can't reach the API (HTTP ${res.status}). Check that VITE_API_BASE_URL is set correctly for this deployment and that the backend is running.`
+      : `Request failed (${res.status})`;
+    throw new ApiRequestError(res.status, (data && (data.error || data.message)) || fallback, data);
   }
   return data as T;
 }
