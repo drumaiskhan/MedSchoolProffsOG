@@ -1,8 +1,13 @@
 [build]
   base = "/"
-  command = "pnpm --filter @workspace/medschoolproffs build"
+  command = "pnpm run build:student"
   publish = "artifacts/medschoolproffs/dist"
 
 [build.environment]
   NODE_VERSION = "22"
   PNPM_FLAGS = "--no-frozen-lockfile"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
