@@ -1,4 +1,4 @@
-import { type ReactNode, type ComponentProps, useState, useEffect } from 'react';
+import { type ReactNode, type ComponentProps, useState, useEffect, useRef } from 'react';
 import { QueryClient, QueryClientProvider, useMutation, useQuery } from '@tanstack/react-query';
 import { Link, Route, Switch, useLocation, useParams, useSearch, Router as WouterRouter } from 'wouter';
 import {
@@ -9,7 +9,7 @@ import {
   TrendingUp, TrendingDown, Minus, Users, X, Zap, Bell, SlidersHorizontal, FileStack, NotebookPen, Bookmark,
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
   GraduationCap, CalendarDays, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
-  RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle
+  RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Link2 as LinkIcon
 } from 'lucide-react';
 import {
   getListMembershipPlansQueryKey, getListPaymentsQueryKey, getListMcqsQueryKey, getListModulesQueryKey, getListStudentsQueryKey, getListNotificationsQueryKey, getGetCurrentUserQueryKey,
@@ -227,23 +227,49 @@ function Practice() {
   const params = new URLSearchParams(search);
   const topicId = Number(params.get('topic')) || undefined;
   const pastPaperId = Number(params.get('pastPaperId')) || undefined;
-  const q = useListMcqs(pastPaperId ? { pastPaperId } : topicId ? { topicId } : undefined);
+  const mcqId = Number(params.get('mcqId')) || undefined;
+  const q = useListMcqs(mcqId ? { mcqId } : pastPaperId ? { pastPaperId } : topicId ? { topicId } : undefined);
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState<string | null>(null);
-  const [submitted, setSubmitted] = useState(false);
+  // "locked" = the student has confirmed their choice and it has been
+  // scored; "revealed" = they've additionally chosen to see the answer.
+  // These used to be one step ("submitted") which forced the correct
+  // answer + explanation on screen immediately — see section 6c fix notes.
+  const [locked, setLocked] = useState(false);
+  const [revealed, setRevealed] = useState(false);
   const [sessionCorrect, setSessionCorrect] = useState(0);
   const [sessionTotal, setSessionTotal] = useState(0);
   const [flagged, setFlagged] = useState(false);
   const [finished, setFinished] = useState(false);
+  // Timed/untimed setup gate — null means "not chosen yet, show the setup
+  // screen"; the session clock (sessionStartRef) only starts once a mode is
+  // picked, so a student lingering on the setup screen doesn't eat into
+  // their own timed session.
+  const [mode, setMode] = useState<'timed' | 'untimed' | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const mcqs: Mcq[] = q.data ?? [];
   const current = mcqs[index];
+  // Accumulate every answer for the current run client-side and submit ONE
+  // POST /practice-sessions call when the run actually finishes, instead of
+  // once per question — otherwise each question becomes its own row in
+  // practiceAttemptsTable, inflating "sessions" on the leaderboard and
+  // leaving "time spent" stuck near 0 (startedAt/completedAt end up
+  // identical for every single-question row).
+  const sessionAnswersRef = useRef<Array<{ mcqId: number; selectedAnswer: string | null }>>([]);
+  const sessionStartRef = useRef<number>(Date.now());
   const submitAnswer = useMutation({ mutationFn: analyticsApi.submitSession });
   const flag = useMutation({ mutationFn: flaggedMcqsApi.create });
   // current can be undefined while loading/empty — askAi's mutationFn is only
   // ever invoked from a click once `current` is guaranteed to exist below,
   // but the hook itself must still be declared unconditionally every render.
   const askAi = useMutation({ mutationFn: () => explanationsApi.askAi(current!.id) });
-  const restartSession = () => { setIndex(0); setSessionCorrect(0); setSessionTotal(0); setSelected(null); setSubmitted(false); setFinished(false); askAi.reset(); };
+  const restartSession = () => { setIndex(0); setSessionCorrect(0); setSessionTotal(0); setSelected(null); setLocked(false); setRevealed(false); setFinished(false); setMode(null); setElapsedSeconds(0); askAi.reset(); sessionAnswersRef.current = []; };
+
+  useEffect(() => {
+    if (mode !== 'timed' || finished) return;
+    const id = setInterval(() => setElapsedSeconds(Math.round((Date.now() - sessionStartRef.current) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [mode, finished]);
 
   if (!q.isLoading && !mcqs.length) {
     return <div className="max-w-5xl"><SectionHeader eyebrow="Daily practice" title="Practice with purpose" action={<Link href={pastPaperId ? '/past-papers' : '/modules'} className="text-xs font-bold text-primary" data-testid="link-practice-back-modules"><ArrowLeft size={13} className="mr-1 inline" /> {pastPaperId ? 'Past papers' : 'Modules'}</Link>} /><EmptyState icon={Target} title={pastPaperId ? 'No questions in this paper yet' : topicId ? 'No questions here yet' : 'Pick a topic to practice'} body={pastPaperId ? "Your academic team hasn't uploaded questions for this past paper yet." : topicId ? "Your academic team hasn't published MCQs for this topic yet." : 'Head to Modules → a subject → a topic, then hit Start to begin a focused practice session.'} /></div>;
@@ -253,27 +279,80 @@ function Practice() {
   if (finished) {
     return <div className="max-w-5xl"><SectionHeader eyebrow="Daily practice" title="Session complete" /><PracticeResultCard correct={sessionCorrect} total={sessionTotal} onRestart={restartSession} backHref={pastPaperId ? '/past-papers' : '/modules'} backLabel={pastPaperId ? 'Back to past papers' : 'Back to modules'} /></div>;
   }
+
+  if (!mode) {
+    return <div className="mx-auto max-w-lg"><SectionHeader eyebrow="Daily practice" title="Before you start" />
+      <div className="rounded-3xl border border-border bg-card p-6 text-center md:p-9">
+        <div className="mx-auto grid size-12 place-items-center rounded-full bg-[#eef7f1] text-primary"><Clock3 size={22} /></div>
+        <h2 className="mt-5 font-display text-xl">How do you want to practice?</h2>
+        <p className="mt-2 text-xs text-muted-foreground">{mcqs.length} question{mcqs.length === 1 ? '' : 's'} in this set.</p>
+        <div className="mt-7 grid gap-3 sm:grid-cols-2">
+          <button onClick={() => { setMode('timed'); sessionStartRef.current = Date.now(); }} className="card-lift rounded-2xl border-2 border-primary bg-[#eef7f1] p-5 text-left" data-testid="button-mode-timed"><Clock3 size={18} className="text-primary" /><div className="mt-3 text-sm font-extrabold text-[#164b4b]">Timed</div><p className="mt-1 text-[11px] text-muted-foreground">See a live stopwatch while you practice.</p></button>
+          <button onClick={() => { setMode('untimed'); sessionStartRef.current = Date.now(); }} className="card-lift rounded-2xl border border-border bg-card p-5 text-left" data-testid="button-mode-untimed"><Target size={18} className="text-muted-foreground" /><div className="mt-3 text-sm font-extrabold">Untimed</div><p className="mt-1 text-[11px] text-muted-foreground">Go at your own pace, no clock on screen.</p></button>
+        </div>
+      </div>
+    </div>;
+  }
+
   if (!current) return <SkeletonPage />;
 
-  const checkAnswer = () => {
-    setSubmitted(true);
-    const correct = selected === current.correctAnswer;
+  const isCorrect = selected === current.correctAnswer;
+  const confirmAnswer = () => {
+    setLocked(true);
     setSessionTotal((t) => t + 1);
-    if (correct) setSessionCorrect((c) => c + 1);
-    submitAnswer.mutate({ topicId, answers: [{ mcqId: current.id, selectedAnswer: selected }] });
+    if (isCorrect) setSessionCorrect((c) => c + 1);
+    sessionAnswersRef.current = [...sessionAnswersRef.current, { mcqId: current.id, selectedAnswer: selected }];
   };
   const nextQuestion = () => {
-    if (index + 1 >= mcqs.length) { setFinished(true); return; }
-    setIndex((i) => i + 1); setSelected(null); setSubmitted(false); setFlagged(false); askAi.reset();
+    if (index + 1 >= mcqs.length) {
+      const durationSeconds = Math.max(0, Math.round((Date.now() - sessionStartRef.current) / 1000));
+      if (sessionAnswersRef.current.length) {
+        submitAnswer.mutate({ topicId, answers: sessionAnswersRef.current, durationSeconds, mode: mode ?? undefined });
+      }
+      setFinished(true);
+      return;
+    }
+    setIndex((i) => i + 1); setSelected(null); setLocked(false); setRevealed(false); setFlagged(false); askAi.reset();
   };
+  const mm = String(Math.floor(elapsedSeconds / 60)).padStart(2, '0');
+  const ss = String(elapsedSeconds % 60).padStart(2, '0');
 
-  return <div className="max-w-5xl"><SectionHeader eyebrow="Daily practice" title="Practice with purpose" action={<button onClick={restartSession} className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-xs font-bold hover:bg-muted" data-testid="button-restart-session"><Clock3 size={14} /> Restart session</button>} /><div className="grid gap-6 lg:grid-cols-[1fr_280px]"><div className="rounded-3xl border border-border bg-card p-6 md:p-9"><div className="flex items-center justify-between"><Badge tone="blue">{current.difficulty}</Badge><span className="font-mono-app text-[10px] text-muted-foreground">Question {String(index + 1).padStart(2, '0')} / {mcqs.length}</span></div><h2 className="mt-8 max-w-2xl text-xl font-extrabold leading-8 tracking-[-.025em]">{current.question}</h2><div className="mt-7 space-y-3">{current.options.map((option, i) => <button key={option} onClick={() => !submitted && setSelected(option)} className={cn('flex w-full items-center gap-3 rounded-xl border p-4 text-left text-sm transition-colors', selected === option ? submitted && option === current.correctAnswer ? 'border-primary bg-[#e6f3ed] text-[#287058]' : submitted ? 'border-[#e7b1a5] bg-[#fff1ed]' : 'border-primary bg-[#e6f3ed]' : 'border-border hover:bg-muted')} data-testid={`button-answer-${i}`}><span className="grid size-7 shrink-0 place-items-center rounded-lg bg-muted font-mono-app text-[11px]">{String.fromCharCode(65 + i)}</span>{option}{submitted && option === current.correctAnswer && <CheckCircle2 className="ml-auto text-primary" size={17} />}</button>)}</div>{submitted && <div className="mt-6 rounded-xl bg-[#e6f3ed] p-4 text-sm leading-6 text-[#287058]"><div className="font-bold">Correct answer: {current.correctAnswer}</div><p className="mt-1 text-xs">{current.explanation}</p>{!askAi.data && <button onClick={() => askAi.mutate()} disabled={askAi.isPending} className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-[#287058]/30 bg-white/60 px-3 py-1.5 text-[11px] font-bold text-[#287058] disabled:opacity-50" data-testid="button-ask-ai">{askAi.isPending ? 'Thinking…' : <><Sparkles size={11} /> Ask AI to explain differently</>}</button>}{askAi.data && <div className="mt-3 rounded-lg bg-white/60 p-3 text-xs leading-5"><div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-[#287058]"><Sparkles size={10} /> AI explanation</div>{askAi.data.explanation}</div>}{askAi.isError && <p className="mt-2 text-[11px] font-semibold text-destructive">{askAi.error instanceof ApiRequestError ? askAi.error.message : 'Could not reach AI right now.'}</p>}</div>}<div className="mt-8 flex flex-wrap items-center gap-3"><button disabled={!selected || submitted} onClick={checkAnswer} className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-xs font-extrabold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40" data-testid="button-submit-answer">{submitted ? 'Answer recorded' : 'Check answer'} <ArrowRight size={14} /></button>{submitted && <button onClick={nextQuestion} className="rounded-xl border border-border bg-card px-5 py-3 text-xs font-bold" data-testid="button-next-question">{index + 1 >= mcqs.length ? 'Finish session' : 'Next question'}</button>}<button onClick={() => { if (!flagged) { flag.mutate({ mcqId: current.id }); setFlagged(true); } }} disabled={flagged} className={cn('inline-flex items-center gap-1.5 rounded-xl border px-3 py-3 text-xs font-bold', flagged ? 'border-[#e5a952] bg-[#fff0cb] text-[#8a5a12]' : 'border-border bg-card')} data-testid="button-flag-question"><Flag size={13} /> {flagged ? 'Flagged' : 'Flag'}</button></div></div><div className="space-y-4"><div className="rounded-2xl bg-[#164b4b] p-5 text-[#eaf2e9]"><Target size={18} className="text-[#e5a952]" /><h3 className="mt-5 font-display text-2xl">A little,<br />often.</h3><p className="mt-2 text-xs leading-5 text-[#bfd4cb]">Short recall sessions beat cramming. Your next 10 minutes are enough.</p></div><div className="rounded-2xl border border-border bg-card p-5"><div className="text-[10px] font-bold uppercase tracking-[.14em] text-muted-foreground">This session</div><div className="mt-4 font-display text-4xl">{sessionTotal ? Math.round((sessionCorrect / sessionTotal) * 100) : 0}%</div><Progress value={sessionTotal ? (sessionCorrect / sessionTotal) * 100 : 0} /><div className="mt-3 text-[11px] text-muted-foreground">{sessionCorrect} correct of {sessionTotal} attempts</div></div></div></div></div>;
+  return <div className="max-w-5xl"><SectionHeader eyebrow="Daily practice" title="Practice with purpose" action={<div className="flex items-center gap-2">{mode === 'timed' && <span className="font-mono-app inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-bold" data-testid="text-session-stopwatch"><Clock3 size={13} /> {mm}:{ss}</span>}<button onClick={restartSession} className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-xs font-bold hover:bg-muted" data-testid="button-restart-session"><RotateCcw size={14} /> Restart session</button></div>} /><div className="grid gap-6 lg:grid-cols-1 xl:grid-cols-[1fr_280px]"><div className="rounded-3xl border border-border bg-card p-5 sm:p-6 md:p-9"><div className="flex items-center justify-between"><Badge tone="blue">{current.difficulty}</Badge><span className="font-mono-app text-[10px] text-muted-foreground">Question {String(index + 1).padStart(2, '0')} / {mcqs.length}</span></div><h2 className="mt-8 max-w-2xl text-lg font-extrabold leading-7 tracking-[-.025em] sm:text-xl sm:leading-8">{current.question}</h2><div className="mt-7 space-y-3">{current.options.map((option, i) => <button key={option} onClick={() => !locked && setSelected(option)} className={cn('flex w-full items-center gap-3 rounded-xl border p-4 text-left text-sm transition-colors', selected === option ? revealed && option === current.correctAnswer ? 'border-primary bg-[#e6f3ed] text-[#287058]' : revealed && !isCorrect ? 'border-[#e7b1a5] bg-[#fff1ed]' : 'border-primary bg-[#e6f3ed]' : revealed && option === current.correctAnswer ? 'border-primary bg-[#e6f3ed] text-[#287058]' : 'border-border hover:bg-muted')} data-testid={`button-answer-${i}`}><span className="grid size-7 shrink-0 place-items-center rounded-lg bg-muted font-mono-app text-[11px]">{String.fromCharCode(65 + i)}</span><span className="flex-1">{option}</span>{revealed && option === current.correctAnswer && <CheckCircle2 className="ml-auto shrink-0 text-primary" size={17} />}</button>)}</div>
+    {locked && !revealed && <div className={cn('mt-6 rounded-xl p-4 text-sm', isCorrect ? 'bg-[#e6f3ed] text-[#287058]' : 'bg-[#fff1ed] text-[#a34c3e]')} data-testid="text-answer-locked-in">Answer recorded. Tap "Show answer" to see how you did, or move on to the next question.</div>}
+    {revealed && <div className={cn('mt-6 rounded-xl p-4 text-sm leading-6', isCorrect ? 'bg-[#e6f3ed] text-[#287058]' : 'bg-[#fff1ed] text-[#a34c3e]')} data-testid="text-answer-revealed">
+      {isCorrect ? <div className="flex items-center gap-2 font-bold"><CheckCircle2 size={16} /> Correct!</div> : <div className="font-bold">Correct answer: {current.correctAnswer}</div>}
+      {!isCorrect && <p className="mt-1 text-xs">{current.explanation}</p>}
+      {!isCorrect && !askAi.data && <button onClick={() => askAi.mutate()} disabled={askAi.isPending} className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-[#a34c3e]/30 bg-white/60 px-3 py-1.5 text-[11px] font-bold text-[#a34c3e] disabled:opacity-50" data-testid="button-ask-ai">{askAi.isPending ? 'Thinking…' : <><Sparkles size={11} /> Ask AI to explain differently</>}</button>}
+      {isCorrect && !askAi.data && <button onClick={() => askAi.mutate()} disabled={askAi.isPending} className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-[#287058]/30 bg-white/60 px-3 py-1.5 text-[11px] font-bold text-[#287058] disabled:opacity-50" data-testid="button-show-explanation-anyway">{askAi.isPending ? 'Thinking…' : 'Show explanation anyway'}</button>}
+      {askAi.data && <div className="mt-3 rounded-lg bg-white/60 p-3 text-xs leading-5"><div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide">{isCorrect ? current.explanation : ''}{isCorrect && <br />}<Sparkles size={10} /> AI explanation</div>{askAi.data.explanation}</div>}
+      {askAi.isError && <p className="mt-2 text-[11px] font-semibold text-destructive">{askAi.error instanceof ApiRequestError ? askAi.error.message : 'Could not reach AI right now.'}</p>}
+    </div>}
+    <div className="mt-8 flex flex-wrap items-center gap-3">
+      {!locked ? <button disabled={!selected} onClick={confirmAnswer} className="w-full rounded-xl bg-primary px-5 py-3.5 text-xs font-extrabold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto" data-testid="button-submit-answer">Confirm answer <ArrowRight size={14} className="ml-1 inline" /></button> : <>
+        {!revealed && <button onClick={() => setRevealed(true)} className="flex-1 rounded-xl border border-border bg-card px-5 py-3.5 text-xs font-bold sm:flex-none" data-testid="button-show-answer">Show answer</button>}
+        <button onClick={nextQuestion} className={cn('rounded-xl px-5 py-3.5 text-xs font-extrabold', revealed ? 'flex-1 bg-primary text-primary-foreground sm:flex-none' : 'flex-1 bg-primary text-primary-foreground sm:flex-none')} data-testid="button-next-question">{index + 1 >= mcqs.length ? 'Finish session' : 'Next question'}</button>
+      </>}
+      <button onClick={() => { if (!flagged) { flag.mutate({ mcqId: current.id }); setFlagged(true); } }} disabled={flagged} className={cn('inline-flex w-full items-center justify-center gap-1.5 rounded-xl border px-3 py-3.5 text-xs font-bold sm:w-auto', flagged ? 'border-[#e5a952] bg-[#fff0cb] text-[#8a5a12]' : 'border-border bg-card')} data-testid="button-flag-question"><Flag size={13} /> {flagged ? 'Flagged' : 'Flag'}</button>
+    </div></div><div className="space-y-4"><div className="rounded-2xl bg-[#164b4b] p-5 text-[#eaf2e9]"><Target size={18} className="text-[#e5a952]" /><h3 className="mt-5 font-display text-2xl">A little,<br />often.</h3><p className="mt-2 text-xs leading-5 text-[#bfd4cb]">Short recall sessions beat cramming. Your next 10 minutes are enough.</p></div><div className="rounded-2xl border border-border bg-card p-5"><div className="text-[10px] font-bold uppercase tracking-[.14em] text-muted-foreground">This session</div><div className="mt-4 font-display text-4xl">{sessionTotal ? Math.round((sessionCorrect / sessionTotal) * 100) : 0}%</div><Progress value={sessionTotal ? (sessionCorrect / sessionTotal) * 100 : 0} /><div className="mt-3 text-[11px] text-muted-foreground">{sessionCorrect} correct of {sessionTotal} attempts</div></div></div></div></div>;
 }
 
 function Flashcards() {
   const search = useSearch();
-  const topicId = Number(new URLSearchParams(search).get('topic')) || undefined;
-  const q = useListFlashcards(topicId ? { topicId } : undefined);
+  const [, navigate] = useLocation();
+  const urlTopicId = Number(new URLSearchParams(search).get('topic')) || undefined;
+  const modulesQ = useListModules();
+  const modules = modulesQ.data ?? [];
+  const [moduleId, setModuleId] = useState('');
+  const subjectsQ = useListSubjects(moduleId ? { moduleId: Number(moduleId) } : undefined);
+  const [subjectId, setSubjectId] = useState('');
+  const topicsQ = useListTopics(subjectId ? { subjectId: Number(subjectId) } : undefined);
+  const [topicId, setTopicId] = useState(urlTopicId ? String(urlTopicId) : '');
+  const activeTopicId = Number(topicId) || undefined;
+  // Program/year scoping already happens server-side via getVisibleModuleIds
+  // (same as past papers/exams) — these selects just let the student narrow
+  // *within* what they can already see, so they get flashcards relevant to
+  // what they're actually studying instead of a random mixed deck.
+  const q = useListFlashcards(activeTopicId ? { topicId: activeTopicId } : undefined);
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [known, setKnown] = useState<Record<number, boolean>>({});
@@ -283,13 +362,21 @@ function Flashcards() {
   const askAi = useMutation({ mutationFn: () => explanationsApi.askAiFlashcard(card!.id) });
 
   const advance = (isKnown: boolean) => { setKnown((prev) => ({ ...prev, [card.id]: isKnown })); setIndex((i) => i + 1); setFlipped(false); askAi.reset(); };
+  const resetDeck = () => { setIndex(0); setKnown({}); setFlipped(false); askAi.reset(); };
+
+  const filterBar = <div className="mb-5 flex flex-wrap gap-2">
+    <select value={moduleId} onChange={(e) => { setModuleId(e.target.value); setSubjectId(''); setTopicId(''); navigate('/flashcards'); resetDeck(); }} className="h-9 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-flashcard-module"><option value="">All modules</option>{modules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
+    <select value={subjectId} onChange={(e) => { setSubjectId(e.target.value); setTopicId(''); resetDeck(); }} disabled={!moduleId} className="h-9 rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-flashcard-subject"><option value="">All subjects</option>{(subjectsQ.data || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+    <select value={topicId} onChange={(e) => { setTopicId(e.target.value); resetDeck(); }} disabled={!subjectId} className="h-9 rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-flashcard-topic"><option value="">All topics</option>{(topicsQ.data || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
+  </div>;
 
   if (!q.isLoading && !cards.length) {
-    return <div className="mx-auto max-w-3xl"><SectionHeader eyebrow="Recall studio" title="Flashcards" /><EmptyState icon={Zap} title={topicId ? 'No flashcards here yet' : 'No flashcards yet'} body={topicId ? "Your academic team hasn't published flashcards for this topic yet." : "Your academic team hasn't published any flashcards yet."} /></div>;
+    return <div className="mx-auto max-w-3xl"><SectionHeader eyebrow="Recall studio" title="Flashcards" />{filterBar}<EmptyState icon={Zap} title={activeTopicId ? 'No flashcards here yet' : 'No flashcards yet'} body={activeTopicId ? "Your academic team hasn't published flashcards for this topic yet." : "Your academic team hasn't published any flashcards yet."} /></div>;
   }
-  if (q.isLoading || !card) return <SkeletonPage />;
+  if (q.isLoading || !card) return <div className="mx-auto max-w-3xl"><SectionHeader eyebrow="Recall studio" title="Flashcards" />{filterBar}<SkeletonPage /></div>;
 
   return <div className="mx-auto max-w-3xl"><SectionHeader eyebrow="Recall studio" title="Flashcards" action={<span className="font-mono-app text-[11px] text-muted-foreground">Card {(index % cards.length) + 1} / {cards.length} · {knownCount} known</span>} />
+    {filterBar}
     <div className="mb-4 flex justify-center gap-1.5">{cards.map((c, i) => <div key={c.id} className={cn('h-1.5 w-6 rounded-full transition-colors', i === index % cards.length ? 'bg-primary' : known[c.id] === true ? 'bg-[#8bcbb8]' : known[c.id] === false ? 'bg-[#e5a952]' : 'bg-muted')} />)}</div>
     <div className="[perspective:1600px]"><button onClick={() => setFlipped(!flipped)} className="relative min-h-[350px] w-full [transform-style:preserve-3d] transition-transform duration-500 md:min-h-[420px]" style={{ transform: flipped ? 'rotateY(180deg)' : 'none' }} data-testid="button-flashcard">
       <div className="absolute inset-0 flex flex-col rounded-3xl border border-border bg-[#164b4b] p-9 text-left text-[#eaf2e9] shadow-lg [backface-visibility:hidden] md:p-14"><div className="flex items-center justify-between text-[10px] uppercase tracking-[.18em] text-[#8bcbb8]"><span>{card.module}</span><span>Prompt</span></div><div className="flex flex-1 items-center justify-center text-center"><h2 className="mx-auto max-w-xl font-display text-3xl leading-tight md:text-5xl">{card.front}</h2></div><div className="flex justify-center text-xs text-[#8bcbb8]">Click to reveal the answer <ArrowRight size={14} className="ml-2" /></div></div>
@@ -297,7 +384,7 @@ function Flashcards() {
     </button></div>
     {flipped && <div className="mt-4 flex justify-center">{!askAi.data ? <button onClick={() => askAi.mutate()} disabled={askAi.isPending} className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-[#eef7f1] px-3 py-1.5 text-[11px] font-bold text-primary disabled:opacity-50" data-testid="button-ask-ai-flashcard">{askAi.isPending ? 'Thinking…' : <><Sparkles size={11} /> Ask AI to explain differently</>}</button> : <div className="max-w-xl rounded-xl bg-[#eef7f1] p-3 text-xs leading-5"><div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-primary"><Sparkles size={10} /> AI explanation</div>{askAi.data.explanation}</div>}{askAi.isError && <p className="mt-2 text-[11px] font-semibold text-destructive">{askAi.error instanceof ApiRequestError ? askAi.error.message : 'Could not reach AI right now.'}</p>}</div>}
     <div className="mt-6 flex justify-center gap-3">{flipped ? <><button onClick={() => advance(false)} className="inline-flex items-center gap-2 rounded-xl border border-[#e5a952] bg-[#fff0cb] px-5 py-3 text-xs font-bold text-[#8a5a12] transition-transform hover:-translate-y-0.5" data-testid="button-still-learning"><ThumbsDown size={14} /> Still learning</button><button onClick={() => advance(true)} className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-xs font-bold text-primary-foreground transition-transform hover:-translate-y-0.5" data-testid="button-know-it"><ThumbsUp size={14} /> I know this</button></> : <button onClick={() => setFlipped(true)} className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-6 py-3 text-xs font-bold hover:bg-muted" data-testid="button-reveal-card">Reveal answer <ChevronRight size={14} /></button>}</div>
-    <div className="mt-3 flex justify-center"><button onClick={() => { setIndex(0); setKnown({}); setFlipped(false); askAi.reset(); }} className="inline-flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground hover:text-foreground" data-testid="button-restart-deck"><RotateCcw size={12} /> Restart deck</button></div>
+    <div className="mt-3 flex justify-center"><button onClick={resetDeck} className="inline-flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground hover:text-foreground" data-testid="button-restart-deck"><RotateCcw size={12} /> Restart deck</button></div>
   </div>;
 }
 
@@ -663,30 +750,82 @@ function VerifyEmail() {
 }
 
 function PastPapers() {
-  const [level, setLevel] = useState('');
-  const papers = useQuery({ queryKey: ['past-papers', level], queryFn: () => pastPapersApi.list(level || undefined) });
+  const papers = useQuery({ queryKey: ['past-papers'], queryFn: () => pastPapersApi.list() });
   const list = papers.data || [];
-  const totals = { papers: list.length, questions: list.reduce((s, p) => s + p.mcqCount, 0), topics: new Set(list.map((p) => p.level)).size };
-  const levels = [...new Set(list.map((p) => p.level).filter(Boolean))];
+  // Scoping to the student's own program/year now happens server-side (see
+  // GET /past-papers), the same way exam eligibility does — so there's no
+  // more manual "All levels" toggle needed here; students just see what
+  // applies to them.
+  const totals = { papers: list.length, questions: list.reduce((s, p) => s + p.mcqCount, 0) };
 
   return <div><div className="rounded-2xl border border-border bg-[#eef2fb] p-6"><div className="flex items-start gap-4"><div className="grid size-11 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground"><FileStack size={20} /></div><div><h1 className="font-display text-2xl tracking-[-.03em]">Past Papers</h1><p className="mt-1 text-sm text-muted-foreground">Master the examination pattern by practicing with authentic previous years' medical board questions.</p></div></div>
-    {levels.length > 0 && <div className="mt-4 flex flex-wrap gap-2"><button onClick={() => setLevel('')} className={cn('rounded-full border px-3 py-1.5 text-xs font-bold', !level ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card')} data-testid="button-level-all">All levels</button>{levels.map((l) => <button key={l} onClick={() => setLevel(l)} className={cn('rounded-full border px-3 py-1.5 text-xs font-bold', level === l ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card')} data-testid={`button-level-${l}`}>{l}</button>)}</div>}
-    <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3"><Stat label="Available Papers" value={totals.papers} /><Stat label="Total Questions" value={totals.questions} /><Stat label="Levels Covered" value={totals.topics} /></div>
+    <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-2"><Stat label="Available Papers" value={totals.papers} /><Stat label="Total Questions" value={totals.questions} /></div>
   </div>
-  <div className="mt-6 grid gap-3 sm:grid-cols-2">{list.map((paper) => <div key={paper.id} className="rounded-2xl border border-border bg-card p-5" data-testid={`card-paper-${paper.id}`}><div className="flex items-start justify-between"><div className="grid size-9 place-items-center rounded-lg bg-muted"><FileText size={16} /></div><span className="rounded-full bg-muted px-2.5 py-1 text-[10px] font-bold">{paper.mcqCount} MCQs</span></div><div className="mt-3 text-sm font-extrabold">{paper.title}</div><div className="mt-1 text-[11px] text-muted-foreground">{[paper.examBoard, paper.year, paper.level].filter(Boolean).join(' · ')} · {paper.topicsCovered} key topics covered</div><Link href={`/practice?pastPaperId=${paper.id}`} className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground" data-testid={`button-start-paper-${paper.id}`}>Start Session <ArrowRight size={13} /></Link></div>)}{!list.length && <EmptyState icon={FileStack} title="No past papers yet" body="Your admin can add past papers from Admin → Past papers." />}</div>
+  {papers.isLoading ? <SkeletonPage /> : list.length ? <div className="mt-6 grid gap-4 sm:grid-cols-2">{list.map((paper) => {
+    const meta = [paper.examBoard, paper.year, paper.level, `${paper.mcqCount} question${paper.mcqCount === 1 ? '' : 's'}`].filter(Boolean).join(' · ');
+    return <div key={paper.id} className="card-lift rounded-2xl border border-border bg-card p-5" data-testid={`card-paper-${paper.id}`}>
+      <div className="flex items-start justify-between"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#eef2fb] text-primary"><FileStack size={18} /></div><span className="rounded-full bg-muted px-2.5 py-1 text-[10px] font-bold">{paper.mcqCount} MCQ{paper.mcqCount === 1 ? '' : 's'}</span></div>
+      <div className="mt-4 text-sm font-extrabold leading-5">{paper.title}</div>
+      {meta && <div className="mt-1.5 text-[11px] font-medium text-muted-foreground">{meta}</div>}
+      <Link href={`/practice?pastPaperId=${paper.id}`} className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground" data-testid={`button-start-paper-${paper.id}`}>Start Session <ArrowRight size={13} /></Link>
+    </div>;
+  })}</div> : <EmptyState icon={FileStack} title="No past papers yet" body="Your admin can add past papers from Admin → Past papers, or none apply to your program/year yet." />}
+  </div>;
+}
+
+function NotebookCard({ note, onLinkedClick }: { note: NotebookEntry; onLinkedClick: (mcqId: number) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(note.title);
+  const [content, setContent] = useState(note.content);
+  const update = useMutation({
+    mutationFn: () => notebookApi.update(note.id, { title: title.trim(), content: content.trim() }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['notebook'] }); setEditing(false); toast({ title: 'Note updated' }); },
+    onError: (err: unknown) => toast({ title: 'Could not save note', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
+  const remove = useMutation({ mutationFn: () => notebookApi.remove(note.id), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notebook'] }) });
+
+  if (editing) {
+    return <div className="rounded-2xl border border-primary/30 bg-[#eef7f1] p-4" data-testid={`card-note-edit-${note.id}`}>
+      <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title (optional)" className="h-10 w-full rounded-xl border border-border bg-card px-3 text-sm" data-testid={`input-edit-note-title-${note.id}`} />
+      <textarea value={content} onChange={(e) => setContent(e.target.value)} className="mt-2 min-h-24 w-full rounded-xl border border-border bg-card p-3 text-sm" data-testid={`input-edit-note-content-${note.id}`} />
+      <div className="mt-2 flex gap-2"><button disabled={update.isPending || !content.trim()} onClick={() => update.mutate()} className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid={`button-save-note-${note.id}`}>{update.isPending ? 'Saving…' : 'Save'}</button><button onClick={() => { setTitle(note.title); setContent(note.content); setEditing(false); }} className="rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold" data-testid={`button-cancel-note-${note.id}`}>Cancel</button></div>
+    </div>;
+  }
+
+  return <div className="card-lift rounded-2xl border border-border bg-card p-4" data-testid={`card-note-${note.id}`}>
+    {note.title && <div className="text-sm font-extrabold">{note.title}</div>}
+    <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{note.content}</p>
+    {note.mcqId != null && <button onClick={() => onLinkedClick(note.mcqId!)} className="mt-2 inline-flex items-center gap-1 rounded-full bg-[#eef2fb] px-2.5 py-1 text-[10px] font-bold text-[#32647b]" data-testid={`button-linked-mcq-${note.id}`}><LinkIcon size={10} /> Linked to a question</button>}
+    <div className="mt-3 flex items-center justify-between text-[10px] text-muted-foreground">
+      <span>{new Date(note.updatedAt).toLocaleString()}</span>
+      <div className="flex items-center gap-3"><button onClick={() => setEditing(true)} className="font-bold text-primary" data-testid={`button-edit-note-${note.id}`}>Edit</button><button onClick={() => remove.mutate()} className="font-bold text-destructive" data-testid={`button-delete-note-${note.id}`}>Delete</button></div>
+    </div>
   </div>;
 }
 
 function Notebook() {
   const [content, setContent] = useState('');
   const [title, setTitle] = useState('');
+  const [search, setSearch] = useState('');
+  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
   const entries = useQuery({ queryKey: ['notebook'], queryFn: notebookApi.list });
   const create = useMutation({ mutationFn: notebookApi.create, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['notebook'] }); setContent(''); setTitle(''); } });
-  const remove = useMutation({ mutationFn: notebookApi.remove, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notebook'] }) });
+  const [, navigate] = useLocation();
+
+  const filtered = (entries.data || []).filter((n) => {
+    if (!search.trim()) return true;
+    const q = search.trim().toLowerCase();
+    return (n.title || '').toLowerCase().includes(q) || n.content.toLowerCase().includes(q);
+  }).sort((a, b) => sortOrder === 'newest' ? b.updatedAt.localeCompare(a.updatedAt) : a.updatedAt.localeCompare(b.updatedAt));
 
   return <div><SectionHeader eyebrow="Your tools" title="My Notebook" action={<span className="text-[10px] text-muted-foreground">Private to you</span>} />
     <form onSubmit={(e) => { e.preventDefault(); if (content.trim()) create.mutate({ title: title.trim() || undefined, content: content.trim() }); }} className="rounded-2xl border border-border bg-card p-4"><input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title (optional)" className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm" data-testid="input-note-title" /><textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder="Write a note…" className="mt-2 min-h-24 w-full rounded-xl border border-border bg-background p-3 text-sm" data-testid="input-note-content" /><button disabled={create.isPending} className="mt-2 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-add-note">{create.isPending ? 'Saving…' : 'Add note'}</button></form>
-    <div className="mt-4 space-y-3">{(entries.data || []).map((note: NotebookEntry) => <div key={note.id} className="rounded-2xl border border-border bg-card p-4" data-testid={`card-note-${note.id}`}>{note.title && <div className="text-sm font-extrabold">{note.title}</div>}<p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{note.content}</p><div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground"><span>{new Date(note.updatedAt).toLocaleString()}</span><button onClick={() => remove.mutate(note.id)} className="font-bold text-destructive" data-testid={`button-delete-note-${note.id}`}>Delete</button></div></div>)}{!entries.data?.length && <EmptyState icon={NotebookPen} title="No notes yet" body="Jot down anything you want to remember while you practice." />}</div>
+
+    {!!entries.data?.length && <div className="mt-4 flex flex-wrap items-center gap-2"><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search notes…" className="h-9 min-w-0 flex-1 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-search-notes" /><div className="flex overflow-hidden rounded-xl border border-border text-[11px] font-bold"><button onClick={() => setSortOrder('newest')} className={cn('px-3 py-2', sortOrder === 'newest' ? 'bg-primary text-primary-foreground' : 'bg-card')} data-testid="button-sort-newest">Newest</button><button onClick={() => setSortOrder('oldest')} className={cn('px-3 py-2', sortOrder === 'oldest' ? 'bg-primary text-primary-foreground' : 'bg-card')} data-testid="button-sort-oldest">Oldest</button></div></div>}
+
+    <div className="mt-4 space-y-3">
+      {entries.isLoading ? <SkeletonPage /> : filtered.length ? filtered.map((note: NotebookEntry) => <NotebookCard key={note.id} note={note} onLinkedClick={(mcqId) => navigate(`/practice?mcqId=${mcqId}`)} />) : entries.data?.length ? <EmptyState icon={NotebookPen} title="No notes match your search" body="Try a different search term." /> : <EmptyState icon={NotebookPen} title="No notes yet" body="Jot down anything you want to remember while you practice." />}
+    </div>
   </div>;
 }
 

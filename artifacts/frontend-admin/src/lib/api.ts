@@ -233,6 +233,12 @@ export const mcqAdminApi = {
   list: () => request<AdminMcqRow[]>('/admin/mcqs'),
   update: (id: number, body: Partial<{ question: string; options: string[]; correctAnswer: string | null; explanation: string | null; reference: string | null; difficulty: string; status: string; moduleId: number; subjectId: number; topicId: number }>) =>
     request<AdminMcqRow>(`/mcqs/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  bulkRemove: (body: { ids: number[] } | { all: true; filters?: { search?: string; moduleId?: number; subjectId?: number; topicId?: number; difficulty?: string } }) =>
+    request<{ ok: true; deleted: number }>('/admin/mcqs/bulk', { method: 'DELETE', body: JSON.stringify(body) }),
+  bulkCreate: (mcqs: Array<Partial<AdminMcqRow> & { question: string; options: string[] }>) =>
+    request<{ ok: true; created: number; mcqs: AdminMcqRow[] }>('/admin/mcqs/bulk', { method: 'POST', body: JSON.stringify({ mcqs }) }),
+  generateAi: (topicId: number, count: number) =>
+    request<{ drafts: Array<{ question: string; options: string[]; correctAnswer: string; explanation: string }>; topicLabel: string }>('/admin/mcqs/generate', { method: 'POST', body: JSON.stringify({ topicId, count }) }),
 };
 
 export const mcqImportApi = {
@@ -253,7 +259,7 @@ export const mcqImportApi = {
     request<{ imported: number; ids: number[] }>('/admin/mcq-import/commit', { method: 'POST', body: JSON.stringify(body) }),
 };
 
-export interface PastPaper { id: number; title: string; examBoard: string; year: string; level: string; active: boolean; archived?: boolean; displayOrder: number; mcqCount: number; topicsCovered: number }
+export interface PastPaper { id: number; title: string; examBoard: string; year: string; level: string; active: boolean; archived?: boolean; displayOrder: number; mcqCount: number; programId: number | null; academicYearId: number | null }
 export interface NotebookEntry { id: number; userId: number; mcqId: number | null; title: string; content: string; createdAt: string; updatedAt: string }
 export interface SavedSession { id: number; userId: number; name: string; config: Record<string, unknown>; createdAt: string }
 export interface FlaggedMcq { id: number; userId: number; mcqId: number; reason: string; status: 'open' | 'resolved'; createdAt: string }
@@ -369,6 +375,7 @@ export const booksAdminApi = {
   list: () => request<AdminBook[]>('/admin/books'),
   create: (body: { title: string; author?: string; moduleId?: number; subjectId?: number; topicId?: number; storagePath: string; coverImagePath?: string }) => request<AdminBook>('/books', { method: 'POST', body: JSON.stringify(body) }),
   remove: (id: number) => request<{ ok: true }>(`/books/${id}`, { method: 'DELETE' }),
+  removePermanent: (id: number) => request<{ ok: true }>(`/admin/books/${id}/permanent`, { method: 'DELETE' }),
 };
 
 export async function uploadFile(file: File, kind: 'payment-proof' | 'profile-picture' | 'resource' | 'favicon' | 'book'): Promise<{ storagePath: string; url: string | null }> {

@@ -453,6 +453,7 @@ export const ListMcqsQueryParams = zod.object({
   "subjectId": zod.coerce.number().int().optional(),
   "topicId": zod.coerce.number().int().optional(),
   "pastPaperId": zod.coerce.number().int().optional(),
+  "mcqId": zod.coerce.number().int().optional(),
   "difficulty": zod.coerce.string().optional()
 })
 

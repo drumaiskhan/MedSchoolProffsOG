@@ -38,3 +38,8 @@ export function verificationEmailHtml(name: string, verifyUrl: string): string {
 export function resetPasswordEmailHtml(name: string, resetUrl: string): string {
   return `<p>Hi ${name},</p><p>We received a request to reset your password. Click below to choose a new one:</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>If you didn't request this, you can safely ignore this email. This link expires in 1 hour.</p>`;
 }
+
+export function membershipActivatedEmailHtml(name: string, planName: string | null, expiresAt: Date): string {
+  const expiry = expiresAt.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+  return `<p>Hi ${name},</p><p>Good news — your payment has been verified and your MedschoolProffs membership is now <strong>active</strong>${planName ? ` (${planName})` : ""}.</p><p>Your access is valid until <strong>${expiry}</strong>.</p><p>Log in any time to pick up where you left off.</p>`;
+}

@@ -284,6 +284,7 @@ moduleId?: number;
 subjectId?: number;
 topicId?: number;
 pastPaperId?: number;
+mcqId?: number;
 difficulty?: string;
 };
 

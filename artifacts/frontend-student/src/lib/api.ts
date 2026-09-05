@@ -223,7 +223,7 @@ export const mcqImportApi = {
     request<{ imported: number; ids: number[] }>('/admin/mcq-import/commit', { method: 'POST', body: JSON.stringify(body) }),
 };
 
-export interface PastPaper { id: number; title: string; examBoard: string; year: string; level: string; active: boolean; displayOrder: number; mcqCount: number; topicsCovered: number }
+export interface PastPaper { id: number; title: string; examBoard: string; year: string; level: string; active: boolean; displayOrder: number; mcqCount: number }
 export interface NotebookEntry { id: number; userId: number; mcqId: number | null; title: string; content: string; createdAt: string; updatedAt: string }
 export interface SavedSession { id: number; userId: number; name: string; config: Record<string, unknown>; createdAt: string }
 export interface FlaggedMcq { id: number; userId: number; mcqId: number; reason: string; status: 'open' | 'resolved'; createdAt: string }
@@ -354,6 +354,6 @@ export const analyticsApi = {
   get: (range: string) => request<Analytics>(`/student/analytics?range=${range}`),
   progress: () => request<ProgressTrend>('/student/progress'),
   leaderboard: (range = '30d') => request<LeaderboardRow[]>(`/leaderboard?range=${range}`),
-  submitSession: (body: { moduleId?: number; subjectId?: number; topicId?: number; mode?: 'timed' | 'untimed'; answers: { mcqId: number; selectedAnswer: string | null }[] }) =>
+  submitSession: (body: { moduleId?: number; subjectId?: number; topicId?: number; mode?: 'timed' | 'untimed'; durationSeconds?: number; answers: { mcqId: number; selectedAnswer: string | null }[] }) =>
     request<{ id: number; scorePercent: number; correctCount: number; totalQuestions: number }>('/practice-sessions', { method: 'POST', body: JSON.stringify(body) }),
 };

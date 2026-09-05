@@ -1,24 +1,39 @@
 import { Router, type IRouter } from "express";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { db, pastPapersTable, mcqsTable, auditLogsTable } from "@workspace/db";
+import { db, pastPapersTable, mcqsTable, auditLogsTable, usersTable } from "@workspace/db";
 import { requireAdmin, requireAuth, requireActiveMembership, isAdminRole } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
 async function paperView(paper: typeof pastPapersTable.$inferSelect) {
   const [mcqCount] = await db.select({ count: sql<number>`count(*)` }).from(mcqsTable).where(eq(mcqsTable.pastPaperId, paper.id));
-  const [topicCount] = await db
-    .select({ count: sql<number>`count(distinct ${mcqsTable.topicId})` })
-    .from(mcqsTable)
-    .where(eq(mcqsTable.pastPaperId, paper.id));
-  return { ...paper, mcqCount: Number(mcqCount?.count ?? 0), topicsCovered: Number(topicCount?.count ?? 0) };
+  return { ...paper, mcqCount: Number(mcqCount?.count ?? 0) };
 }
 
 router.get("/past-papers", async (req, res): Promise<void> => {
   const isAdmin = req.user && (isAdminRole(req.user.role));
   const level = typeof req.query.level === "string" ? req.query.level : undefined;
-  const rows = await db.select().from(pastPapersTable).where(and(isAdmin ? undefined : eq(pastPapersTable.active, true), level ? eq(pastPapersTable.level, level) : undefined)).orderBy(pastPapersTable.displayOrder);
+
+  // Scope students to their own program + academic year, the same way
+  // GET /exams already does via getStudentTargeting/isEligible — a paper
+  // with programId/academicYearId left null is "all programs/years" and
+  // stays visible to everyone; a paper tagged to a specific program/year
+  // is only visible to matching students. Admins see everything.
+  let studentProgramId: number | null = null;
+  let studentAcademicYearId: number | null = null;
+  if (req.user && !isAdmin) {
+    const [student] = await db.select({ programId: usersTable.programId, academicYearId: usersTable.academicYearId }).from(usersTable).where(eq(usersTable.id, req.user.id));
+    studentProgramId = student?.programId ?? null;
+    studentAcademicYearId = student?.academicYearId ?? null;
+  }
+
+  const rows = await db.select().from(pastPapersTable).where(and(
+    isAdmin ? undefined : eq(pastPapersTable.active, true),
+    level ? eq(pastPapersTable.level, level) : undefined,
+    isAdmin || !req.user ? undefined : or(isNull(pastPapersTable.programId), eq(pastPapersTable.programId, studentProgramId ?? -1)),
+    isAdmin || !req.user ? undefined : or(isNull(pastPapersTable.academicYearId), eq(pastPapersTable.academicYearId, studentAcademicYearId ?? -1)),
+  )).orderBy(pastPapersTable.displayOrder);
   res.json(await Promise.all(rows.map(paperView)));
 });
 

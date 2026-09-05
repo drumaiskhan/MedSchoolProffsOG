@@ -75,4 +75,17 @@ router.delete("/books/:id", requireAdmin, async (req, res): Promise<void> => {
   res.json({ ok: true });
 });
 
+// Permanent delete — the admin "Delete this book?" dialog wires to this (not
+// the soft-archive route above), since the request is for the book to be
+// gone, not archived. Mirrors the past-papers permanent-delete pattern.
+router.delete("/admin/books/:id/permanent", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) { res.status(400).json({ error: "Invalid book id" }); return; }
+  const [row] = await db.select().from(booksTable).where(eq(booksTable.id, id));
+  if (!row) { res.status(404).json({ error: "Book not found" }); return; }
+  await db.delete(booksTable).where(eq(booksTable.id, id));
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "BOOK_PERMANENTLY_DELETED", entity: "book", entityId: id });
+  res.json({ ok: true });
+});
+
 export default router;

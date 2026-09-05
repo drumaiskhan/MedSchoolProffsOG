@@ -1,9 +1,9 @@
 import { Router, type IRouter } from "express";
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { db, mcqsTable, flashcardsTable, topicsTable, auditLogsTable } from "@workspace/db";
+import { db, mcqsTable, flashcardsTable, topicsTable, subjectsTable, modulesTable, auditLogsTable } from "@workspace/db";
 import { requireAdmin, requireAuth, requireActiveMembership } from "../middlewares/auth";
-import { generateExplanation, generateFlashcardExplanation, generateFlashcardSet, AiNotConfiguredError } from "../lib/aiExplain";
+import { generateExplanation, generateFlashcardExplanation, generateFlashcardSet, generateMcqSet, AiNotConfiguredError } from "../lib/aiExplain";
 
 const router: IRouter = Router();
 
@@ -140,6 +140,49 @@ router.post("/admin/flashcards/generate", requireAdmin, async (req, res): Promis
     const drafts = await generateFlashcardSet({ sourceText, mcqs, topicLabel, count });
     if (!drafts.length) { res.status(502).json({ error: "AI did not return any flashcards. Try again or provide more source text." }); return; }
     res.json({ drafts });
+  } catch (err) {
+    if (err instanceof AiNotConfiguredError) { res.status(503).json({ error: err.message }); return; }
+    res.status(502).json({ error: err instanceof Error ? err.message : "AI generation failed" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Admin: AI-generate MCQs strictly scoped to one topic (fixes the "AI
+// question generator ignores the selected topic" bug — see
+// buildMcqGenerationPrompt in lib/aiExplain.ts for the actual fix). Returns
+// drafts for review, same pattern as /admin/flashcards/generate — nothing
+// is written to the bank until the admin reviews and saves via
+// POST /admin/mcqs/bulk.
+// ---------------------------------------------------------------------------
+
+const GenerateMcqsBody = z.object({
+  topicId: z.number().int().positive(),
+  count: z.number().int().min(1).max(15).default(5),
+});
+
+router.post("/admin/mcqs/generate", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = GenerateMcqsBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message }); return; }
+  const { topicId, count } = parsed.data;
+
+  const [row] = await db.select({
+    topicName: topicsTable.name, subjectName: subjectsTable.name, moduleName: modulesTable.name,
+  }).from(topicsTable)
+    .innerJoin(subjectsTable, eq(topicsTable.subjectId, subjectsTable.id))
+    .innerJoin(modulesTable, eq(subjectsTable.moduleId, modulesTable.id))
+    .where(eq(topicsTable.id, topicId));
+  if (!row) { res.status(404).json({ error: "Topic not found" }); return; }
+
+  // Full breadcrumb, most-specific first — this is what actually grounds the
+  // model (a bare "Blood" is ambiguous; "Blood (Pathology, Systemic
+  // Pathology Module)" is not).
+  const topicLabel = `${row.topicName} (${row.subjectName}, ${row.moduleName} module)`;
+  const existing = await db.select({ question: mcqsTable.question }).from(mcqsTable).where(eq(mcqsTable.topicId, topicId)).limit(8);
+
+  try {
+    const drafts = await generateMcqSet({ topicLabel, existingQuestions: existing.map((m) => m.question), count });
+    if (!drafts.length) { res.status(502).json({ error: "AI did not return any usable questions for this topic. Try again, or narrow the topic name." }); return; }
+    res.json({ drafts, topicLabel });
   } catch (err) {
     if (err instanceof AiNotConfiguredError) { res.status(503).json({ error: err.message }); return; }
     res.status(502).json({ error: err instanceof Error ? err.message : "AI generation failed" });

@@ -57,12 +57,21 @@ router.post("/practice-sessions", requireAuth, requireActiveMembership, async (r
   }
   const scorePercent = ((correctCount / data.answers.length) * 100).toFixed(2);
 
+  // "Time spent" on the dashboard is sum(completedAt - startedAt) per row
+  // (see GET /student/analytics below). Without this, startedAt defaults to
+  // now() at insert time — identical to completedAt — so time spent is
+  // always ~0 regardless of how long the student actually studied. Prefer
+  // the client-tracked durationSeconds (session-start to session-finish) to
+  // back-date startedAt; fall back to "now" only if the client didn't send one.
+  const completedAt = new Date();
+  const startedAt = data.durationSeconds != null ? new Date(completedAt.getTime() - data.durationSeconds * 1000) : completedAt;
+
   const [attempt] = await db
     .insert(practiceAttemptsTable)
     .values({
       userId: req.user!.id, moduleId: data.moduleId, subjectId: data.subjectId, topicId: data.topicId,
       mode: data.mode ?? "untimed", totalQuestions: data.answers.length, correctCount, scorePercent,
-      completedAt: new Date(),
+      startedAt, completedAt,
     })
     .returning();
 

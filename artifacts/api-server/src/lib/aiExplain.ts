@@ -43,6 +43,7 @@ export interface GeneratedFlashcard {
   back: string;
 }
 
+<<<<<<< HEAD
 const MAX_FLASHCARDS = 100;
 const FLASHCARD_BATCH_SIZE = 20;
 const MAX_GENERATION_ATTEMPTS = 4;
@@ -169,6 +170,39 @@ async function getAIConfig(): Promise<{
     model,
     baseUrl: baseUrl || undefined,
   };
+=======
+export interface McqGenerationRequest {
+  /** Full context string, e.g. "Blood (Pathology — MBBS Year 1)" — the more
+   * specific this is, the less likely the model drifts to generic/unrelated
+   * trivia instead of questions actually about the topic. */
+  topicLabel: string;
+  /** A few existing questions from the same topic, if any — used only as
+   * style/scope reference so new questions match the existing set's level
+   * and don't duplicate them; never sent as content to copy verbatim. */
+  existingQuestions?: string[];
+  count: number;
+}
+
+export interface GeneratedMcq {
+  question: string;
+  options: string[];
+  correctAnswer: string;
+  explanation: string;
+}
+
+function buildPrompt({ question, options, correctAnswer, reference }: ExplanationRequest): string {
+  const optionList = options.map((opt, i) => `${String.fromCharCode(65 + i)}. ${opt}`).join("\n");
+  return [
+    "You are writing a concise study explanation for a medical school MCQ (MBBS/BDS level).",
+    "Explain why the correct answer is right and briefly note why the other options are wrong.",
+    "Keep it factual, exam-focused, and under 150 words. Do not use markdown headers.",
+    "",
+    `Question: ${question}`,
+    `Options:\n${optionList}`,
+    correctAnswer ? `Correct answer: ${correctAnswer}` : "Correct answer: not specified — infer the most medically accurate answer and note the uncertainty.",
+    reference ? `Reference material to ground the explanation in: ${reference}` : "",
+  ].filter(Boolean).join("\n");
+>>>>>>> 2ee909e (Initial MedSchoolProffs upload)
 }
 
 /* -------------------------------------------------------------------------- */
@@ -607,10 +641,80 @@ function parseFlashcards(
     );
   }
 
+<<<<<<< HEAD
   if (!Array.isArray(parsed)) {
     throw new Error(
       "AI response was not a JSON array."
     );
+=======
+// This prompt is the actual fix for "AI generates questions unrelated to the
+// selected topic" (e.g. a "Blood" topic producing a question about the
+// smallest bone in the body): the topic label is repeated at both the start
+// AND end of the prompt (models weight the tail of a long prompt more
+// heavily), every question is required to explicitly reference the topic
+// subject matter, and the model is told directly to discard and regenerate
+// anything generic. existingQuestions are shown only as a "don't repeat
+// these / match this level" reference, never as content to draw the new
+// questions' subject matter from.
+function buildMcqGenerationPrompt({ topicLabel, existingQuestions, count }: McqGenerationRequest): string {
+  const existingBlock = existingQuestions?.length
+    ? `\nFor reference only (do not repeat these, do not copy their subject if it drifted off-topic — match their difficulty level instead):\n${existingQuestions.slice(0, 8).map((q) => `- ${q}`).join("\n")}\n`
+    : "";
+  return [
+    `You are a medical school question-bank author. Every single question you write MUST be specifically about: "${topicLabel}".`,
+    "Do not write generic pre-med trivia (bone names, cell organelles, vital sign ranges, etc.) unless that is literally what the topic above is about.",
+    "Before finalizing each question, check: does this question directly test knowledge of the exact topic named above? If not, discard it and write a different one that does.",
+    `Produce exactly ${count} single-best-answer multiple-choice questions (MBBS/BDS level) on "${topicLabel}".`,
+    "Each question needs exactly 4 options (A-D equivalent, but return them as a plain string array, not labeled), one correct answer that must be an exact string match to one of the options, and a concise 1-3 sentence explanation of why it's correct.",
+    "Vary the sub-topics, question stems, and clinical vs. factual framing across the set so it doesn't feel repetitive.",
+    existingBlock,
+    `Remember: this entire question set is about "${topicLabel}" — nothing else.`,
+    "",
+    "Respond with ONLY a valid JSON array, no prose before or after, no code fences, in this exact shape:",
+    '[{"question": "...", "options": ["...", "...", "...", "..."], "correctAnswer": "...", "explanation": "..."}]',
+  ].join("\n");
+}
+
+function parseMcqJson(raw: string): GeneratedMcq[] {
+  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    const match = cleaned.match(/\[[\s\S]*\]/);
+    if (!match) throw new Error("AI did not return valid MCQ JSON");
+    parsed = JSON.parse(match[0]);
+  }
+  if (!Array.isArray(parsed)) throw new Error("AI did not return an MCQ array");
+  return parsed
+    .filter((m): m is { question: unknown; options: unknown; correctAnswer: unknown; explanation: unknown } => !!m && typeof m === "object")
+    .map((m) => ({
+      question: String((m as { question: unknown }).question ?? "").trim(),
+      options: Array.isArray((m as { options: unknown }).options) ? ((m as { options: unknown[] }).options).map((o) => String(o).trim()).filter(Boolean) : [],
+      correctAnswer: String((m as { correctAnswer: unknown }).correctAnswer ?? "").trim(),
+      explanation: String((m as { explanation: unknown }).explanation ?? "").trim(),
+    }))
+    // Drop malformed entries (missing question/options) and ones where the
+    // "correct answer" doesn't actually match one of the options — better to
+    // silently skip a bad row than hand the admin a question with no valid
+    // correct answer to review.
+    .filter((m) => m.question.length > 0 && m.options.length >= 2 && m.options.includes(m.correctAnswer));
+}
+
+async function generateWithAnthropic(apiKey: string, prompt: string): Promise<string> {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-6",
+      max_tokens: 400,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Anthropic API error (${res.status}): ${body.slice(0, 300)}`);
+>>>>>>> 2ee909e (Initial MedSchoolProffs upload)
   }
 
   const cards: GeneratedFlashcard[] = [];
@@ -1016,4 +1120,16 @@ export async function generateFlashcardSet(
   }
 
   return finalCards;
+}
+
+/** Generates draft MCQs strictly scoped to the given topic — see
+ * buildMcqGenerationPrompt for the anti-drift prompt design. Callers should
+ * treat these as editable drafts for admin review, not auto-publish. */
+export async function generateMcqSet(request: McqGenerationRequest): Promise<GeneratedMcq[]> {
+  const raw = await runPrompt(buildMcqGenerationPrompt(request));
+  const parsed = parseMcqJson(raw);
+  // Cheap post-hoc relevance guard: if the model still ignored the topic
+  // instruction, at least surface fewer, better results rather than a full
+  // batch of noise — cap to what actually parsed cleanly.
+  return parsed.slice(0, request.count);
 }
