@@ -1,8 +1,6 @@
-import { getSetting } from "./settings";
-
 /* ============================================================
-   AI PROVIDERS
-   ============================================================ */
+  AI PROVIDERS
+  ============================================================ */
 
 export type AIProvider =
   | "openai"
@@ -12,12 +10,12 @@ export type AIProvider =
   | "custom";
 
 /* ============================================================
-   ERRORS
-   ============================================================ */
+  ERRORS
+  ============================================================ */
 
 export class AiNotConfiguredError extends Error {
   constructor(
-    message = "AI is not configured. Please configure AI from the Admin Panel.",
+    message = "AI is not configured. Please configure the AI environment variables.",
   ) {
     super(message);
     this.name = "AiNotConfiguredError";
@@ -25,8 +23,8 @@ export class AiNotConfiguredError extends Error {
 }
 
 /* ============================================================
-   TYPES
-   ============================================================ */
+  TYPES
+  ============================================================ */
 
 export interface ExplanationRequest {
   question: string;
@@ -83,8 +81,8 @@ interface AIConfig {
 }
 
 /* ============================================================
-   LIMITS
-   ============================================================ */
+  LIMITS
+  ============================================================ */
 
 const MAX_FLASHCARDS = 100;
 const FLASHCARD_BATCH_SIZE = 20;
@@ -95,8 +93,8 @@ const MCQ_BATCH_SIZE = 20;
 const MAX_GENERATION_ATTEMPTS = 4;
 
 /* ============================================================
-   HELPERS
-   ============================================================ */
+  HELPERS
+  ============================================================ */
 
 function normalizeText(value: unknown): string {
   if (value === null || value === undefined) {
@@ -119,155 +117,59 @@ function isProvider(value: string): value is AIProvider {
   );
 }
 
+function getEnv(name: string): string {
+  return normalizeText(process.env[name]);
+}
+
 /* ============================================================
-   AI CONFIGURATION
-   ============================================================ */
+  AI CONFIGURATION
+  ============================================================ */
 
 /**
- * All AI configuration comes from Admin Panel/database settings.
+ * AI configuration comes ONLY from backend environment variables.
  *
- * Universal settings:
- *   ai_provider
- *   ai_api_key
- *   ai_model
- *   ai_base_url
+ * Required:
+ *   AI_PROVIDER
+ *   AI_API_KEY
+ *   AI_MODEL
  *
- * Provider-specific fallback settings are also supported.
+ * Optional:
+ *   AI_BASE_URL
  *
- * No AI API key is read from environment variables.
+ * Example:
  *
- * Custom providers can use any OpenAI-compatible API.
+ *   AI_PROVIDER=groq
+ *   AI_API_KEY=your_api_key
+ *   AI_MODEL=your_model
+ *   AI_BASE_URL=
+ *
+ * The Admin Panel/database is NOT used for AI configuration.
  */
-async function getAIConfig(): Promise<AIConfig> {
-  const providerValue = await getSetting("ai_provider");
 
-  const normalizedProvider = normalizeText(providerValue).toLowerCase();
+function getAIConfig(): AIConfig {
+  const providerValue = getEnv("AI_PROVIDER").toLowerCase();
 
-  if (!normalizedProvider) {
+  if (!providerValue) {
     throw new AiNotConfiguredError(
-      "AI provider is not configured. Configure AI from the Admin Panel.",
+      "AI provider is not configured. Set AI_PROVIDER in the backend environment variables.",
     );
   }
 
-  if (!isProvider(normalizedProvider)) {
+  if (!isProvider(providerValue)) {
     throw new AiNotConfiguredError(
-      `Unsupported AI provider: ${normalizedProvider}`,
+      `Unsupported AI provider: ${providerValue}`,
     );
   }
 
-  const provider = normalizedProvider;
+  const provider = providerValue;
 
-  let apiKey = normalizeText(
-    await getSetting("ai_api_key"),
-  );
-
-  let model = normalizeText(
-    await getSetting("ai_model"),
-  );
-
-  let baseUrl = normalizeText(
-    await getSetting("ai_base_url"),
-  );
-
-  /* ----------------------------------------------------------
-     Provider-specific fallbacks
-     ---------------------------------------------------------- */
-
-  if (provider === "openai") {
-    if (!apiKey) {
-      apiKey = normalizeText(
-        await getSetting("ai_openai_key"),
-      );
-    }
-
-    if (!model) {
-      model = normalizeText(
-        await getSetting("ai_openai_model"),
-      );
-    }
-
-    if (!baseUrl) {
-      baseUrl = normalizeText(
-        await getSetting("ai_openai_base_url"),
-      );
-    }
-  }
-
-  if (provider === "gemini") {
-    if (!apiKey) {
-      apiKey = normalizeText(
-        await getSetting("ai_gemini_key"),
-      );
-    }
-
-    if (!model) {
-      model = normalizeText(
-        await getSetting("ai_gemini_model"),
-      );
-    }
-  }
-
-  if (provider === "anthropic") {
-    if (!apiKey) {
-      apiKey = normalizeText(
-        await getSetting("ai_anthropic_key"),
-      );
-    }
-
-    if (!model) {
-      model = normalizeText(
-        await getSetting("ai_anthropic_model"),
-      );
-    }
-  }
-
-  if (provider === "groq") {
-    if (!apiKey) {
-      apiKey = normalizeText(
-        await getSetting("ai_groq_key"),
-      );
-    }
-
-    if (!model) {
-      model = normalizeText(
-        await getSetting("ai_groq_model"),
-      );
-    }
-
-    if (!baseUrl) {
-      baseUrl = normalizeText(
-        await getSetting("ai_groq_base_url"),
-      );
-    }
-  }
-
-  if (provider === "custom") {
-    if (!apiKey) {
-      apiKey = normalizeText(
-        await getSetting("ai_custom_key"),
-      );
-    }
-
-    if (!model) {
-      model = normalizeText(
-        await getSetting("ai_custom_model"),
-      );
-    }
-
-    if (!baseUrl) {
-      baseUrl = normalizeText(
-        await getSetting("ai_custom_base_url"),
-      );
-    }
-  }
-
-  /* ----------------------------------------------------------
-     Validation
-     ---------------------------------------------------------- */
+  const apiKey = getEnv("AI_API_KEY");
+  const model = getEnv("AI_MODEL");
+  const baseUrl = getEnv("AI_BASE_URL");
 
   if (!model) {
     throw new AiNotConfiguredError(
-      "AI model is missing. Add the model name from the Admin Panel.",
+      "AI model is missing. Set AI_MODEL in the backend environment variables.",
     );
   }
 
@@ -275,24 +177,18 @@ async function getAIConfig(): Promise<AIConfig> {
    * Official providers require an API key.
    *
    * Custom OpenAI-compatible endpoints may optionally
-   * operate without a key, which allows local/self-hosted
+   * operate without a key, allowing local/self-hosted
    * AI servers.
    */
-  if (
-    provider !== "custom" &&
-    !apiKey
-  ) {
+  if (provider !== "custom" && !apiKey) {
     throw new AiNotConfiguredError(
-      "AI API key is missing. Add it from the Admin Panel.",
+      "AI API key is missing. Set AI_API_KEY in the backend environment variables.",
     );
   }
 
-  if (
-    provider === "custom" &&
-    !baseUrl
-  ) {
+  if (provider === "custom" && !baseUrl) {
     throw new AiNotConfiguredError(
-      "Custom AI requires a Base URL configured from the Admin Panel.",
+      "Custom AI requires AI_BASE_URL in the backend environment variables.",
     );
   }
 
@@ -305,12 +201,10 @@ async function getAIConfig(): Promise<AIConfig> {
 }
 
 /* ============================================================
-   RESPONSE HANDLING
-   ============================================================ */
+  RESPONSE HANDLING
+  ============================================================ */
 
-async function parseResponse(
-  response: Response,
-): Promise<any> {
+async function parseResponse(response: Response): Promise<any> {
   const text = await response.text();
 
   let data: any;
@@ -320,18 +214,12 @@ async function parseResponse(
   } catch {
     if (!response.ok) {
       throw new Error(
-        `AI provider returned HTTP ${response.status}: ${text.slice(
-          0,
-          500,
-        )}`,
+        `AI provider returned HTTP ${response.status}: ${text.slice(0, 500)}`,
       );
     }
 
     throw new Error(
-      `AI provider returned an invalid response: ${text.slice(
-        0,
-        500,
-      )}`,
+      `AI provider returned an invalid response: ${text.slice(0, 500)}`,
     );
   }
 
@@ -340,9 +228,7 @@ async function parseResponse(
       data?.error?.message ||
       data?.error?.type ||
       data?.message ||
-      (typeof data?.error === "string"
-        ? data.error
-        : undefined) ||
+      (typeof data?.error === "string" ? data.error : undefined) ||
       `AI request failed with HTTP ${response.status}`;
 
     throw new Error(String(message));
@@ -354,20 +240,9 @@ async function parseResponse(
 function cleanAIJson(text: string): string {
   let cleaned = text.trim();
 
-  cleaned = cleaned.replace(
-    /^```json\s*/i,
-    "",
-  );
-
-  cleaned = cleaned.replace(
-    /^```\s*/i,
-    "",
-  );
-
-  cleaned = cleaned.replace(
-    /\s*```$/i,
-    "",
-  );
+  cleaned = cleaned.replace(/^```json\s*/i, "");
+  cleaned = cleaned.replace(/^```\s*/i, "");
+  cleaned = cleaned.replace(/\s*```$/i, "");
 
   return cleaned.trim();
 }
@@ -378,25 +253,16 @@ function extractJsonArray(text: string): string {
   const start = cleaned.indexOf("[");
   const end = cleaned.lastIndexOf("]");
 
-  if (
-    start === -1 ||
-    end === -1 ||
-    end <= start
-  ) {
-    throw new Error(
-      "AI did not return a valid JSON array.",
-    );
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error("AI did not return a valid JSON array.");
   }
 
-  return cleaned.slice(
-    start,
-    end + 1,
-  );
+  return cleaned.slice(start, end + 1);
 }
 
 /* ============================================================
-   PROVIDER: ANTHROPIC
-   ============================================================ */
+  PROVIDER: ANTHROPIC
+  ============================================================ */
 
 async function callAnthropic(
   config: AIConfig,
@@ -432,9 +298,7 @@ async function callAnthropic(
     },
   );
 
-  const data = await parseResponse(
-    response,
-  );
+  const data = await parseResponse(response);
 
   const content = data?.content;
 
@@ -446,12 +310,10 @@ async function callAnthropic(
 
   const text = content
     .filter(
-      (item: any) =>
-        item?.type === "text",
+      (item: any) => item?.type === "text",
     )
     .map(
-      (item: any) =>
-        item?.text || "",
+      (item: any) => item?.text || "",
     )
     .join("\n")
     .trim();
@@ -466,8 +328,8 @@ async function callAnthropic(
 }
 
 /* ============================================================
-   PROVIDER: OPENAI / GROQ / CUSTOM
-   ============================================================ */
+  PROVIDER: OPENAI / GROQ / CUSTOM
+  ============================================================ */
 
 async function callOpenAICompatible(
   config: AIConfig,
@@ -479,33 +341,22 @@ async function callOpenAICompatible(
   if (!baseUrl) {
     if (config.provider === "openai") {
       baseUrl = "https://api.openai.com/v1";
-    } else if (
-      config.provider === "groq"
-    ) {
-      baseUrl =
-        "https://api.groq.com/openai/v1";
+    } else if (config.provider === "groq") {
+      baseUrl = "https://api.groq.com/openai/v1";
     } else {
       throw new AiNotConfiguredError(
-        "Custom AI requires a Base URL configured from the Admin Panel.",
+        "Custom AI requires AI_BASE_URL in the backend environment variables.",
       );
     }
   }
 
-  baseUrl = baseUrl.replace(
-    /\/+$/,
-    "",
-  );
+  baseUrl = baseUrl.replace(/\/+$/, "");
 
-  const url = baseUrl.endsWith(
-    "/chat/completions",
-  )
+  const url = baseUrl.endsWith("/chat/completions")
     ? baseUrl
     : `${baseUrl}/chat/completions`;
 
-  const headers: Record<
-    string,
-    string
-  > = {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
 
@@ -532,9 +383,7 @@ async function callOpenAICompatible(
     }),
   });
 
-  const data = await parseResponse(
-    response,
-  );
+  const data = await parseResponse(response);
 
   const content =
     data?.choices?.[0]?.message?.content;
@@ -548,9 +397,7 @@ async function callOpenAICompatible(
   if (Array.isArray(content)) {
     const text = content
       .map((item: any) => {
-        if (
-          typeof item === "string"
-        ) {
+        if (typeof item === "string") {
           return item;
         }
 
@@ -572,8 +419,8 @@ async function callOpenAICompatible(
 }
 
 /* ============================================================
-   PROVIDER: GEMINI
-   ============================================================ */
+  PROVIDER: GEMINI
+  ============================================================ */
 
 async function callGemini(
   config: AIConfig,
@@ -625,9 +472,7 @@ async function callGemini(
     }),
   });
 
-  const data = await parseResponse(
-    response,
-  );
+  const data = await parseResponse(response);
 
   const parts =
     data?.candidates?.[0]?.content?.parts;
@@ -640,8 +485,7 @@ async function callGemini(
 
   const text = parts
     .map(
-      (part: any) =>
-        part?.text || "",
+      (part: any) => part?.text || "",
     )
     .join("")
     .trim();
@@ -656,15 +500,14 @@ async function callGemini(
 }
 
 /* ============================================================
-   CENTRAL AI DISPATCHER
-   ============================================================ */
+  CENTRAL AI DISPATCHER
+  ============================================================ */
 
 async function generateText(
   systemPrompt: string,
   userPrompt: string,
 ): Promise<string> {
-  const config =
-    await getAIConfig();
+  const config = getAIConfig();
 
   switch (config.provider) {
     case "gemini":
@@ -698,8 +541,8 @@ async function generateText(
 }
 
 /* ============================================================
-   MCQ EXPLANATIONS
-   ============================================================ */
+  MCQ EXPLANATIONS
+  ============================================================ */
 
 export async function generateExplanation(
   request: ExplanationRequest,
@@ -755,8 +598,8 @@ Provide a concise but educational explanation.
 }
 
 /* ============================================================
-   FLASHCARD EXPLANATION
-   ============================================================ */
+  FLASHCARD EXPLANATION
+  ============================================================ */
 
 export async function generateFlashcardExplanation(
   request: FlashcardExplanationRequest,
@@ -798,25 +641,21 @@ Provide a concise educational explanation.
 }
 
 /* ============================================================
-   FLASHCARD SOURCE MATERIAL
-   ============================================================ */
+  FLASHCARD SOURCE MATERIAL
+  ============================================================ */
 
 function buildSourceMaterial(
   request: FlashcardGenerationRequest,
 ): string {
   const sections: string[] = [];
 
-  if (
-    request.topicLabel?.trim()
-  ) {
+  if (request.topicLabel?.trim()) {
     sections.push(
       `Topic: ${request.topicLabel.trim()}`,
     );
   }
 
-  if (
-    request.sourceText?.trim()
-  ) {
+  if (request.sourceText?.trim()) {
     sections.push(
       `SOURCE MATERIAL:\n${request.sourceText.trim()}`,
     );
@@ -870,14 +709,13 @@ ${mcq.explanation || ""}
 }
 
 /* ============================================================
-   FLASHCARD PARSER
-   ============================================================ */
+  FLASHCARD PARSER
+  ============================================================ */
 
 function parseFlashcards(
   text: string,
 ): GeneratedFlashcard[] {
-  const json =
-    extractJsonArray(text);
+  const json = extractJsonArray(text);
 
   let parsed: unknown;
 
@@ -895,8 +733,7 @@ function parseFlashcards(
     );
   }
 
-  const cards: GeneratedFlashcard[] =
-    [];
+  const cards: GeneratedFlashcard[] = [];
 
   for (const item of parsed) {
     if (
@@ -907,10 +744,7 @@ function parseFlashcards(
     }
 
     const record =
-      item as Record<
-        string,
-        unknown
-      >;
+      item as Record<string, unknown>;
 
     const front = normalizeText(
       record.front,
@@ -930,17 +764,14 @@ function parseFlashcards(
     });
   }
 
-  return deduplicateFlashcards(
-    cards,
-  );
+  return deduplicateFlashcards(cards);
 }
 
 function deduplicateFlashcards(
   cards: GeneratedFlashcard[],
 ): GeneratedFlashcard[] {
   const seen = new Set<string>();
-  const result: GeneratedFlashcard[] =
-    [];
+  const result: GeneratedFlashcard[] = [];
 
   for (const card of cards) {
     const front = normalizeText(
@@ -974,8 +805,8 @@ function deduplicateFlashcards(
 }
 
 /* ============================================================
-   FLASHCARD GENERATION
-   ============================================================ */
+  FLASHCARD GENERATION
+  ============================================================ */
 
 async function generateFlashcardBatch(
   request: FlashcardGenerationRequest,
@@ -1082,11 +913,9 @@ export async function generateFlashcardSet(
     ),
   );
 
-  const allCards: GeneratedFlashcard[] =
-    [];
+  const allCards: GeneratedFlashcard[] = [];
 
-  let remaining =
-    requestedCount;
+  let remaining = requestedCount;
 
   while (remaining > 0) {
     const batchSize = Math.min(
@@ -1115,14 +944,13 @@ export async function generateFlashcardSet(
 }
 
 /* ============================================================
-   MCQ PARSER
-   ============================================================ */
+  MCQ PARSER
+  ============================================================ */
 
 function parseMcqs(
   text: string,
 ): GeneratedMcq[] {
-  const json =
-    extractJsonArray(text);
+  const json = extractJsonArray(text);
 
   let parsed: unknown;
 
@@ -1140,8 +968,7 @@ function parseMcqs(
     );
   }
 
-  const mcqs: GeneratedMcq[] =
-    [];
+  const mcqs: GeneratedMcq[] = [];
 
   for (const item of parsed) {
     if (
@@ -1152,10 +979,7 @@ function parseMcqs(
     }
 
     const record =
-      item as Record<
-        string,
-        unknown
-      >;
+      item as Record<string, unknown>;
 
     const question =
       normalizeText(
@@ -1168,9 +992,7 @@ function parseMcqs(
       );
 
     const options =
-      Array.isArray(
-        record.options,
-      )
+      Array.isArray(record.options)
         ? record.options
             .map((option) =>
               normalizeText(option),
@@ -1213,23 +1035,19 @@ function parseMcqs(
     mcqs.push({
       question,
       options,
-      correctAnswer:
-        matchingOption,
+      correctAnswer: matchingOption,
       explanation,
     });
   }
 
-  return deduplicateMcqs(
-    mcqs,
-  );
+  return deduplicateMcqs(mcqs);
 }
 
 function deduplicateMcqs(
   mcqs: GeneratedMcq[],
 ): GeneratedMcq[] {
   const seen = new Set<string>();
-  const result: GeneratedMcq[] =
-    [];
+  const result: GeneratedMcq[] = [];
 
   for (const mcq of mcqs) {
     const key = mcq.question
@@ -1249,8 +1067,8 @@ function deduplicateMcqs(
 }
 
 /* ============================================================
-   MCQ GENERATION PROMPT
-   ============================================================ */
+  MCQ GENERATION PROMPT
+  ============================================================ */
 
 function buildMcqGenerationPrompt(
   request: McqGenerationRequest,
@@ -1352,8 +1170,8 @@ Make the questions meaningfully different from the existing questions.
 }
 
 /* ============================================================
-   MCQ GENERATION BATCH
-   ============================================================ */
+  MCQ GENERATION BATCH
+  ============================================================ */
 
 async function generateMcqBatch(
   request: McqGenerationRequest,
@@ -1422,8 +1240,8 @@ async function generateMcqBatch(
 }
 
 /* ============================================================
-   PUBLIC MCQ GENERATION
-   ============================================================ */
+  PUBLIC MCQ GENERATION
+  ============================================================ */
 
 export async function generateMcqSet(
   request: McqGenerationRequest,
@@ -1436,11 +1254,9 @@ export async function generateMcqSet(
     ),
   );
 
-  const allMcqs: GeneratedMcq[] =
-    [];
+  const allMcqs: GeneratedMcq[] = [];
 
-  let remaining =
-    requestedCount;
+  let remaining = requestedCount;
 
   while (remaining > 0) {
     const batchSize = Math.min(
@@ -1453,18 +1269,16 @@ export async function generateMcqSet(
      * batches so later batches do not duplicate them.
      */
     const existingQuestions = [
-      ...(request.existingQuestions ||
-        []),
+      ...(request.existingQuestions || []),
       ...allMcqs.map(
         (mcq) => mcq.question,
       ),
     ];
 
-    const batchRequest: McqGenerationRequest =
-      {
-        ...request,
-        existingQuestions,
-      };
+    const batchRequest: McqGenerationRequest = {
+      ...request,
+      existingQuestions,
+    };
 
     const mcqs =
       await generateMcqBatch(
