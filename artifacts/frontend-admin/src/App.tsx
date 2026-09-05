@@ -113,14 +113,25 @@ function SideNav({ user, onClose }: { user: User; onClose: () => void }) {
 // see so much as a flash of the dashboard/admin UI underneath.
 function Shell({ children }: { children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const userQuery = useGetCurrentUser();
+  // retry: false — a failed/unusable current-user response should send the
+  // user to /login promptly, not spend several silent retries first.
+  const userQuery = useGetCurrentUser({ query: { retry: false } });
   const [location, setLocation] = useLocation();
   const isMobile = useIsMobile();
   const user = userQuery.data;
 
   useEffect(() => {
     if (userQuery.isLoading) return;
-    if (!user) { setLocation('/login'); return; }
+    if (!user) {
+      // A hard navigation (not wouter's client-side setLocation) so any
+      // stale/broken React Query cache from the failed session is fully
+      // discarded rather than carried into the next render — a soft route
+      // change alone was letting a bad cached response resurface the same
+      // crash after refresh instead of landing cleanly on the login page.
+      queryClient.clear();
+      window.location.href = '/login';
+      return;
+    }
   }, [user, userQuery.isLoading, setLocation]);
 
   if (userQuery.isLoading || !user) return <div className="grid min-h-[100dvh] place-items-center bg-background"><SkeletonPage /></div>;
