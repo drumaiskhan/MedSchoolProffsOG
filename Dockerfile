@@ -24,12 +24,18 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 COPY --from=build /repo/artifacts/api-server/dist ./dist
-COPY --from=build /repo/artifacts/api-server/package.json ./package.json
 
 # esbuild externalizes a fixed list of packages it can't safely bundle (see
 # artifacts/api-server/build.mjs) — of those, only nodemailer is actually
 # used here, so it needs a real install for the bundled output to `require()` it.
-RUN corepack enable && npm install --omit=dev nodemailer
+#
+# We deliberately do NOT copy artifacts/api-server/package.json here: it uses
+# pnpm-only specifiers (`workspace:*`, `catalog:`) for its other dependencies,
+# which plain npm can't parse — `npm install` fails immediately on that file
+# even when only installing an unrelated package. A minimal, npm-only
+# package.json avoids that entirely.
+RUN echo '{"name":"medschoolproffs-api-runtime","private":true,"type":"module"}' > package.json && \
+    corepack enable && npm install --omit=dev nodemailer@^6.9.15
 
 EXPOSE 3001
 CMD ["node", "--enable-source-maps", "dist/index.mjs"]
