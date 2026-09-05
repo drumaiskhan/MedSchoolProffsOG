@@ -8,6 +8,12 @@
   PNPM_FLAGS = "--no-frozen-lockfile"
 
 [[redirects]]
+  from = "/admin"
+  to = "/admin/"
+  status = 301
+  force = true
+
+[[redirects]]
   from = "/admin/*"
   to = "/admin/index.html"
   status = 200
