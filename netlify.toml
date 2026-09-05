@@ -1,24 +1,27 @@
+# Single Netlify config shared by BOTH frontends.
+# Create two Netlify sites pointing at this same repo.
+# Set FRONTEND to "student" or "admin" on each site.
+
 [build]
-  base = "/"
-  command = "pnpm --filter @workspace/frontend-student run build && pnpm --filter @workspace/frontend-admin run build && rm -rf dist && mkdir -p dist/admin && cp -R artifacts/frontend-student/dist/. dist/ && cp -R artifacts/frontend-admin/dist/. dist/admin/"
-  publish = "dist"
+command = "pnpm install && pnpm run build:${FRONTEND:-student} && rm -rf netlify-publish && mkdir -p netlify-publish && cp -r artifacts/frontend-${FRONTEND:-student}/dist/public/. netlify-publish/"
+publish = "netlify-publish"
 
 [build.environment]
-  NODE_VERSION = "22"
-  PNPM_FLAGS = "--no-frozen-lockfile"
+NODE_VERSION = "22"
+PNPM_FLAGS = "--no-frozen-lockfile"
 
 [[redirects]]
-  from = "/admin"
-  to = "/admin/"
-  status = 301
-  force = true
+from = "/admin"
+to = "/admin/"
+status = 301
+force = true
 
 [[redirects]]
-  from = "/admin/*"
-  to = "/admin/index.html"
-  status = 200
+from = "/admin/*"
+to = "/admin/index.html"
+status = 200
 
 [[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+from = "/*"
+to = "/index.html"
+status = 200

@@ -144,8 +144,12 @@ In the Vercel project settings, set:
 ### Netlify (frontend only)
 
 `netlify.toml` at the repo root has the build command, publish directory,
-and SPA redirect already set up. Set `VITE_API_BASE_URL` in
-**Site settings → Environment variables**.
+and SPA redirect already set up, and it's shared by **both** frontends —
+create two Netlify sites pointing at this repo, and on each one set the
+`FRONTEND` environment variable to `student` or `admin`
+(**Site settings → Environment variables**), plus `VITE_API_BASE_URL` (and
+`VITE_ADMIN_URL` / `VITE_STUDENT_URL`) per site. See `DEPLOY-SPLIT.md` for
+the full walkthrough.
 
 ### Backend CORS/cookie config for split deploys
 

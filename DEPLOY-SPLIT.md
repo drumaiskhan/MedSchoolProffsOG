@@ -36,10 +36,17 @@ Create **two** Vercel projects pointing at this repo:
 
 ## Netlify
 
-Create **two** Netlify sites pointing at this repo:
-- one using `netlify.toml` (student, the default)
-- one using `netlify.admin.toml` — set it via that site's
-  Build & deploy > "Netlify configuration file" setting
+Create **two** Netlify sites pointing at this repo. Both use the same
+`netlify.toml` — no "Netlify configuration file" override needed. What
+tells them apart is a per-site environment variable:
+
+- Site 1: set `FRONTEND=student` (Site settings > Environment variables)
+- Site 2: set `FRONTEND=admin`
+
+`netlify.toml`'s build command reads `FRONTEND` to decide which app to
+build (`build:student` or `build:admin`) and copies that build's output
+into a fixed `netlify-publish/` folder, which is what both sites publish
+from. If `FRONTEND` is unset, it defaults to `student`.
 
 ## Root scripts
 
