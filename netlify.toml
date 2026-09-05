@@ -1,11 +1,16 @@
 [build]
   base = "/"
-  command = "pnpm --filter @workspace/frontend-admin run build"
-  publish = "artifacts/frontend-admin/dist"
+  command = "pnpm --filter @workspace/frontend-student run build && pnpm --filter @workspace/frontend-admin run build && rm -rf dist && mkdir -p dist/admin && cp -R artifacts/frontend-student/dist/. dist/ && cp -R artifacts/frontend-admin/dist/. dist/admin/"
+  publish = "dist"
 
 [build.environment]
   NODE_VERSION = "22"
   PNPM_FLAGS = "--no-frozen-lockfile"
+
+[[redirects]]
+  from = "/admin/*"
+  to = "/admin/index.html"
+  status = 200
 
 [[redirects]]
   from = "/*"
