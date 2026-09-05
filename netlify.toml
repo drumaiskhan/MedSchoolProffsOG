@@ -1,18 +1,7 @@
-# Deploys the STUDENT frontend only. The backend (Express + Postgres) needs a
-# separate host — Railway, Render, or Fly.io all work well. Set
-# VITE_API_BASE_URL and VITE_ADMIN_URL below (or in the Netlify UI).
-#
-# The admin frontend is a separate Netlify site — see netlify.admin.toml and
-# DEPLOY-SPLIT.md for how to point a second site at it.
-
 [build]
-  command = "pnpm install && pnpm run build:student"
-  publish = "artifacts/frontend-student/dist/public"
+  base = "/"
+  command = "pnpm install --no-frozen-lockfile && pnpm --filter @workspace/medschoolproffs build"
+  publish = "artifacts/medschoolproffs/dist"
 
 [build.environment]
   NODE_VERSION = "22"
-
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
