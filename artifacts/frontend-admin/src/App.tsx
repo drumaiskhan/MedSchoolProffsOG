@@ -122,19 +122,22 @@ function Shell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (userQuery.isLoading) return;
-    if (!user) {
+    if (!user || user.role !== 'admin') {
       // A hard navigation (not wouter's client-side setLocation) so any
       // stale/broken React Query cache from the failed session is fully
       // discarded rather than carried into the next render — a soft route
       // change alone was letting a bad cached response resurface the same
       // crash after refresh instead of landing cleanly on the login page.
+      // This deployment only serves admin routes — a non-admin account
+      // (e.g. a student who signed in here by mistake) must never see admin
+      // UI, so it's treated the same as "not signed in" and sent to /login.
       queryClient.clear();
       window.location.href = '/login';
       return;
     }
   }, [user, userQuery.isLoading, setLocation]);
 
-  if (userQuery.isLoading || !user) return <div className="grid min-h-[100dvh] place-items-center bg-background"><SkeletonPage /></div>;
+  if (userQuery.isLoading || !user || user.role !== 'admin') return <div className="grid min-h-[100dvh] place-items-center bg-background"><SkeletonPage /></div>;
 
   const title = location.slice(1).split('/').map((part) => part.replaceAll('-', ' ')).join(' / ') || 'Overview';
   return <div className="flex min-h-[100dvh] bg-background"><div className={cn(menuOpen ? 'block' : 'hidden', 'fixed inset-0 z-30 bg-[#102c37]/40 md:hidden')} onClick={() => setMenuOpen(false)} />{(menuOpen || !isMobile) && <SideNav user={user} onClose={() => setMenuOpen(false)} />}<main className="min-w-0 flex-1"><header className="sticky top-0 z-20 flex h-[72px] items-center justify-between border-b border-border/70 bg-background/90 px-5 backdrop-blur-md md:px-10"><div className="flex items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} data-testid="button-open-menu"><Menu size={20} /></button><div><div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-muted-foreground">MedschoolProffs / Admin</div><h1 className="mt-1 text-[17px] font-bold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="flex items-center gap-2"><Link href="/notifications" className="relative grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted" data-testid="link-notifications"><Bell size={17} /></Link><Link href="/profile" className="ml-1 grid size-9 place-items-center rounded-full bg-[#d7eee4] text-xs font-extrabold text-[#164b4b]" data-testid="link-header-profile">{initials(user.name)}</Link></div></header><div className="page-enter px-5 py-7 md:px-10 md:py-9">{children}</div></main></div>;

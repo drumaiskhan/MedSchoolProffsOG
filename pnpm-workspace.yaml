@@ -34,6 +34,20 @@ minimumReleaseAgeExclude:
   - '@replit/*'
   - stripe-replit-sync
 
+# ============================================================================
+# Allow specific dependencies' install/build scripts to run
+# ============================================================================
+#
+# pnpm now blocks every dependency's install/build scripts by default (a
+# supply-chain-attack defense) unless explicitly allow-listed here. esbuild
+# (used directly by artifacts/api-server to bundle the backend, and pulled in
+# transitively by Vite) needs its install script to fetch the correct native
+# binary for the platform — without approval, `pnpm install` fails outright
+# with ERR_PNPM_IGNORED_BUILDS instead of silently skipping it. Only add
+# packages here whose install scripts you've reviewed and trust.
+allowBuilds:
+  esbuild: true
+
 packages:
   - artifacts/*
   - lib/*
