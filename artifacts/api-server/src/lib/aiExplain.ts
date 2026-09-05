@@ -1,16 +1,40 @@
 import { getSetting } from "./settings";
 
-type AIProvider = "anthropic" | "openai" | "gemini" | "groq" | "custom";
+export type AIProvider =
+  | "anthropic"
+  | "openai"
+  | "gemini"
+  | "groq"
+  | "custom";
+
+/**
+ * Used by the explanations route to distinguish
+ * configuration problems from normal AI/API errors.
+ */
+export class AiNotConfiguredError extends Error {
+  constructor(message = "AI provider is not configured.") {
+    super(message);
+    this.name = "AiNotConfiguredError";
+
+    Object.setPrototypeOf(
+      this,
+      AiNotConfiguredError.prototype
+    );
+  }
+}
 
 export interface FlashcardGenerationRequest {
   sourceText?: string;
+
   mcqs?: Array<{
     question: string;
     options?: string[];
     answer?: string;
     explanation?: string;
   }>;
+
   topicLabel?: string;
+
   count: number;
 }
 
@@ -24,7 +48,7 @@ const FLASHCARD_BATCH_SIZE = 20;
 const MAX_GENERATION_ATTEMPTS = 4;
 
 /* -------------------------------------------------------------------------- */
-/*                              Configuration                                 */
+/*                              AI CONFIGURATION                              */
 /* -------------------------------------------------------------------------- */
 
 async function getAIConfig(): Promise<{
@@ -33,10 +57,12 @@ async function getAIConfig(): Promise<{
   model: string;
   baseUrl?: string;
 }> {
-  const provider =
-    ((await getSetting("ai_provider")) ||
-      process.env.AI_PROVIDER ||
-      "gemini") as AIProvider;
+  const providerValue =
+    (await getSetting("ai_provider")) ||
+    process.env.AI_PROVIDER ||
+    "gemini";
+
+  const provider = providerValue as AIProvider;
 
   let apiKey = "";
   let model = "";
@@ -114,23 +140,27 @@ async function getAIConfig(): Promise<{
       break;
 
     default:
-      throw new Error(`Unsupported AI provider: ${provider}`);
+      throw new AiNotConfiguredError(
+        `Unsupported AI provider: ${providerValue}`
+      );
   }
 
   if (!apiKey) {
-    throw new Error(
+    throw new AiNotConfiguredError(
       `No API key configured for AI provider "${provider}".`
     );
   }
 
   if (!model) {
-    throw new Error(
+    throw new AiNotConfiguredError(
       `No model configured for AI provider "${provider}".`
     );
   }
 
   if (provider === "custom" && !baseUrl) {
-    throw new Error("Custom AI provider requires a base URL.");
+    throw new AiNotConfiguredError(
+      "Custom AI provider requires a base URL."
+    );
   }
 
   return {
@@ -142,10 +172,12 @@ async function getAIConfig(): Promise<{
 }
 
 /* -------------------------------------------------------------------------- */
-/*                                HTTP helper                                 */
+/*                              RESPONSE PARSER                               */
 /* -------------------------------------------------------------------------- */
 
-async function parseResponse(response: Response): Promise<any> {
+async function parseResponse(
+  response: Response
+): Promise<any> {
   const text = await response.text();
 
   let data: any;
@@ -153,25 +185,30 @@ async function parseResponse(response: Response): Promise<any> {
   try {
     data = JSON.parse(text);
   } catch {
-    data = { raw: text };
+    data = {
+      raw: text,
+    };
   }
 
   if (!response.ok) {
     const message =
       data?.error?.message ||
+      data?.error?.type ||
       data?.message ||
       data?.error ||
-      text ||
+      data?.raw ||
       `HTTP ${response.status}`;
 
-    throw new Error(`AI request failed: ${message}`);
+    throw new Error(
+      `AI request failed: ${message}`
+    );
   }
 
   return data;
 }
 
 /* -------------------------------------------------------------------------- */
-/*                                Anthropic                                   */
+/*                                ANTHROPIC                                   */
 /* -------------------------------------------------------------------------- */
 
 async function generateWithAnthropic(
@@ -184,14 +221,18 @@ async function generateWithAnthropic(
     "https://api.anthropic.com/v1/messages",
     {
       method: "POST",
+
       headers: {
         "Content-Type": "application/json",
         "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
       },
+
       body: JSON.stringify({
         model,
+
         max_tokens: maxTokens,
+
         messages: [
           {
             role: "user",
@@ -205,19 +246,25 @@ async function generateWithAnthropic(
   const data = await parseResponse(response);
 
   const text = data?.content
-    ?.filter((item: any) => item?.type === "text")
-    ?.map((item: any) => item.text)
+    ?.filter(
+      (item: any) => item?.type === "text"
+    )
+    ?.map(
+      (item: any) => item.text
+    )
     ?.join("\n");
 
   if (!text) {
-    throw new Error("Anthropic returned an empty response.");
+    throw new Error(
+      "Anthropic returned an empty response."
+    );
   }
 
   return text;
 }
 
 /* -------------------------------------------------------------------------- */
-/*                                  OpenAI                                    */
+/*                                  OPENAI                                    */
 /* -------------------------------------------------------------------------- */
 
 async function generateWithOpenAi(
@@ -230,13 +277,19 @@ async function generateWithOpenAi(
     "https://api.openai.com/v1/chat/completions",
     {
       method: "POST",
+
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
+
       body: JSON.stringify({
         model,
+
         max_tokens: maxTokens,
+
+        temperature: 0.3,
+
         messages: [
           {
             role: "user",
@@ -249,17 +302,20 @@ async function generateWithOpenAi(
 
   const data = await parseResponse(response);
 
-  const text = data?.choices?.[0]?.message?.content;
+  const text =
+    data?.choices?.[0]?.message?.content;
 
   if (!text) {
-    throw new Error("OpenAI returned an empty response.");
+    throw new Error(
+      "OpenAI returned an empty response."
+    );
   }
 
   return text;
 }
 
 /* -------------------------------------------------------------------------- */
-/*                                  Gemini                                    */
+/*                                  GEMINI                                    */
 /* -------------------------------------------------------------------------- */
 
 async function generateWithGemini(
@@ -277,14 +333,17 @@ async function generateWithGemini(
 
   const response = await fetch(url, {
     method: "POST",
+
     headers: {
       "Content-Type": "application/json",
       "x-goog-api-key": apiKey,
     },
+
     body: JSON.stringify({
       contents: [
         {
           role: "user",
+
           parts: [
             {
               text: prompt,
@@ -292,6 +351,7 @@ async function generateWithGemini(
           ],
         },
       ],
+
       generationConfig: {
         maxOutputTokens,
         temperature: 0.3,
@@ -303,18 +363,22 @@ async function generateWithGemini(
 
   const text =
     data?.candidates?.[0]?.content?.parts
-      ?.map((part: any) => part?.text || "")
+      ?.map(
+        (part: any) => part?.text || ""
+      )
       ?.join("");
 
   if (!text) {
-    throw new Error("Gemini returned an empty response.");
+    throw new Error(
+      "Gemini returned an empty response."
+    );
   }
 
   return text;
 }
 
 /* -------------------------------------------------------------------------- */
-/*                                   Groq                                     */
+/*                                   GROQ                                     */
 /* -------------------------------------------------------------------------- */
 
 async function generateWithGroq(
@@ -327,14 +391,19 @@ async function generateWithGroq(
     "https://api.groq.com/openai/v1/chat/completions",
     {
       method: "POST",
+
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
+
       body: JSON.stringify({
         model,
+
         max_tokens: maxTokens,
+
         temperature: 0.3,
+
         messages: [
           {
             role: "user",
@@ -347,17 +416,20 @@ async function generateWithGroq(
 
   const data = await parseResponse(response);
 
-  const text = data?.choices?.[0]?.message?.content;
+  const text =
+    data?.choices?.[0]?.message?.content;
 
   if (!text) {
-    throw new Error("Groq returned an empty response.");
+    throw new Error(
+      "Groq returned an empty response."
+    );
   }
 
   return text;
 }
 
 /* -------------------------------------------------------------------------- */
-/*                          Custom OpenAI-compatible                           */
+/*                          CUSTOM OPENAI COMPATIBLE                          */
 /* -------------------------------------------------------------------------- */
 
 async function generateWithCustomEndpoint(
@@ -379,14 +451,19 @@ async function generateWithCustomEndpoint(
 
   const response = await fetch(url, {
     method: "POST",
+
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
+
     body: JSON.stringify({
       model,
+
       max_tokens: maxTokens,
+
       temperature: 0.3,
+
       messages: [
         {
           role: "user",
@@ -398,17 +475,20 @@ async function generateWithCustomEndpoint(
 
   const data = await parseResponse(response);
 
-  const text = data?.choices?.[0]?.message?.content;
+  const text =
+    data?.choices?.[0]?.message?.content;
 
   if (!text) {
-    throw new Error("Custom AI provider returned an empty response.");
+    throw new Error(
+      "Custom AI provider returned an empty response."
+    );
   }
 
   return text;
 }
 
 /* -------------------------------------------------------------------------- */
-/*                              AI dispatcher                                 */
+/*                              AI DISPATCHER                                 */
 /* -------------------------------------------------------------------------- */
 
 async function generateText(
@@ -460,35 +540,58 @@ async function generateText(
       );
 
     default:
-      throw new Error(
+      throw new AiNotConfiguredError(
         `Unsupported AI provider: ${config.provider}`
       );
   }
 }
 
 /* -------------------------------------------------------------------------- */
-/*                             JSON extraction                                */
+/*                              JSON CLEANING                                 */
 /* -------------------------------------------------------------------------- */
 
-function cleanAIJson(text: string): string {
+function cleanAIJson(
+  text: string
+): string {
   let cleaned = text.trim();
 
-  // Remove markdown code fences.
-  cleaned = cleaned.replace(/^```(?:json)?\s*/i, "");
-  cleaned = cleaned.replace(/\s*```$/i, "");
+  cleaned = cleaned.replace(
+    /^```(?:json)?\s*/i,
+    ""
+  );
 
-  // Find the first JSON array.
-  const firstArray = cleaned.indexOf("[");
-  const lastArray = cleaned.lastIndexOf("]");
+  cleaned = cleaned.replace(
+    /\s*```$/i,
+    ""
+  );
 
-  if (firstArray !== -1 && lastArray !== -1) {
-    cleaned = cleaned.slice(firstArray, lastArray + 1);
+  const firstArray =
+    cleaned.indexOf("[");
+
+  const lastArray =
+    cleaned.lastIndexOf("]");
+
+  if (
+    firstArray !== -1 &&
+    lastArray !== -1 &&
+    lastArray > firstArray
+  ) {
+    cleaned = cleaned.slice(
+      firstArray,
+      lastArray + 1
+    );
   }
 
   return cleaned.trim();
 }
 
-function parseFlashcards(text: string): GeneratedFlashcard[] {
+/* -------------------------------------------------------------------------- */
+/*                           FLASHCARD PARSER                                 */
+/* -------------------------------------------------------------------------- */
+
+function parseFlashcards(
+  text: string
+): GeneratedFlashcard[] {
   const cleaned = cleanAIJson(text);
 
   let parsed: unknown;
@@ -497,18 +600,26 @@ function parseFlashcards(text: string): GeneratedFlashcard[] {
     parsed = JSON.parse(cleaned);
   } catch {
     throw new Error(
-      `AI returned invalid flashcard JSON: ${cleaned.slice(0, 500)}`
+      `AI returned invalid flashcard JSON: ${cleaned.slice(
+        0,
+        500
+      )}`
     );
   }
 
   if (!Array.isArray(parsed)) {
-    throw new Error("AI response was not a JSON array.");
+    throw new Error(
+      "AI response was not a JSON array."
+    );
   }
 
   const cards: GeneratedFlashcard[] = [];
 
   for (const item of parsed) {
-    if (!item || typeof item !== "object") {
+    if (
+      !item ||
+      typeof item !== "object"
+    ) {
       continue;
     }
 
@@ -533,17 +644,21 @@ function parseFlashcards(text: string): GeneratedFlashcard[] {
   }
 
   if (!cards.length) {
-    throw new Error("No valid flashcards were found in AI response.");
+    throw new Error(
+      "No valid flashcards were found in AI response."
+    );
   }
 
   return cards;
 }
 
 /* -------------------------------------------------------------------------- */
-/*                              Deduplication                                 */
+/*                              DEDUPLICATION                                 */
 /* -------------------------------------------------------------------------- */
 
-function normalizeText(value: string): string {
+function normalizeText(
+  value: string
+): string {
   return value
     .toLowerCase()
     .replace(/\s+/g, " ")
@@ -555,16 +670,20 @@ function deduplicateFlashcards(
   cards: GeneratedFlashcard[]
 ): GeneratedFlashcard[] {
   const seen = new Set<string>();
+
   const result: GeneratedFlashcard[] = [];
 
   for (const card of cards) {
-    const key = normalizeText(card.front);
+    const key = normalizeText(
+      card.front
+    );
 
     if (!key || seen.has(key)) {
       continue;
     }
 
     seen.add(key);
+
     result.push(card);
   }
 
@@ -572,7 +691,7 @@ function deduplicateFlashcards(
 }
 
 /* -------------------------------------------------------------------------- */
-/*                         Source material preparation                         */
+/*                         SOURCE MATERIAL BUILDER                            */
 /* -------------------------------------------------------------------------- */
 
 function buildSourceMaterial(
@@ -581,29 +700,36 @@ function buildSourceMaterial(
   const sections: string[] = [];
 
   if (request.topicLabel) {
-    sections.push(`TOPIC:
-${request.topicLabel}`);
+    sections.push(
+      `TOPIC:\n${request.topicLabel}`
+    );
   }
 
   if (request.sourceText?.trim()) {
-    sections.push(`SOURCE TEXT:
-${request.sourceText.trim()}`);
+    sections.push(
+      `SOURCE TEXT:\n${request.sourceText.trim()}`
+    );
   }
 
   if (request.mcqs?.length) {
     const mcqText = request.mcqs
       .map((mcq, index) => {
-        const options = mcq.options?.length
-          ? `Options: ${mcq.options.join(" | ")}`
-          : "";
+        const options =
+          mcq.options?.length
+            ? `Options: ${mcq.options.join(
+                " | "
+              )}`
+            : "";
 
-        const answer = mcq.answer
-          ? `Answer: ${mcq.answer}`
-          : "";
+        const answer =
+          mcq.answer
+            ? `Answer: ${mcq.answer}`
+            : "";
 
-        const explanation = mcq.explanation
-          ? `Explanation: ${mcq.explanation}`
-          : "";
+        const explanation =
+          mcq.explanation
+            ? `Explanation: ${mcq.explanation}`
+            : "";
 
         return `
 MCQ ${index + 1}
@@ -615,15 +741,16 @@ ${explanation}
       })
       .join("\n\n");
 
-    sections.push(`MCQ SOURCE:
-${mcqText}`);
+    sections.push(
+      `MCQ SOURCE:\n${mcqText}`
+    );
   }
 
   return sections.join("\n\n");
 }
 
 /* -------------------------------------------------------------------------- */
-/*                           Explanation generation                           */
+/*                         MCQ EXPLANATION GENERATION                         */
 /* -------------------------------------------------------------------------- */
 
 export async function generateExplanation(
@@ -654,16 +781,19 @@ Requirements:
 - Briefly explain why the other options are incorrect when useful.
 - Focus on clinically important reasoning.
 - Use standard medical terminology.
-- Do not invent facts that are not medically established.
 - Keep the explanation concise but educational.
+- Do not invent facts.
 - Do not mention that you are an AI.
 `;
 
-  return generateText(prompt, 4000);
+  return generateText(
+    prompt,
+    4000
+  );
 }
 
 /* -------------------------------------------------------------------------- */
-/*                        Flashcard explanation                                */
+/*                     FLASHCARD EXPLANATION GENERATION                      */
 /* -------------------------------------------------------------------------- */
 
 export async function generateFlashcardExplanation(
@@ -695,11 +825,14 @@ Requirements:
 - Return only the improved answer text.
 `;
 
-  return generateText(prompt, 3000);
+  return generateText(
+    prompt,
+    3000
+  );
 }
 
 /* -------------------------------------------------------------------------- */
-/*                        Single flashcard batch                               */
+/*                       FLASHCARD BATCH GENERATION                          */
 /* -------------------------------------------------------------------------- */
 
 async function generateFlashcardBatch(
@@ -708,8 +841,9 @@ async function generateFlashcardBatch(
   count: number,
   previousCards: GeneratedFlashcard[]
 ): Promise<GeneratedFlashcard[]> {
-  const previousText = previousCards.length
-    ? `
+  const previousText =
+    previousCards.length
+      ? `
 Previously generated flashcards:
 
 ${previousCards
@@ -719,9 +853,9 @@ ${previousCards
   )
   .join("\n")}
 
-Do NOT duplicate these cards.
+Do NOT duplicate these flashcards.
 `
-    : "";
+      : "";
 
   const prompt = `
 You are an expert medical educator creating high-quality flashcards for MBBS students.
@@ -736,7 +870,7 @@ ${previousText}
 
 Generate exactly ${count} NEW flashcards based ONLY on the source material.
 
-Flashcard requirements:
+Requirements:
 - Test important medical knowledge.
 - Prioritize high-yield concepts.
 - Avoid trivial questions.
@@ -762,24 +896,35 @@ Required JSON format:
 
   const response = await generateText(
     prompt,
-    Math.max(5000, count * 300)
+    Math.max(
+      5000,
+      count * 300
+    )
   );
 
-  return parseFlashcards(response);
+  return parseFlashcards(
+    response
+  );
 }
 
 /* -------------------------------------------------------------------------- */
-/*                       Main flashcard generation                            */
+/*                       MAIN FLASHCARD GENERATOR                             */
 /* -------------------------------------------------------------------------- */
 
 export async function generateFlashcardSet(
   request: FlashcardGenerationRequest
 ): Promise<GeneratedFlashcard[]> {
-  if (!request || typeof request !== "object") {
-    throw new Error("Invalid flashcard generation request.");
+  if (
+    !request ||
+    typeof request !== "object"
+  ) {
+    throw new Error(
+      "Invalid flashcard generation request."
+    );
   }
 
-  const requestedCount = Number(request.count);
+  const requestedCount =
+    Number(request.count);
 
   if (
     !Number.isFinite(requestedCount) ||
@@ -795,7 +940,8 @@ export async function generateFlashcardSet(
     MAX_FLASHCARDS
   );
 
-  const sourceMaterial = buildSourceMaterial(request);
+  const sourceMaterial =
+    buildSourceMaterial(request);
 
   if (!sourceMaterial.trim()) {
     throw new Error(
@@ -803,7 +949,8 @@ export async function generateFlashcardSet(
     );
   }
 
-  const allCards: GeneratedFlashcard[] = [];
+  const allCards: GeneratedFlashcard[] =
+    [];
 
   let attempts = 0;
 
@@ -813,7 +960,8 @@ export async function generateFlashcardSet(
   ) {
     attempts++;
 
-    const remaining = count - allCards.length;
+    const remaining =
+      count - allCards.length;
 
     const batchCount = Math.min(
       remaining,
@@ -821,35 +969,45 @@ export async function generateFlashcardSet(
     );
 
     try {
-      const batch = await generateFlashcardBatch(
-        sourceMaterial,
-        request.topicLabel,
-        batchCount,
-        allCards
-      );
+      const batch =
+        await generateFlashcardBatch(
+          sourceMaterial,
+          request.topicLabel,
+          batchCount,
+          allCards
+        );
 
-      const uniqueBatch = deduplicateFlashcards([
-        ...allCards,
-        ...batch,
-      ]);
+      const uniqueCards =
+        deduplicateFlashcards([
+          ...allCards,
+          ...batch,
+        ]);
 
       allCards.length = 0;
-      allCards.push(...uniqueBatch);
 
-      if (allCards.length >= count) {
+      allCards.push(
+        ...uniqueCards
+      );
+
+      if (
+        allCards.length >= count
+      ) {
         break;
       }
     } catch (error) {
-      if (attempts >= MAX_GENERATION_ATTEMPTS) {
+      if (
+        attempts >=
+        MAX_GENERATION_ATTEMPTS
+      ) {
         throw error;
       }
     }
   }
 
-  const finalCards = deduplicateFlashcards(allCards).slice(
-    0,
-    count
-  );
+  const finalCards =
+    deduplicateFlashcards(
+      allCards
+    ).slice(0, count);
 
   if (!finalCards.length) {
     throw new Error(
