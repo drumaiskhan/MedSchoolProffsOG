@@ -3,24 +3,20 @@ import crypto from "node:crypto";
 import { logger } from "./logger";
 import { getSetting } from "./settings";
 
-// Folders whose files are typically large (book PDFs, resource files) go to
-// Cloudinary; everything else defaults to Supabase Storage. Either backend
-// can still take anything — this is just the default routing — and the
-// SIZE_OVERRIDE_BYTES check below sends anything over that size to
-// Cloudinary regardless of folder, as a safety net for a large file coming
-// in through a folder not on this list (e.g. an MCQ question image someone
-// pastes in at unusually high resolution).
-const LARGE_FILE_FOLDERS = new Set(["books", "resources"]);
-const SIZE_OVERRIDE_BYTES = 5 * 1024 * 1024; // 5MB
-
-async function resolveSupabaseConfig(): Promise<{ url: string; key: string; bucket: string } | null> {
-  const dbUrl = await getSetting("SUPABASE_URL", null);
-  const dbKey = await getSetting("SUPABASE_SERVICE_ROLE_KEY", null);
-  if (dbUrl && dbKey) return { url: dbUrl, key: dbKey, bucket: (await getSetting("SUPABASE_STORAGE_BUCKET", null)) || "medschool-uploads" };
-  const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_STORAGE_BUCKET } = process.env;
-  if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) return { url: SUPABASE_URL, key: SUPABASE_SERVICE_ROLE_KEY, bucket: SUPABASE_STORAGE_BUCKET || "medschool-uploads" };
-  return null;
-}
+// Supabase is used for this app's Postgres database only (DATABASE_URL) —
+// Supabase Storage is NOT used for new uploads. Cloudinary is the one and
+// only upload backend now. This removed the @supabase/supabase-js dependency
+// from the server entirely (smaller install/bundle, one less client to spin
+// up per request) and the "Invalid Compact JWS" error that came from a
+// malformed/legacy Supabase service-role key, since nothing ever builds a
+// Supabase Storage client anymore.
+//
+// The only remaining trace of Supabase here is in resolveFileUrl() below,
+// which can still turn an *old* "supabase:..." storage path (saved back when
+// Supabase Storage was in use) into a working public URL — reading a public
+// bucket's object needs no key at all, just the project URL — so files
+// uploaded before this change don't suddenly break. New uploads never
+// produce a "supabase:" path.
 
 async function resolveCloudinaryConfig(): Promise<{ cloudName: string; apiKey: string; apiSecret: string } | null> {
   const dbCloudName = await getSetting("CLOUDINARY_CLOUD_NAME", null);
@@ -37,32 +33,22 @@ async function resolveCloudinaryConfig(): Promise<{ cloudName: string; apiKey: s
 // settings. This small self-refreshing cache bridges the gap: populated by
 // uploadFile() on every upload, and lazily kicks off a background refresh
 // (never blocking the current request) whenever it's read stale/empty — so
-// within a request or two of an admin saving these in Settings, URL
+// within a request or two of an admin saving Cloudinary settings, URL
 // resolution picks them up without needing an upload to happen first.
 // process.env is used as the synchronous fallback in the meantime.
+//
+// cachedSupabaseUrl exists only to resolve pre-existing "supabase:" storage
+// paths from before Storage moved to Cloudinary-only (see the comment atop
+// this file) — it is read from SUPABASE_URL if that env var happens to still
+// be set (e.g. left over from before this change), never from admin
+// settings, since Supabase Storage is no longer admin-configurable.
 let cachedSupabaseUrl: string | null = process.env.SUPABASE_URL || null;
 let cachedCloudinaryCloudName: string | null = process.env.CLOUDINARY_CLOUD_NAME || null;
 let lastConfigRefresh = 0;
 function refreshConfigCacheIfStale(): void {
   if (Date.now() - lastConfigRefresh <= 15_000) return;
   lastConfigRefresh = Date.now();
-  void getSetting("SUPABASE_URL", null).then((url) => { if (url) cachedSupabaseUrl = url; }).catch(() => {});
   void getSetting("CLOUDINARY_CLOUD_NAME", null).then((name) => { if (name) cachedCloudinaryCloudName = name; }).catch(() => {});
-}
-
-async function uploadToSupabase(buffer: Buffer, safeName: string, mimeType: string): Promise<{ path: string } | { error: string }> {
-  const config = await resolveSupabaseConfig();
-  if (!config) return { error: "Supabase Storage is not configured (missing URL or service role key)." };
-  try {
-    const { createClient } = await import("@supabase/supabase-js");
-    const supabase = createClient(config.url, config.key);
-    const { error } = await supabase.storage.from(config.bucket).upload(safeName, buffer, { contentType: mimeType, upsert: false });
-    if (error) throw error;
-    return { path: `supabase:${config.bucket}/${safeName}` };
-  } catch (err) {
-    logger.error({ err }, "Supabase upload failed");
-    return { error: `Supabase: ${err instanceof Error ? err.message : "upload failed"}` };
-  }
 }
 
 async function uploadToCloudinary(buffer: Buffer, safeName: string): Promise<{ path: string } | { error: string }> {
@@ -91,65 +77,35 @@ async function uploadToCloudinary(buffer: Buffer, safeName: string): Promise<{ p
  * DB (proofPath / storagePath / profilePicturePath / imagePath columns) and
  * later resolved back to a downloadable URL via resolveFileUrl().
  *
- * Two real backends, both configurable from Admin -> Platform settings ->
- * Storage (env vars still work as a fallback): Supabase Storage for most
- * uploads, Cloudinary for large files (books/resources by folder, or
- * anything over ~5MB regardless of folder). There is deliberately no local-
- * disk fallback — this app's compute (Render/Railway/Netlify functions) all
- * wipe local disk on redeploy or restart, which is exactly how a previously
- * "successfully" uploaded book disappeared. If neither backend is
- * configured, or the appropriate one fails, this throws instead of quietly
- * writing somewhere that won't survive the next deploy — and includes the
- * real reason from each backend it tried, instead of a generic "both
- * failed" that hides whether it was a bad key, a missing bucket, or
- * something else.
+ * Cloudinary is the only upload backend (configurable from Admin -> Platform
+ * settings -> Storage; env vars still work as a fallback). Supabase is used
+ * for this app's Postgres database only — see the comment atop this file.
+ * There is deliberately no local-disk fallback — this app's compute
+ * (Render/Railway/Netlify functions) all wipe local disk on redeploy or
+ * restart, which is exactly how a previously "successfully" uploaded book
+ * disappeared. If Cloudinary isn't configured, or the upload fails, this
+ * throws instead of quietly writing somewhere that won't survive the next
+ * deploy — and includes the real reason (bad key, wrong cloud name, etc.)
+ * rather than a generic failure.
  */
 export async function uploadFile(buffer: Buffer, originalName: string, mimeType: string, folder = "misc"): Promise<string> {
   const ext = path.extname(originalName) || "";
   const safeName = `${folder}/${Date.now()}-${crypto.randomBytes(8).toString("hex")}${ext}`;
-  const preferCloudinary = LARGE_FILE_FOLDERS.has(folder) || buffer.byteLength > SIZE_OVERRIDE_BYTES;
 
-  const primary = preferCloudinary ? uploadToCloudinary : uploadToSupabase;
-  const fallback = preferCloudinary ? uploadToSupabase : uploadToCloudinary;
+  const result = await uploadToCloudinary(buffer, safeName, mimeType);
+  if ("path" in result) return result.path;
 
-  const primaryResult = await primary(buffer, safeName, mimeType);
-  if ("path" in primaryResult) return primaryResult.path;
-
-  const fallbackResult = await fallback(buffer, safeName, mimeType);
-  if ("path" in fallbackResult) return fallbackResult.path;
-
-  throw new Error(
-    `Couldn't save the uploaded file — both storage backends failed. ${primaryResult.error} ${fallbackResult.error}`,
-  );
+  throw new Error(`Couldn't save the uploaded file. ${result.error}`);
 }
 
 /**
  * Real connectivity check for Admin -> Platform settings -> Storage's "Test
- * connection" button — unlike the presence-only SUPABASE_CONFIGURED /
- * CLOUDINARY_CONFIGURED flags returned by GET /admin/settings (which only
- * check that the fields are non-empty, not that they actually work), this
- * makes a real, cheap API call to each provider and reports the real
- * failure reason if one is misconfigured. Deliberately avoids
- * upload+delete (which would leave test artifacts behind on partial
- * failure, e.g. an upload that succeeds but a delete without permission) in
- * favor of read-only calls that still require valid, working credentials.
+ * connection" button — unlike the presence-only CLOUDINARY_CONFIGURED flag
+ * returned by GET /admin/settings (which only checks that the fields are
+ * non-empty, not that they actually work), this makes a real, cheap API call
+ * and reports the real failure reason if it's misconfigured (bad key, wrong
+ * cloud name, etc.).
  */
-export async function testSupabaseConnection(): Promise<{ ok: boolean; error?: string; bucket?: string }> {
-  const config = await resolveSupabaseConfig();
-  if (!config) return { ok: false, error: "Not configured — set a Supabase URL and service role key first." };
-  try {
-    const { createClient } = await import("@supabase/supabase-js");
-    const supabase = createClient(config.url, config.key);
-    const { data, error } = await supabase.storage.getBucket(config.bucket);
-    if (error) throw error;
-    if (!data) return { ok: false, error: `Connected, but bucket "${config.bucket}" doesn't exist. Create it in Supabase Storage first and set it to public.` };
-    if (!data.public) return { ok: false, error: `Bucket "${config.bucket}" exists but isn't public — uploaded files won't be viewable. Set it to public in Supabase Storage.` };
-    return { ok: true, bucket: config.bucket };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Could not reach Supabase." };
-  }
-}
-
 export async function testCloudinaryConnection(): Promise<{ ok: boolean; error?: string }> {
   const config = await resolveCloudinaryConfig();
   if (!config) return { ok: false, error: "Not configured — set a cloud name, API key, and API secret first." };

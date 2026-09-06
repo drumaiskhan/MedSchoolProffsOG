@@ -106,6 +106,10 @@ this project's Replit origins). Use WSL or Git Bash rather than PowerShell/cmd.
    `medschoolproffs-web` service's `VITE_API_BASE_URL` env var, then
    redeploy the frontend (env vars are baked in at build time for a Vite app).
 4. `JWT_SECRET` and `DATABASE_URL` are wired automatically by the blueprint.
+   If you use Supabase/Neon instead of the Railway Postgres plugin, the
+   connection string points at a different network, so a plain
+   `?sslmode=disable` DATABASE_URL will fail there — leave `sslmode` off
+   (or set it to `require`) and the app enables SSL automatically.
    Set the SMTP/Supabase/Cloudinary vars from `.env.example` for real email
    and persistent file storage — required, not optional: there's no local-
    disk fallback (Render wipes local disk on every redeploy, which is why an

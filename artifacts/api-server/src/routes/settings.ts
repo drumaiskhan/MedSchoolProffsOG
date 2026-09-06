@@ -3,7 +3,7 @@ import { z } from "zod";
 import { auditLogsTable, db } from "@workspace/db";
 import { getAllSettings, setSetting } from "../lib/settings";
 import { requireAdmin } from "../middlewares/auth";
-import { resolveFileUrl, testSupabaseConnection, testCloudinaryConnection } from "../lib/storage";
+import { resolveFileUrl, testCloudinaryConnection } from "../lib/storage";
 
 const router: IRouter = Router();
 
@@ -66,18 +66,11 @@ const EDITABLE_KEYS = [
   "AI_API_KEY",
   "AI_MODEL", // optional override; each provider has a sensible default if left blank
   "AI_BASE_URL", // required only when AI_PROVIDER = "custom" — an OpenAI-compatible /chat/completions base URL
-  // Persistent file storage (Supabase Storage) — same "configurable from the
-  // admin panel, no server env-var access needed" pattern as the AI keys
-  // above. Without these set (here or as env vars), uploads fall back to
-  // this server's local disk, which is wiped on redeploy/restart on most
-  // hosts (Netlify included) — see lib/storage.ts. SUPABASE_SERVICE_ROLE_KEY
+  // Persistent file storage — Cloudinary is the only upload backend (see
+  // lib/storage.ts; Supabase is used for this app's Postgres database only,
+  // not for storage). Same "configurable from the admin panel, no server
+  // env-var access needed" pattern as the AI keys above. CLOUDINARY_API_SECRET
   // is masked on the way out the same way AI_API_KEY is.
-  "SUPABASE_URL",
-  "SUPABASE_SERVICE_ROLE_KEY",
-  "SUPABASE_STORAGE_BUCKET", // optional — defaults to "medschool-uploads"
-  // Cloudinary — used for large files (books/resources, or anything over
-  // ~5MB regardless of folder). Same masked-secret pattern as
-  // SUPABASE_SERVICE_ROLE_KEY for CLOUDINARY_API_SECRET.
   "CLOUDINARY_CLOUD_NAME",
   "CLOUDINARY_API_KEY",
   "CLOUDINARY_API_SECRET",
@@ -118,7 +111,7 @@ function withResolvedMedia(view: Record<string, string>): Record<string, string>
 // masked preview per key and only sends a new value in the PATCH body when
 // the admin is actually changing it (see the blank-value skip in the PATCH
 // handler below).
-const SECRET_KEYS = ["AI_API_KEY", "SUPABASE_SERVICE_ROLE_KEY", "CLOUDINARY_API_SECRET"] as const;
+const SECRET_KEYS = ["AI_API_KEY", "CLOUDINARY_API_SECRET"] as const;
 function withSecretsMasked(view: Record<string, string>): Record<string, string> {
   const masked: Record<string, string> = {};
   const rest = { ...view };
@@ -146,14 +139,13 @@ router.get("/payment-details", async (_req, res): Promise<void> => {
 router.get("/admin/settings", requireAdmin, async (_req, res): Promise<void> => {
   const settings = await getAllSettings();
   const view = Object.fromEntries(EDITABLE_KEYS.map((key) => [key, settings[key] ?? ""]));
-  // Not an editable setting — tells the admin UI which storage backends are
-  // actually configured and reachable for uploads, since there's no local-
-  // disk fallback anymore (see storage.ts) — an upload throws outright if
-  // neither is set. Checks the DB-backed settings first (the ones the admin
-  // can set right here) before falling back to env vars.
-  const supabaseConfigured = !!((view.SUPABASE_URL && view.SUPABASE_SERVICE_ROLE_KEY) || (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY));
+  // Not an editable setting — tells the admin UI whether Cloudinary (the
+  // only upload backend, see storage.ts) is actually configured, since
+  // there's no local-disk fallback — an upload throws outright if it isn't
+  // set. Checks the DB-backed settings first (the ones the admin can set
+  // right here) before falling back to env vars.
   const cloudinaryConfigured = !!((view.CLOUDINARY_CLOUD_NAME && view.CLOUDINARY_API_KEY && view.CLOUDINARY_API_SECRET) || (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET));
-  res.json({ ...withSecretsMasked(withResolvedMedia(view)), SUPABASE_CONFIGURED: String(supabaseConfigured), CLOUDINARY_CONFIGURED: String(cloudinaryConfigured) });
+  res.json({ ...withSecretsMasked(withResolvedMedia(view)), CLOUDINARY_CONFIGURED: String(cloudinaryConfigured) });
 });
 
 const SettingsBody = z.object(Object.fromEntries(EDITABLE_KEYS.map((key) => [key, z.string().max(4000).optional()])) as Record<(typeof EDITABLE_KEYS)[number], z.ZodOptional<z.ZodString>>);
@@ -181,15 +173,14 @@ router.post("/admin/settings/rotate-admin-code", requireAdmin, async (req, res):
 });
 
 // Real connectivity check, as opposed to the presence-only
-// SUPABASE_CONFIGURED / CLOUDINARY_CONFIGURED flags on GET /admin/settings
-// above (which only mean "the fields aren't blank," not "this actually
-// works" — the source of the falsely-green "Configured" badge). Makes one
-// cheap, read-only call to each provider using whatever is currently saved
-// and reports the real reason if something's wrong (bad key, wrong bucket
-// name, bucket not public, etc.) instead of a generic failure.
+// CLOUDINARY_CONFIGURED flag on GET /admin/settings above (which only means
+// "the fields aren't blank," not "this actually works" — the source of the
+// falsely-green "Configured" badge). Makes one cheap, read-only call using
+// whatever is currently saved and reports the real reason if something's
+// wrong (bad key, wrong cloud name, etc.) instead of a generic failure.
 router.post("/admin/settings/test-storage", requireAdmin, async (_req, res): Promise<void> => {
-  const [supabase, cloudinary] = await Promise.all([testSupabaseConnection(), testCloudinaryConnection()]);
-  res.json({ supabase, cloudinary });
+  const cloudinary = await testCloudinaryConnection();
+  res.json({ cloudinary });
 });
 
 export default router;

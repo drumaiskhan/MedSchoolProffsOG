@@ -173,7 +173,7 @@ export async function generateVisualization(userPrompt: string): Promise<Visuali
   const trimmed = userPrompt.trim().slice(0, MAX_PROMPT_LENGTH);
   if (!trimmed) throw new InvalidVisualizationError("Prompt was empty");
 
-  const raw = await runPrompt(buildPrompt(trimmed), VISUALIZATION_MAX_TOKENS);
+  const raw = await runPrompt(buildPrompt(trimmed), VISUALIZATION_MAX_TOKENS, "object");
   const cleaned = stripFences(raw);
 
   let parsedJson: unknown;

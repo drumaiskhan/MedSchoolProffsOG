@@ -245,15 +245,31 @@ async function parseJsonOrThrow(res: Response, url: string, providerLabel: strin
   }
 }
 
-async function generateWithAnthropic(apiKey: string, prompt: string, maxTokens = 400): Promise<string> {
+// Whether (and how) the caller needs strict JSON back. "object" and "array"
+// tell each provider's own native JSON-mode/prefill mechanism what the
+// top-level shape will be (several providers restrict or shape their JSON
+// mode differently for the two) — false means plain prose, no JSON handling
+// at all (explanations, "explain this step").
+export type JsonMode = "object" | "array" | false;
+
+async function generateWithAnthropic(apiKey: string, model: string, prompt: string, maxTokens = 400, jsonMode: JsonMode = false): Promise<string> {
   const url = "https://api.anthropic.com/v1/messages";
+  // Anthropic has no dedicated JSON-mode flag. The standard trick is an
+  // assistant-turn "prefill": seed the reply with the opening brace/bracket
+  // so the model has no room left to add a preamble like "Sure, here's the
+  // JSON:" — it can only continue from the character we already forced.
+  // Because the prefill isn't echoed back, we prepend it to the response.
+  const prefill = jsonMode === "object" ? "{" : jsonMode === "array" ? "[" : null;
+  const messages = prefill
+    ? [{ role: "user", content: prompt }, { role: "assistant", content: prefill }]
+    : [{ role: "user", content: prompt }];
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({
-      model: "claude-sonnet-4-6",
+      model,
       max_tokens: maxTokens,
-      messages: [{ role: "user", content: prompt }],
+      messages,
     }),
   });
   if (!res.ok) {
@@ -263,18 +279,25 @@ async function generateWithAnthropic(apiKey: string, prompt: string, maxTokens =
   const data = await parseJsonOrThrow(res, url, "Anthropic") as { content?: Array<{ type: string; text?: string }> };
   const text = data.content?.find((block) => block.type === "text")?.text;
   if (!text) throw new Error("Anthropic API returned no text content");
-  return text.trim();
+  return prefill ? prefill + text.trim() : text.trim();
 }
 
-async function generateWithOpenAi(apiKey: string, prompt: string, maxTokens = 400): Promise<string> {
+async function generateWithOpenAi(apiKey: string, model: string, prompt: string, maxTokens = 400, jsonMode: JsonMode = false): Promise<string> {
   const url = "https://api.openai.com/v1/chat/completions";
+  // OpenAI's native JSON mode (response_format: json_object) only guarantees
+  // a top-level *object* — turning it on for an array-shaped request (the
+  // flashcard/MCQ generators, which need `[...]`) would make the model wrap
+  // the array in an object instead, breaking the parser downstream. So this
+  // is only ever enabled for "object" mode; "array" mode falls back to the
+  // prompt's own instructions, same as before.
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
-      model: "gpt-4o-mini",
+      model,
       max_tokens: maxTokens,
       messages: [{ role: "user", content: prompt }],
+      ...(jsonMode === "object" ? { response_format: { type: "json_object" } } : {}),
     }),
   });
   if (!res.ok) {
@@ -287,12 +310,20 @@ async function generateWithOpenAi(apiKey: string, prompt: string, maxTokens = 40
   return text.trim();
 }
 
-async function generateWithGemini(apiKey: string, model: string, prompt: string, maxTokens = 400): Promise<string> {
+async function generateWithGemini(apiKey: string, model: string, prompt: string, maxTokens = 400, jsonMode: JsonMode = false): Promise<string> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: maxTokens } }),
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
+        maxOutputTokens: maxTokens,
+        // Gemini's native JSON mode works for both object- and array-shaped
+        // responses (unlike OpenAI's), so it's safe to enable for either.
+        ...(jsonMode ? { responseMimeType: "application/json" } : {}),
+      },
+    }),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
@@ -317,8 +348,16 @@ async function generateWithGemini(apiKey: string, model: string, prompt: string,
  * send to any other OpenAI-compatible provider too, since they'll just
  * ignore headers they don't recognize.
  */
-async function generateWithCustomEndpoint(baseUrl: string, apiKey: string, model: string, prompt: string, maxTokens = 400): Promise<string> {
+async function generateWithCustomEndpoint(baseUrl: string, apiKey: string, model: string, prompt: string, maxTokens = 400, jsonMode: JsonMode = false): Promise<string> {
   const url = baseUrl.replace(/\/$/, "") + "/chat/completions";
+  // Left without a native JSON-mode flag on purpose — this is an arbitrary
+  // admin-supplied OpenAI-compatible endpoint (Groq, OpenRouter, a
+  // self-hosted model, an enterprise gateway...) and we can't assume it
+  // supports `response_format` the same way OpenAI does, or that it agrees
+  // with OpenAI's object-only restriction. jsonMode is accepted for a
+  // consistent call signature but relies on the prompt's own instructions,
+  // same as before this fix.
+  void jsonMode;
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -373,14 +412,14 @@ async function resolveProvider(): Promise<{ provider: AiProvider; apiKey: string
   return null;
 }
 
-export async function runPrompt(prompt: string, maxTokens = 400): Promise<string> {
+export async function runPrompt(prompt: string, maxTokens = 400, jsonMode: JsonMode = false): Promise<string> {
   const resolved = await resolveProvider();
   if (!resolved) throw new AiNotConfiguredError();
   switch (resolved.provider) {
-    case "anthropic": return generateWithAnthropic(resolved.apiKey, prompt, maxTokens);
-    case "openai": return generateWithOpenAi(resolved.apiKey, prompt, maxTokens);
-    case "gemini": return generateWithGemini(resolved.apiKey, resolved.model, prompt, maxTokens);
-    case "custom": return generateWithCustomEndpoint(resolved.baseUrl!, resolved.apiKey, resolved.model, prompt, maxTokens);
+    case "anthropic": return generateWithAnthropic(resolved.apiKey, resolved.model, prompt, maxTokens, jsonMode);
+    case "openai": return generateWithOpenAi(resolved.apiKey, resolved.model, prompt, maxTokens, jsonMode);
+    case "gemini": return generateWithGemini(resolved.apiKey, resolved.model, prompt, maxTokens, jsonMode);
+    case "custom": return generateWithCustomEndpoint(resolved.baseUrl!, resolved.apiKey, resolved.model, prompt, maxTokens, jsonMode);
   }
 }
 
@@ -412,7 +451,7 @@ function mcqMaxTokens(count: number): number {
 
 /** Generates draft front/back flashcard pairs — callers should treat these as editable drafts, not auto-publish. */
 export async function generateFlashcardSet(request: FlashcardGenerationRequest): Promise<GeneratedFlashcard[]> {
-  const raw = await runPrompt(buildFlashcardGenerationPrompt(request), flashcardMaxTokens(request.count));
+  const raw = await runPrompt(buildFlashcardGenerationPrompt(request), flashcardMaxTokens(request.count), "array");
   return parseFlashcardJson(raw);
 }
 
@@ -420,7 +459,7 @@ export async function generateFlashcardSet(request: FlashcardGenerationRequest):
  * buildMcqGenerationPrompt for the anti-drift prompt design. Callers should
  * treat these as editable drafts for admin review, not auto-publish. */
 export async function generateMcqSet(request: McqGenerationRequest): Promise<GeneratedMcq[]> {
-  const raw = await runPrompt(buildMcqGenerationPrompt(request), mcqMaxTokens(request.count));
+  const raw = await runPrompt(buildMcqGenerationPrompt(request), mcqMaxTokens(request.count), "array");
   const parsed = parseMcqJson(raw);
   // Cheap post-hoc relevance guard: if the model still ignored the topic
   // instruction, at least surface fewer, better results rather than a full

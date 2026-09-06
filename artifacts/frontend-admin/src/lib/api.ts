@@ -79,7 +79,6 @@ export interface AuthUser {
 export interface PlatformSettings {
   [key: string]: string;
   ADMIN_SIGNUP_CODE: string; SUPPORT_EMAIL: string; SUPPORT_WHATSAPP: string; PLATFORM_NAME: string; PLATFORM_TAGLINE: string;
-  STORAGE_BACKEND: 'local' | 'supabase';
   DEFAULT_CURRENCY: string; PAYMENT_INSTRUCTIONS: string; ANNOUNCEMENT_BANNER: string; REGISTRATION_ENABLED: string;
   PAYMENT_ACCOUNT_HOLDER: string; PAYMENT_ACCOUNT_NUMBER: string; PAYMENT_BANK_NAME: string; PAYMENT_IFSC_OR_ROUTING: string; PAYMENT_UPI_ID: string; PAYMENT_QR_CODE_PATH: string;
   PAYMENT_RAAST_ID: string; PAYMENT_WALLET_PROVIDER: string; PAYMENT_WALLET_NUMBER: string; PAYMENT_WALLET_ACCOUNT_NAME: string;
@@ -88,7 +87,8 @@ export interface PlatformSettings {
   PLATFORM_DESCRIPTION: string; SOCIAL_FACEBOOK: string; SOCIAL_YOUTUBE: string; SOCIAL_LINKEDIN: string; SOCIAL_INSTAGRAM: string;
   CONTACT_EMAIL: string; CONTACT_LOCATION: string; SUPPORT_HOURS: string; COPYRIGHT_NOTICE: string; FEATURES_LIST: string; QUICK_LINKS: string;
   AI_PROVIDER: string; AI_API_KEY_SET: string; AI_API_KEY_MASKED: string; AI_API_KEY: string;
-  SUPABASE_URL: string; SUPABASE_SERVICE_ROLE_KEY: string; SUPABASE_SERVICE_ROLE_KEY_SET: string; SUPABASE_SERVICE_ROLE_KEY_MASKED: string; SUPABASE_STORAGE_BUCKET: string;
+  CLOUDINARY_CLOUD_NAME: string; CLOUDINARY_API_KEY: string; CLOUDINARY_API_SECRET: string; CLOUDINARY_API_SECRET_SET: string; CLOUDINARY_API_SECRET_MASKED: string;
+  CLOUDINARY_CONFIGURED: string;
 }
 
 export interface BankAccount { id: string; label: string; accountHolder: string; bankName: string; accountNumber: string; ifsc: string; branch: string; isPrimary: boolean }
@@ -365,7 +365,7 @@ export const settingsApi = {
   get: () => request<PlatformSettings>('/admin/settings'),
   update: (body: Partial<PlatformSettings>) => request<PlatformSettings>('/admin/settings', { method: 'PATCH', body: JSON.stringify(body) }),
   rotateAdminCode: () => request<{ ADMIN_SIGNUP_CODE: string }>('/admin/settings/rotate-admin-code', { method: 'POST' }),
-  testStorage: () => request<{ supabase: { ok: boolean; error?: string; bucket?: string }; cloudinary: { ok: boolean; error?: string } }>('/admin/settings/test-storage', { method: 'POST' }),
+  testStorage: () => request<{ cloudinary: { ok: boolean; error?: string } }>('/admin/settings/test-storage', { method: 'POST' }),
 };
 
 export const auditApi = {

@@ -798,7 +798,7 @@ function AdminSettings() {
   });
   const set = (key: string, value: string) => setForm({ ...values, [key]: value });
   const [tab, setTab] = useState<'general' | 'branding' | 'ai' | 'storage' | 'security'>('general');
-  const storageIssue = values.SUPABASE_CONFIGURED !== 'true' && values.CLOUDINARY_CONFIGURED !== 'true';
+  const storageIssue = values.CLOUDINARY_CONFIGURED !== 'true';
 
   const TABS: Array<{ id: typeof tab; label: string; icon: typeof Sparkles; badge?: boolean }> = [
     { id: 'general', label: 'General', icon: Settings },
@@ -837,23 +837,12 @@ function AdminSettings() {
       </div></div>}
 
       {tab === 'storage' && <>
-        {storageIssue && <div className="rounded-2xl border border-[#efc7bc] bg-[#fff5f0] p-5 text-xs text-[#9e4c39]" data-testid="banner-storage-warning"><div className="flex items-center gap-2 font-bold"><CircleHelp size={15} /> No file storage is configured</div><p className="mt-1.5 leading-5 text-[#a96a5b]">Every upload (favicon, payment QR code, payment proofs, team photos, MCQ images, books, resources) needs at least one of Supabase or Cloudinary configured below — there's no fallback, so uploads will fail until one is set.</p></div>}
+        {storageIssue && <div className="rounded-2xl border border-[#efc7bc] bg-[#fff5f0] p-5 text-xs text-[#9e4c39]" data-testid="banner-storage-warning"><div className="flex items-center gap-2 font-bold"><CircleHelp size={15} /> No file storage is configured</div><p className="mt-1.5 leading-5 text-[#a96a5b]">Every upload (favicon, payment QR code, payment proofs, team photos, MCQ images, books, resources) goes through Cloudinary — there's no fallback, so uploads will fail until it's configured below.</p></div>}
         <div className="flex items-center justify-between rounded-2xl border border-border bg-card p-4">
-          <p className="text-xs text-muted-foreground">The green "Saved" badges below only mean credentials were entered — they don't confirm the connection actually works. Save your settings first, then test.</p>
+          <p className="text-xs text-muted-foreground">The green "Saved" badge below only means credentials were entered — it doesn't confirm the connection actually works. Save your settings first, then test.</p>
           <button type="button" onClick={() => testStorage.mutate()} disabled={testStorage.isPending} className="ml-4 shrink-0 rounded-xl border border-border bg-background px-4 py-2 text-xs font-bold disabled:opacity-50" data-testid="button-test-storage">{testStorage.isPending ? 'Testing…' : 'Test connection'}</button>
         </div>
-        <div className="rounded-2xl border border-border bg-card p-6"><h3 className="flex items-center gap-2 font-bold">Supabase Storage {values.SUPABASE_CONFIGURED === 'true' && <Badge tone="green">Saved</Badge>}
-            {testStorage.data && (testStorage.data.supabase.ok
-              ? <Badge tone="green">Connected{testStorage.data.supabase.bucket ? ` · ${testStorage.data.supabase.bucket}` : ''}</Badge>
-              : <Badge tone="red">Not working</Badge>)}
-          </h3><p className="mt-1 text-xs text-muted-foreground">Used for most uploads — favicon, payment QR/proofs, team photos, MCQ images.</p>
-          {testStorage.data && !testStorage.data.supabase.ok && <p className="mt-2 rounded-xl bg-[#fff5f0] p-3 text-[11px] text-[#9e4c39]" data-testid="text-supabase-test-error">{testStorage.data.supabase.error}</p>}
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <label className="text-xs font-bold">Supabase URL<input value={values.SUPABASE_URL || ''} onChange={(e) => set('SUPABASE_URL', e.target.value)} placeholder="https://xxxxx.supabase.co" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-supabase-url" /></label>
-            <label className="text-xs font-bold">Service role key{values.SUPABASE_SERVICE_ROLE_KEY_SET === 'true' && <span className="ml-2 font-normal text-muted-foreground">Currently set · {values.SUPABASE_SERVICE_ROLE_KEY_MASKED}</span>}<input type="password" value={values.SUPABASE_SERVICE_ROLE_KEY || ''} onChange={(e) => set('SUPABASE_SERVICE_ROLE_KEY', e.target.value)} placeholder={values.SUPABASE_SERVICE_ROLE_KEY_SET === 'true' ? 'Leave blank to keep current key' : 'eyJ...'} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-supabase-key" /></label>
-            <label className="text-xs font-bold sm:col-span-2">Storage bucket <span className="font-normal text-muted-foreground">(optional — defaults to "medschool-uploads"; create this bucket in Supabase first and set it to public)</span><input value={values.SUPABASE_STORAGE_BUCKET || ''} onChange={(e) => set('SUPABASE_STORAGE_BUCKET', e.target.value)} placeholder="medschool-uploads" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-supabase-bucket" /></label>
-          </div>
-        </div>
+        <p className="text-[11px] text-muted-foreground">Supabase is used for this platform's database only — file storage runs on Cloudinary.</p>
         <div className="rounded-2xl border border-border bg-card p-6"><h3 className="flex items-center gap-2 font-bold">Cloudinary {values.CLOUDINARY_CONFIGURED === 'true' && <Badge tone="green">Saved</Badge>}
             {testStorage.data && (testStorage.data.cloudinary.ok
               ? <Badge tone="green">Connected</Badge>
