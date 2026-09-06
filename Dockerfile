@@ -1,41 +1,104 @@
-# Builds the api-server (and its workspace dependencies: lib/db, lib/api-zod)
-# and produces a small runtime image. Works on Railway, Render, Fly.io, or
-# any platform that builds from a Dockerfile.
+# Builds the api-server and its workspace dependencies:
+# lib/db, lib/api-zod
 #
-# Build context must be the repo root, e.g.:
+# Produces a small runtime image.
+# Works on Railway, Render, Fly.io, or any platform
+# that builds from a Dockerfile.
+#
+# Build context must be the repository root:
+#
 #   docker build -t medschoolproffs-api .
+#
+# Run locally:
+#
 #   docker run -p 3001:3001 --env-file .env medschoolproffs-api
 
+
+# ---------------------------------------------------------------------------
+# Base image
+# ---------------------------------------------------------------------------
+
 FROM node:22-slim AS base
+
 RUN corepack enable
+
 WORKDIR /repo
 
+
+# ---------------------------------------------------------------------------
+# Build image
+# ---------------------------------------------------------------------------
+
 FROM base AS build
+
+# Copy the complete monorepo/workspace
 COPY . .
-RUN pnpm install --frozen-lockfile=false
+
+# IMPORTANT:
+# Railway currently uses pnpm 12.x.
+# pnpm 12 does not accept --frozen-lockfile=false.
+#
+# Use the lockfile exactly as committed to the repository.
+RUN pnpm install --frozen-lockfile
+
+# Typecheck shared libraries first
 RUN pnpm run typecheck:libs
+
+# Build the API server
 RUN pnpm --filter @workspace/api-server run build
 
+
 # ---------------------------------------------------------------------------
-# Runtime image — only what's needed to run the built server
+# Runtime image
 # ---------------------------------------------------------------------------
+
 FROM node:22-slim AS runtime
+
 WORKDIR /app
+
 ENV NODE_ENV=production
 
+# Copy only the compiled API server
 COPY --from=build /repo/artifacts/api-server/dist ./dist
 
-# esbuild externalizes a fixed list of packages it can't safely bundle (see
-# artifacts/api-server/build.mjs) — of those, only nodemailer is actually
-# used here, so it needs a real install for the bundled output to `require()` it.
+
+# ---------------------------------------------------------------------------
+# Runtime dependencies
+# ---------------------------------------------------------------------------
 #
-# We deliberately do NOT copy artifacts/api-server/package.json here: it uses
-# pnpm-only specifiers (`workspace:*`, `catalog:`) for its other dependencies,
-# which plain npm can't parse — `npm install` fails immediately on that file
-# even when only installing an unrelated package. A minimal, npm-only
-# package.json avoids that entirely.
-RUN echo '{"name":"medschoolproffs-api-runtime","private":true,"type":"module"}' > package.json && \
-    corepack enable && npm install --omit=dev nodemailer@^6.9.15
+# esbuild externalizes a fixed list of packages that it cannot safely bundle
+# (see artifacts/api-server/build.mjs).
+#
+# nodemailer is required by the bundled output at runtime, so install it here.
+#
+# We deliberately do NOT copy:
+#
+#   artifacts/api-server/package.json
+#
+# because that package uses pnpm-only specifiers such as:
+#
+#   workspace:*
+#   catalog:
+#
+# Plain npm cannot parse those specifiers.
+#
+# Instead, create a minimal runtime package.json and install only the package
+# actually required by the compiled server.
+# ---------------------------------------------------------------------------
+
+RUN echo '{"name":"medschoolproffs-api-runtime","private":true,"type":"module"}' > package.json \
+    && npm install --omit=dev nodemailer@^6.9.15
+
+
+# ---------------------------------------------------------------------------
+# API port
+# ---------------------------------------------------------------------------
 
 EXPOSE 3001
+
+
+# ---------------------------------------------------------------------------
+# Start API
+# ---------------------------------------------------------------------------
+
 CMD ["node", "--enable-source-maps", "dist/index.mjs"]
