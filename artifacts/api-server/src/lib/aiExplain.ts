@@ -106,7 +106,7 @@ function buildFlashcardGenerationPrompt({ sourceText, mcqs, topicLabel, count }:
     "Each front should be a short, specific question or prompt. Each back should be a concise, factual answer (1-3 sentences).",
     "Do not repeat near-duplicate cards. Do not include markdown headers or numbering in the front/back text itself.",
     "",
-    "Respond with ONLY a valid JSON array, no prose before or after, no code fences, in this exact shape:",
+    "Respond with ONLY a valid JSON array, no prose before or after, no code fences, no introductory sentence like \"Here are the flashcards\", no closing remarks — the response must start with [ and end with ] and contain nothing else, in this exact shape:",
     '[{"front": "...", "back": "..."}]',
     "",
     "Source material:",
@@ -123,10 +123,24 @@ function parseFlashcardJson(raw: string): GeneratedFlashcard[] {
   } catch {
     // Some models wrap the array in extra prose — try to extract the first [...] block.
     const match = cleaned.match(/\[[\s\S]*\]/);
-    if (!match) throw new Error("AI did not return valid flashcard JSON");
-    parsed = JSON.parse(match[0]);
+    // Include a snippet of what the model actually said in both failure
+    // cases below — a bare "AI did not return valid flashcard JSON" gave no
+    // way to tell "the model refused/ignored the format" apart from "the
+    // response got cut off mid-array" apart from "OpenRouter returned an
+    // error payload shaped differently than expected." The raw text is the
+    // only way to tell these apart from the admin UI.
+    if (!match) throw new Error(`AI did not return valid flashcard JSON. Raw response: ${cleaned.slice(0, 500)}`);
+    try {
+      parsed = JSON.parse(match[0]);
+    } catch {
+      // Found brackets but the content between them didn't parse — almost
+      // always means the response got cut off before the array closed
+      // (ran out of max_tokens). Say so explicitly since "increase the
+      // token limit" is a very different fix than "pick a better model."
+      throw new Error(`AI's flashcard JSON was cut off or malformed (likely ran out of output tokens mid-response). Raw response: ${cleaned.slice(0, 500)}`);
+    }
   }
-  if (!Array.isArray(parsed)) throw new Error("AI did not return a flashcard array");
+  if (!Array.isArray(parsed)) throw new Error(`AI did not return a flashcard array. Raw response: ${cleaned.slice(0, 500)}`);
   return parsed
     .filter((c): c is { front: unknown; back: unknown } => !!c && typeof c === "object")
     .map((c) => ({ front: String((c as { front: unknown }).front ?? "").trim(), back: String((c as { back: unknown }).back ?? "").trim() }))
@@ -157,7 +171,7 @@ function buildMcqGenerationPrompt({ topicLabel, existingQuestions, count }: McqG
     existingBlock,
     `Remember: this entire question set is about "${topicLabel}" — nothing else.`,
     "",
-    "Respond with ONLY a valid JSON array, no prose before or after, no code fences, in this exact shape (optionExplanations must have exactly one entry per option, in the same order as options):",
+    "Respond with ONLY a valid JSON array, no prose before or after, no code fences, no introductory sentence, no closing remarks — the response must start with [ and end with ] and contain nothing else, in this exact shape (optionExplanations must have exactly one entry per option, in the same order as options):",
     '[{"question": "...", "options": ["...", "...", "...", "..."], "correctAnswer": "...", "explanation": "...", "optionExplanations": ["...", "...", "...", "..."]}]',
   ].join("\n");
 }
@@ -169,10 +183,14 @@ function parseMcqJson(raw: string): GeneratedMcq[] {
     parsed = JSON.parse(cleaned);
   } catch {
     const match = cleaned.match(/\[[\s\S]*\]/);
-    if (!match) throw new Error("AI did not return valid MCQ JSON");
-    parsed = JSON.parse(match[0]);
+    if (!match) throw new Error(`AI did not return valid MCQ JSON. Raw response: ${cleaned.slice(0, 500)}`);
+    try {
+      parsed = JSON.parse(match[0]);
+    } catch {
+      throw new Error(`AI's MCQ JSON was cut off or malformed (likely ran out of output tokens mid-response). Raw response: ${cleaned.slice(0, 500)}`);
+    }
   }
-  if (!Array.isArray(parsed)) throw new Error("AI did not return an MCQ array");
+  if (!Array.isArray(parsed)) throw new Error(`AI did not return an MCQ array. Raw response: ${cleaned.slice(0, 500)}`);
   return parsed
     .filter((m): m is { question: unknown; options: unknown; correctAnswer: unknown; explanation: unknown; optionExplanations: unknown } => !!m && typeof m === "object")
     .map((m) => {
@@ -216,7 +234,7 @@ async function parseJsonOrThrow(res: Response, url: string, providerLabel: strin
     throw new Error(
       `${providerLabel} returned a non-JSON response from ${url} (status ${res.status}, content-type "${contentType || "unknown"}").` +
       (looksLikeHtml
-        ? " That URL is serving a webpage, not an API — double-check the provider's Base URL in Admin > Platform settings > AI (it should point at the API base, e.g. https://openrouter.ai/api/v1, not a website homepage)."
+        ? " That URL is serving a webpage, not an API — double-check the provider's Base URL in Admin > Platform settings > AI (it should point at the API base, e.g. https://api.example.com/v1, not a website homepage)."
         : ` Response started with: ${raw.slice(0, 200)}`),
     );
   }
@@ -293,11 +311,11 @@ async function generateWithGemini(apiKey: string, model: string, prompt: string,
  * is the provider mode most likely to get a wrong URL (it's free text), so
  * the non-JSON-response check above matters most here.
  *
- * OpenRouter specifically: it's happy to accept the request without these
- * headers, but including them is OpenRouter's documented way to identify
- * your app on https://openrouter.ai/rankings and in their dashboard/logs —
- * harmless to send to any other OpenAI-compatible provider too, since
- * they'll just ignore unrecognized headers.
+ * OpenRouter specifically: it accepts requests without these headers, but
+ * sending them is OpenRouter's documented way to identify this app on
+ * https://openrouter.ai/rankings and in its dashboard/logs — harmless to
+ * send to any other OpenAI-compatible provider too, since they'll just
+ * ignore headers they don't recognize.
  */
 async function generateWithCustomEndpoint(baseUrl: string, apiKey: string, model: string, prompt: string, maxTokens = 400): Promise<string> {
   const url = baseUrl.replace(/\/$/, "") + "/chat/completions";
@@ -374,9 +392,27 @@ export async function generateFlashcardExplanation(request: FlashcardExplanation
   return runPrompt(buildFlashcardPrompt(request));
 }
 
+// The default maxTokens (400, sized for a single short explanation) is far
+// too small for a batch of structured JSON objects — 8 flashcards easily
+// need 800-1200+ tokens once you include JSON punctuation and any preamble
+// a model adds despite instructions, and MCQs need much more since each one
+// carries a full explanation per option (4 options x ~2 sentences x N
+// questions). Underestimating this was the actual cause of "AI did not
+// return valid flashcard JSON" — the response wasn't garbage, it was just
+// cut off mid-array before the closing bracket. Scale with the requested
+// count instead of using one fixed number, with a floor so small requests
+// still get enough room for the model's other overhead (any preamble,
+// closing punctuation, etc).
+function flashcardMaxTokens(count: number): number {
+  return Math.max(800, count * 150);
+}
+function mcqMaxTokens(count: number): number {
+  return Math.max(1500, count * 500);
+}
+
 /** Generates draft front/back flashcard pairs — callers should treat these as editable drafts, not auto-publish. */
 export async function generateFlashcardSet(request: FlashcardGenerationRequest): Promise<GeneratedFlashcard[]> {
-  const raw = await runPrompt(buildFlashcardGenerationPrompt(request));
+  const raw = await runPrompt(buildFlashcardGenerationPrompt(request), flashcardMaxTokens(request.count));
   return parseFlashcardJson(raw);
 }
 
@@ -384,7 +420,7 @@ export async function generateFlashcardSet(request: FlashcardGenerationRequest):
  * buildMcqGenerationPrompt for the anti-drift prompt design. Callers should
  * treat these as editable drafts for admin review, not auto-publish. */
 export async function generateMcqSet(request: McqGenerationRequest): Promise<GeneratedMcq[]> {
-  const raw = await runPrompt(buildMcqGenerationPrompt(request));
+  const raw = await runPrompt(buildMcqGenerationPrompt(request), mcqMaxTokens(request.count));
   const parsed = parseMcqJson(raw);
   // Cheap post-hoc relevance guard: if the model still ignored the topic
   // instruction, at least surface fewer, better results rather than a full
