@@ -14,17 +14,28 @@
 -- migration rather than a missing table, but a missing table is exactly
 -- what it is.
 --
--- This file is CREATE TABLE IF NOT EXISTS / CREATE INDEX IF NOT EXISTS only
--- — purely additive, never ALTER/DROP — so it's safe to run on every boot:
--- a no-op once the schema already exists, and it fills in a table on its
--- own if only *some* tables are missing (e.g. a partially-applied deploy).
--- It is run automatically by lib/db/src/ensureSchema.ts before any other
--- query, in api-server's index.ts.
+-- This file is mostly CREATE TABLE IF NOT EXISTS / CREATE INDEX IF NOT
+-- EXISTS — purely additive, safe to run on every boot: a no-op once the
+-- schema already exists, and it fills in a table on its own if only *some*
+-- tables are missing (e.g. a partially-applied deploy). It is run
+-- automatically by lib/db/src/ensureSchema.ts before any other query, in
+-- api-server's index.ts.
+--
+-- It also includes a small, explicit "additive migrations" block at the
+-- end (ALTER TABLE ... ADD COLUMN IF NOT EXISTS / DROP NOT NULL) for
+-- columns added to the schema after their table had already been created
+-- in production — CREATE TABLE IF NOT EXISTS alone can't add a column to
+-- an existing table, so without this block those columns would exist in
+-- the Drizzle schema and never reach a real deployment (see that block's
+-- own comment for the specific columns and the bug this caused). Every
+-- statement there is idempotent/safe to rerun — never a destructive ALTER
+-- or DROP.
 --
 -- This does NOT replace `pnpm run db:push` / manual-migration.sql for
 -- schema *changes* later on (new columns, altered types, etc.) — those
 -- still need a real migration, same as before. This only guarantees the
--- tables exist in the first place.
+-- tables (and the specific columns called out in the additive-migrations
+-- block below) exist in the first place.
 
 BEGIN;
 
@@ -542,5 +553,24 @@ CREATE TABLE IF NOT EXISTS med_platform_settings (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ---------------------------------------------------------------------
+-- Additive migrations for columns added to the schema AFTER a table
+-- already existed in production. CREATE TABLE IF NOT EXISTS above is a
+-- no-op on a table that's already there, so on an existing deployment
+-- these ALTER statements are what actually apply the column — safe to
+-- rerun any time (each is a no-op once applied). Mirrors the same block
+-- in ensureSchema.ts (which is what actually runs on every boot) and
+-- manual-migration.sql — keep all three in sync.
+-- ---------------------------------------------------------------------
+ALTER TABLE med_mcqs ALTER COLUMN module_id DROP NOT NULL;
+ALTER TABLE med_mcqs ALTER COLUMN subject_id DROP NOT NULL;
+ALTER TABLE med_mcqs ALTER COLUMN topic_id DROP NOT NULL;
+ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS option_explanations TEXT[];
+
+ALTER TABLE med_membership_plans ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE med_membership_plans ADD COLUMN IF NOT EXISTS eligibility TEXT;
+ALTER TABLE med_membership_plans ADD COLUMN IF NOT EXISTS original_price NUMERIC(12, 2);
+ALTER TABLE med_membership_plans ADD COLUMN IF NOT EXISTS discount_label TEXT;
 
 COMMIT;

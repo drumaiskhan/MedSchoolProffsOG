@@ -4,9 +4,13 @@ import { pool } from "./index";
 // short version: nothing in this deploy pipeline ever ran
 // `drizzle-kit push` against a fresh database, so on a brand-new Postgres
 // (a fresh Railway Postgres plugin, for example) every table is missing on
-// first boot. This runs a hand-written, additive-only
-// (CREATE TABLE/INDEX IF NOT EXISTS) copy of the schema before anything
-// else touches the database, so first boot works without a manual step.
+// first boot. This runs a hand-written copy of the schema (CREATE
+// TABLE/INDEX IF NOT EXISTS, plus a small additive-migrations block of
+// ALTER ... ADD COLUMN IF NOT EXISTS / DROP NOT NULL further down for
+// columns added after a table already existed in production — see that
+// block's own comment) before anything else touches the database, so both
+// a brand-new deploy and an existing one missing a newer column work
+// without a manual step.
 //
 // The SQL is inlined here (rather than read from ensure-schema.sql at
 // runtime) because api-server's build bundles @workspace/db straight into
@@ -17,9 +21,11 @@ import { pool } from "./index";
 // runnable copy — e.g. to run by hand via `psql` — and is not itself read
 // by any code path).
 //
-// Safe to run on every boot — a no-op once the tables exist. Does not
-// replace `pnpm run db:push` / manual-migration.sql for actual schema
-// changes later (new columns, altered types, etc.).
+// Safe to run on every boot — every statement here is a no-op once already
+// applied. Does not replace `pnpm run db:push` / manual-migration.sql for
+// schema changes in general — only the specific columns the
+// additive-migrations block below names are covered automatically; a truly
+// new column still needs to be added to that block by hand.
 const ENSURE_SCHEMA_SQL = `
 BEGIN;
 
@@ -536,6 +542,39 @@ CREATE TABLE IF NOT EXISTS med_platform_settings (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ---------------------------------------------------------------------
+-- Additive migrations for columns added to the Drizzle schema AFTER a
+-- table already existed in production. CREATE TABLE IF NOT EXISTS above
+-- is a no-op on a table that's already there, so a brand-new column never
+-- reaches an existing deployment on its own — these ALTER ... ADD COLUMN
+-- IF NOT EXISTS / DROP NOT NULL statements are what actually apply it,
+-- and are safe to rerun every boot (each is a no-op once applied). This
+-- mirrors lib/db/manual-migration.sql, which covered the same changes but
+-- was written to be run by hand and, in practice, never was — hence
+-- "column does not exist" errors in production (option_explanations on
+-- med_mcqs, original_price/discount_label on med_membership_plans) despite
+-- both columns being in the Drizzle schema and in a CREATE TABLE above.
+-- Keep this in sync with manual-migration.sql and ensure-schema.sql.
+-- ---------------------------------------------------------------------
+
+-- med_mcqs: curriculum placement became optional once MCQs could be
+-- imported straight into a past paper (no module/subject/topic needed).
+ALTER TABLE med_mcqs ALTER COLUMN module_id DROP NOT NULL;
+ALTER TABLE med_mcqs ALTER COLUMN subject_id DROP NOT NULL;
+ALTER TABLE med_mcqs ALTER COLUMN topic_id DROP NOT NULL;
+
+-- med_mcqs: per-option explanations (why each specific option is right or
+-- wrong), index-aligned with the "options" array.
+ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS option_explanations TEXT[];
+
+-- med_membership_plans: optional promotional pricing/eligibility text and
+-- auto-renew flag, all added after the table's initial CREATE TABLE ran
+-- in production.
+ALTER TABLE med_membership_plans ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE med_membership_plans ADD COLUMN IF NOT EXISTS eligibility TEXT;
+ALTER TABLE med_membership_plans ADD COLUMN IF NOT EXISTS original_price NUMERIC(12, 2);
+ALTER TABLE med_membership_plans ADD COLUMN IF NOT EXISTS discount_label TEXT;
 
 COMMIT;
 `;

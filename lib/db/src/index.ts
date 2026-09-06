@@ -22,6 +22,20 @@ if (!databaseUrl) {
 // and write quietly fails (e.g. saved data never loads, "Could not create
 // plan" on every admin action).
 //
+// This is intentionally a plain substring check, NOT `new URL(databaseUrl)`.
+// A generated DB password very often contains characters like `#`, `?`, or
+// `@` that are valid in a Postgres connection string's password segment but
+// are NOT the same character once `URL` parses it as a generic URI — `#`
+// starts a fragment, `?` starts a query string, etc. `new URL()` on a
+// password containing one of those either throws "Invalid URL" outright, or
+// silently truncates the password at that character without any error at
+// all. Either way this file is imported at process startup, so that failure
+// crashes the entire API server before it can even start listening — every
+// request then fails at the network level (looks like "the backend is
+// unreachable" from the frontend), which is a much worse failure mode than
+// the SSL problem this was meant to fix. A substring check needs no
+// well-formed URL and can't be broken by what's inside the password.
+//
 // `sslmode=disable` in the URL (typical for a local/Docker Postgres with no
 // TLS listener) opts out; anything else defaults to SSL on, since that's
 // what every one of this app's supported hosted-DB providers needs.
@@ -29,8 +43,7 @@ if (!databaseUrl) {
 // certificates not in Node's default trust store — this matches Supabase's
 // and Railway's own connection-snippet guidance, not a relaxation we're
 // choosing casually.
-const url = new URL(databaseUrl);
-const sslDisabled = url.searchParams.get("sslmode") === "disable";
+const sslDisabled = databaseUrl.includes("sslmode=disable");
 const ssl = sslDisabled ? undefined : { rejectUnauthorized: false };
 
 export const pool = new Pool({ connectionString: databaseUrl, ssl });
