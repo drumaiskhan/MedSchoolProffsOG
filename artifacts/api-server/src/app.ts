@@ -6,6 +6,7 @@ import multer from "multer";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { attachUser } from "./middlewares/auth";
+import { dbErrorMessage } from "./lib/dbErrors";
 
 const app: Express = express();
 
@@ -95,7 +96,7 @@ app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
     res.status(bodyErr.status).json({ error: bodyErr.type === "entity.too.large" ? "That request is too large — try submitting fewer items at once." : (bodyErr.message || "Invalid request body.") });
     return;
   }
-  const message = err instanceof Error ? err.message : "Something went wrong. Please try again.";
+  const message = dbErrorMessage(err, "Something went wrong. Please try again.");
   res.status(500).json({ error: message });
 });
 

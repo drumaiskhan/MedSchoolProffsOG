@@ -6,6 +6,7 @@ import { db, mcqImportProfilesTable, mcqsTable, auditLogsTable } from "@workspac
 import { requireAdmin } from "../middlewares/auth";
 import { extractFileContent } from "../lib/fileExtraction";
 import { extractMcqsFromText, extractMcqsFromRows, DEFAULT_IMPORT_PATTERNS, type ImportPatternSet } from "../lib/mcqParser";
+import { dbErrorMessage } from "../lib/dbErrors";
 
 const router: IRouter = Router();
 
@@ -156,8 +157,11 @@ router.post("/admin/mcq-import/commit", requireAdmin, async (req, res): Promise<
   } catch (err) {
     // Any DB constraint violation (or other insert failure) surfaces as a
     // real error to the admin instead of an unhandled 500 the frontend
-    // can't explain.
-    res.status(422).json({ error: err instanceof Error ? `Could not save these questions: ${err.message}` : "Could not save these questions" });
+    // can't explain. dbErrorMessage() unwraps Drizzle's DrizzleQueryError
+    // (whose .message is just the raw SQL + bound params, not the actual
+    // Postgres error) so this shows the real reason instead of a dump of
+    // every question/option in the batch.
+    res.status(422).json({ error: `Could not save these questions: ${dbErrorMessage(err, "unknown database error")}` });
   }
 });
 

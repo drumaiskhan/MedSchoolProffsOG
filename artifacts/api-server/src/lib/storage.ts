@@ -50,24 +50,24 @@ function refreshConfigCacheIfStale(): void {
   void getSetting("CLOUDINARY_CLOUD_NAME", null).then((name) => { if (name) cachedCloudinaryCloudName = name; }).catch(() => {});
 }
 
-async function uploadToSupabase(buffer: Buffer, safeName: string, mimeType: string): Promise<string | null> {
+async function uploadToSupabase(buffer: Buffer, safeName: string, mimeType: string): Promise<{ path: string } | { error: string }> {
   const config = await resolveSupabaseConfig();
-  if (!config) return null;
+  if (!config) return { error: "Supabase Storage is not configured (missing URL or service role key)." };
   try {
     const { createClient } = await import("@supabase/supabase-js");
     const supabase = createClient(config.url, config.key);
     const { error } = await supabase.storage.from(config.bucket).upload(safeName, buffer, { contentType: mimeType, upsert: false });
     if (error) throw error;
-    return `supabase:${config.bucket}/${safeName}`;
+    return { path: `supabase:${config.bucket}/${safeName}` };
   } catch (err) {
     logger.error({ err }, "Supabase upload failed");
-    return null;
+    return { error: `Supabase: ${err instanceof Error ? err.message : "upload failed"}` };
   }
 }
 
-async function uploadToCloudinary(buffer: Buffer, safeName: string): Promise<string | null> {
+async function uploadToCloudinary(buffer: Buffer, safeName: string): Promise<{ path: string } | { error: string }> {
   const config = await resolveCloudinaryConfig();
-  if (!config) return null;
+  if (!config) return { error: "Cloudinary is not configured (missing cloud name, API key, or API secret)." };
   try {
     const { v2: cloudinary } = await import("cloudinary");
     cloudinary.config({ cloud_name: config.cloudName, api_key: config.apiKey, api_secret: config.apiSecret });
@@ -79,10 +79,10 @@ async function uploadToCloudinary(buffer: Buffer, safeName: string): Promise<str
       });
       stream.end(buffer);
     });
-    return `cloudinary:${result.resource_type}/${result.public_id}`;
+    return { path: `cloudinary:${result.resource_type}/${result.public_id}` };
   } catch (err) {
     logger.error({ err }, "Cloudinary upload failed");
-    return null;
+    return { error: `Cloudinary: ${err instanceof Error ? err.message : "upload failed"}` };
   }
 }
 
@@ -99,7 +99,10 @@ async function uploadToCloudinary(buffer: Buffer, safeName: string): Promise<str
  * wipe local disk on redeploy or restart, which is exactly how a previously
  * "successfully" uploaded book disappeared. If neither backend is
  * configured, or the appropriate one fails, this throws instead of quietly
- * writing somewhere that won't survive the next deploy.
+ * writing somewhere that won't survive the next deploy — and includes the
+ * real reason from each backend it tried, instead of a generic "both
+ * failed" that hides whether it was a bad key, a missing bucket, or
+ * something else.
  */
 export async function uploadFile(buffer: Buffer, originalName: string, mimeType: string, folder = "misc"): Promise<string> {
   const ext = path.extname(originalName) || "";
@@ -110,15 +113,57 @@ export async function uploadFile(buffer: Buffer, originalName: string, mimeType:
   const fallback = preferCloudinary ? uploadToSupabase : uploadToCloudinary;
 
   const primaryResult = await primary(buffer, safeName, mimeType);
-  if (primaryResult) return primaryResult;
+  if ("path" in primaryResult) return primaryResult.path;
 
   const fallbackResult = await fallback(buffer, safeName, mimeType);
-  if (fallbackResult) return fallbackResult;
+  if ("path" in fallbackResult) return fallbackResult.path;
 
   throw new Error(
-    "Couldn't save the uploaded file — no storage backend is configured (or both failed). " +
-    "Set Supabase and/or Cloudinary credentials in Admin \u2192 Platform settings \u2192 Storage.",
+    `Couldn't save the uploaded file — both storage backends failed. ${primaryResult.error} ${fallbackResult.error}`,
   );
+}
+
+/**
+ * Real connectivity check for Admin -> Platform settings -> Storage's "Test
+ * connection" button — unlike the presence-only SUPABASE_CONFIGURED /
+ * CLOUDINARY_CONFIGURED flags returned by GET /admin/settings (which only
+ * check that the fields are non-empty, not that they actually work), this
+ * makes a real, cheap API call to each provider and reports the real
+ * failure reason if one is misconfigured. Deliberately avoids
+ * upload+delete (which would leave test artifacts behind on partial
+ * failure, e.g. an upload that succeeds but a delete without permission) in
+ * favor of read-only calls that still require valid, working credentials.
+ */
+export async function testSupabaseConnection(): Promise<{ ok: boolean; error?: string; bucket?: string }> {
+  const config = await resolveSupabaseConfig();
+  if (!config) return { ok: false, error: "Not configured — set a Supabase URL and service role key first." };
+  try {
+    const { createClient } = await import("@supabase/supabase-js");
+    const supabase = createClient(config.url, config.key);
+    const { data, error } = await supabase.storage.getBucket(config.bucket);
+    if (error) throw error;
+    if (!data) return { ok: false, error: `Connected, but bucket "${config.bucket}" doesn't exist. Create it in Supabase Storage first and set it to public.` };
+    if (!data.public) return { ok: false, error: `Bucket "${config.bucket}" exists but isn't public — uploaded files won't be viewable. Set it to public in Supabase Storage.` };
+    return { ok: true, bucket: config.bucket };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Could not reach Supabase." };
+  }
+}
+
+export async function testCloudinaryConnection(): Promise<{ ok: boolean; error?: string }> {
+  const config = await resolveCloudinaryConfig();
+  if (!config) return { ok: false, error: "Not configured — set a cloud name, API key, and API secret first." };
+  try {
+    const { v2: cloudinary } = await import("cloudinary");
+    cloudinary.config({ cloud_name: config.cloudName, api_key: config.apiKey, api_secret: config.apiSecret });
+    await cloudinary.api.ping();
+    return { ok: true };
+  } catch (err) {
+    const message = err && typeof err === "object" && "error" in err
+      ? String((err as { error?: { message?: string } }).error?.message ?? "Could not reach Cloudinary.")
+      : (err instanceof Error ? err.message : "Could not reach Cloudinary.");
+    return { ok: false, error: message };
+  }
 }
 
 /** Resolves a stored path (from uploadFile) into a URL the frontend can fetch. */

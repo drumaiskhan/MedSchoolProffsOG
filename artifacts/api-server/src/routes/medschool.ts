@@ -71,6 +71,7 @@ import {
 import { requireAuth, requireAdmin, requireActiveMembership, isAdminRole } from "../middlewares/auth";
 import { getStudentTargeting, getVisibleModuleIds, describeModuleTargeting } from "../lib/contentVisibility";
 import { resolveFileUrl } from "../lib/storage";
+import { dbErrorMessage } from "../lib/dbErrors";
 import { sendEmail, membershipActivatedEmailHtml } from "../lib/email";
 
 const router: IRouter = Router();
@@ -782,12 +783,19 @@ router.delete("/admin/mcqs/bulk", requireAdmin, async (req, res): Promise<void> 
 router.post("/admin/mcqs/bulk", requireAdmin, async (req, res): Promise<void> => {
   const parsed = z.object({ mcqs: z.array(CreateMcqBody).min(1) }).safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
-  const rows = await db.insert(mcqsTable).values(parsed.data.mcqs.map((mcq) => ({
-    ...mcq, options: mcq.options, status: "draft" as const,
-    explanationStatus: (mcq.explanation?.trim() ? "APPROVED" : "PENDING") as "APPROVED" | "PENDING",
-  }))).returning();
-  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MCQ_BULK_CREATED", entity: "mcq", entityId: 0, metadata: JSON.stringify({ count: rows.length }) });
-  res.status(201).json({ ok: true, created: rows.length, mcqs: rows.map((mcq) => ({ ...mcq, module: "", subject: "", topic: "" })) });
+  try {
+    const rows = await db.insert(mcqsTable).values(parsed.data.mcqs.map((mcq) => ({
+      ...mcq, options: mcq.options, status: "draft" as const,
+      explanationStatus: (mcq.explanation?.trim() ? "APPROVED" : "PENDING") as "APPROVED" | "PENDING",
+    }))).returning();
+    await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MCQ_BULK_CREATED", entity: "mcq", entityId: 0, metadata: JSON.stringify({ count: rows.length }) });
+    res.status(201).json({ ok: true, created: rows.length, mcqs: rows.map((mcq) => ({ ...mcq, module: "", subject: "", topic: "" })) });
+  } catch (err) {
+    // See dbErrorMessage() — without this, a failed batch insert here
+    // surfaced the raw SQL + every bound parameter instead of the actual
+    // Postgres error.
+    res.status(422).json({ error: `Could not save these questions: ${dbErrorMessage(err, "unknown database error")}` });
+  }
 });
 
 router.get("/flashcards", requireAuth, requireActiveMembership, async (req, res): Promise<void> => {

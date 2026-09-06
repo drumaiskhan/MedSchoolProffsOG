@@ -3,7 +3,7 @@ import { z } from "zod";
 import { auditLogsTable, db } from "@workspace/db";
 import { getAllSettings, setSetting } from "../lib/settings";
 import { requireAdmin } from "../middlewares/auth";
-import { resolveFileUrl } from "../lib/storage";
+import { resolveFileUrl, testSupabaseConnection, testCloudinaryConnection } from "../lib/storage";
 
 const router: IRouter = Router();
 
@@ -178,6 +178,18 @@ router.post("/admin/settings/rotate-admin-code", requireAdmin, async (req, res):
   await setSetting("ADMIN_SIGNUP_CODE", code);
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "ADMIN_CODE_ROTATED", entity: "platform_settings" });
   res.json({ ADMIN_SIGNUP_CODE: code });
+});
+
+// Real connectivity check, as opposed to the presence-only
+// SUPABASE_CONFIGURED / CLOUDINARY_CONFIGURED flags on GET /admin/settings
+// above (which only mean "the fields aren't blank," not "this actually
+// works" — the source of the falsely-green "Configured" badge). Makes one
+// cheap, read-only call to each provider using whatever is currently saved
+// and reports the real reason if something's wrong (bad key, wrong bucket
+// name, bucket not public, etc.) instead of a generic failure.
+router.post("/admin/settings/test-storage", requireAdmin, async (_req, res): Promise<void> => {
+  const [supabase, cloudinary] = await Promise.all([testSupabaseConnection(), testCloudinaryConnection()]);
+  res.json({ supabase, cloudinary });
 });
 
 export default router;
