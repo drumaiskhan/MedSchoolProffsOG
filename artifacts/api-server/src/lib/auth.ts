@@ -51,18 +51,19 @@ export function hashToken(raw: string): string {
 
 export const SESSION_COOKIE_NAME = "medschool_session";
 
-// Same-origin deployments (frontend + backend on one domain, e.g. both on
-// Render/Railway behind one host) work fine with the default "lax" cookie.
-// Split deployments (e.g. frontend on Vercel/Netlify, backend on
-// Railway/Render — different domains) need SameSite=None + Secure for the
-// browser to send the cookie on cross-site requests. Set
-// COOKIE_CROSS_SITE=true in that case.
-const crossSite = process.env.COOKIE_CROSS_SITE === "true";
-
+// This deployment is always split-domain: the frontend(s) run on Netlify
+// and the API server runs on a separate host (Railway/Render). Cross-site
+// fetch/XHR calls only carry cookies when they're set as
+// SameSite=None; Secure — SameSite=Lax (the old default here) is silently
+// dropped on JS-initiated cross-origin requests, which caused login to
+// succeed (200) but the very next /me check to come back 401 and bounce
+// the user straight back to /login. Hardcoded to "none"/secure rather than
+// gated behind an env var so this can't regress by forgetting to set
+// COOKIE_CROSS_SITE=true on the API host.
 export const sessionCookieOptions = {
   httpOnly: true,
-  sameSite: (crossSite ? "none" : "lax") as "none" | "lax",
-  secure: crossSite || process.env.NODE_ENV === "production",
+  sameSite: "none" as const,
+  secure: true,
   maxAge: 7 * 24 * 60 * 60 * 1000,
   path: "/",
 };
