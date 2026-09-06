@@ -3,6 +3,10 @@ export interface ParsedMcqCandidate {
   options: string[];
   correctAnswer: string | null;
   explanation: string | null;
+  // Index-aligned with `options` — why each individual option is right or
+  // wrong (not just why the correct one is right). null/empty entries mean
+  // "no specific explanation was found for this option in the source file."
+  optionExplanations: (string | null)[] | null;
   reference: string | null;
   needsReview: boolean;
   rawBlock?: string;
@@ -79,10 +83,15 @@ export function extractMcqsFromText(rawText: string, patterns: ImportPatternSet 
 
   const lines = rawText.replace(/\r\n/g, "\n").split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
 
-  type Block = { questionLines: string[]; optionLines: { key: string; text: string; inlineCorrect: boolean }[]; answerKey: string | null; explanationLines: string[]; raw: string[] };
+  type Block = { questionLines: string[]; optionLines: { key: string; text: string; inlineCorrect: boolean; explanationLines: string[] }[]; answerKey: string | null; explanationLines: string[]; raw: string[] };
   const blocks: Block[] = [];
   let current: Block | null = null;
-  let mode: "question" | "option" | "explanation" = "question";
+  // "option-explanation" is a distinct mode from "explanation" — it means
+  // an explanation line was found directly attached to the option just
+  // above it (per-option format), so continuation lines should keep
+  // appending to THAT option's explanation rather than to a whole-block
+  // explanation or the option's own text.
+  let mode: "question" | "option" | "option-explanation" | "explanation" = "question";
 
   for (const line of lines) {
     const qMatch = line.match(questionRe);
@@ -102,7 +111,7 @@ export function extractMcqsFromText(rawText: string, patterns: ImportPatternSet 
     if (optMatch) {
       const inlineCorrect = hasInlineCorrectMarker(line);
       const text = stripInlineCorrectMarker(optMatch[2]);
-      current.optionLines.push({ key: optMatch[1].toUpperCase(), text, inlineCorrect });
+      current.optionLines.push({ key: optMatch[1].toUpperCase(), text, inlineCorrect, explanationLines: [] });
       if (inlineCorrect) current.answerKey = optMatch[1].toUpperCase();
       mode = "option";
       continue;
@@ -114,7 +123,7 @@ export function extractMcqsFromText(rawText: string, patterns: ImportPatternSet 
       const normalized = /^t/i.test(tfMatch[1]) ? "True" : "False";
       const key = normalized === "True" ? "A" : "B";
       const inlineCorrect = hasInlineCorrectMarker(line);
-      current.optionLines.push({ key, text: normalized, inlineCorrect });
+      current.optionLines.push({ key, text: normalized, inlineCorrect, explanationLines: [] });
       if (inlineCorrect) current.answerKey = key;
       mode = "option";
       continue;
@@ -148,25 +157,50 @@ export function extractMcqsFromText(rawText: string, patterns: ImportPatternSet 
     }
     const expMatch = line.match(explanationRe);
     if (expMatch) {
-      current.explanationLines.push(expMatch[1]);
-      mode = "explanation";
+      // An explanation line that directly follows an option (before the
+      // next option, an answer line, or the next question) is that
+      // option's own explanation — a per-option format, e.g.:
+      //   A) Some option
+      //   Explanation: why this is right/wrong
+      //   B) Next option
+      //   Explanation: why THIS one is right/wrong
+      // Otherwise (appearing after "Answer: X", or with no options seen
+      // yet) it's the whole-question explanation, as before.
+      if (mode === "option" && current.optionLines.length > 0) {
+        current.optionLines[current.optionLines.length - 1].explanationLines.push(expMatch[1]);
+        mode = "option-explanation";
+      } else {
+        current.explanationLines.push(expMatch[1]);
+        mode = "explanation";
+      }
       continue;
     }
     // continuation line — append to whichever section we're in
     if (mode === "question" && current.optionLines.length === 0) current.questionLines.push(line);
     else if (mode === "option" && current.optionLines.length > 0) current.optionLines[current.optionLines.length - 1].text += " " + line;
+    else if (mode === "option-explanation" && current.optionLines.length > 0) current.optionLines[current.optionLines.length - 1].explanationLines.push(line);
     else if (mode === "explanation") current.explanationLines.push(line);
   }
   if (current) blocks.push(current);
 
   return blocks.map((block) => {
+    const sortedOptions = block.optionLines.sort((a, b) => a.key.localeCompare(b.key));
     const question = block.questionLines.join(" ").trim();
-    const options = block.optionLines.sort((a, b) => a.key.localeCompare(b.key)).map((o) => o.text.trim());
-    const answerOption = block.answerKey ? block.optionLines.find((o) => o.key === block.answerKey) : undefined;
+    const options = sortedOptions.map((o) => o.text.trim());
+    const optionExplanationTexts = sortedOptions.map((o) => o.explanationLines.join(" ").trim() || null);
+    const hasAnyOptionExplanation = optionExplanationTexts.some((e) => e != null);
+    const answerOption = block.answerKey ? sortedOptions.find((o) => o.key === block.answerKey) : undefined;
     const correctAnswer = answerOption ? answerOption.text.trim() : null;
-    const explanation = block.explanationLines.join(" ").trim() || null;
+    // Whole-question `explanation` prefers an explicit block-level
+    // explanation (after "Answer: X"); falls back to the correct option's
+    // own per-option explanation if that's the only kind the file had, so
+    // existing UI that only reads the single `explanation` field still
+    // shows something sensible.
+    const blockExplanation = block.explanationLines.join(" ").trim() || null;
+    const correctOptionExplanation = answerOption ? optionExplanationTexts[sortedOptions.indexOf(answerOption)] : null;
+    const explanation = blockExplanation || correctOptionExplanation;
     const needsReview = !question || options.length < 2 || !correctAnswer;
-    return { question, options, correctAnswer, explanation, reference: null, needsReview, rawBlock: block.raw.join("\n") };
+    return { question, options, correctAnswer, explanation, optionExplanations: hasAnyOptionExplanation ? optionExplanationTexts : null, reference: null, needsReview, rawBlock: block.raw.join("\n") };
   }).filter((c) => c.question.length > 0);
 }
 
@@ -179,6 +213,14 @@ const HEADER_ALIASES: Record<string, string[]> = {
   optionE: ["optione", "option e", "e", "choice e", "opt e"],
   answer: ["answer", "correct answer", "correct", "key", "ans"],
   explanation: ["explanation", "rationale", "explain", "reason"],
+  // Per-option explanation columns — "why is A right/wrong", "why is B
+  // right/wrong", etc. Distinct from the single whole-question
+  // "explanation" column above.
+  explanationA: ["explanationa", "explanation a", "why a", "rationale a", "explain a", "reason a"],
+  explanationB: ["explanationb", "explanation b", "why b", "rationale b", "explain b", "reason b"],
+  explanationC: ["explanationc", "explanation c", "why c", "rationale c", "explain c", "reason c"],
+  explanationD: ["explanationd", "explanation d", "why d", "rationale d", "explain d", "reason d"],
+  explanationE: ["explanatione", "explanation e", "why e", "rationale e", "explain e", "reason e"],
   reference: ["reference", "ref", "source"],
 };
 
@@ -204,6 +246,8 @@ export function extractMcqsFromRows(rows: string[][]): ParsedMcqCandidate[] | nu
   if (questionCol === -1 || optionCols.every((c) => c === -1)) return null;
   const answerCol = headerRow.indexOf("answer");
   const explanationCol = headerRow.indexOf("explanation");
+  const explanationCols = ["explanationA", "explanationB", "explanationC", "explanationD", "explanationE"].map((k) => headerRow.indexOf(k));
+  const hasPerOptionExplanations = explanationCols.some((c) => c >= 0);
   const referenceCol = headerRow.indexOf("reference");
 
   const candidates: ParsedMcqCandidate[] = [];
@@ -213,23 +257,32 @@ export function extractMcqsFromRows(rows: string[][]): ParsedMcqCandidate[] | nu
     if (!question) continue;
     const options = optionCols.map((c) => (c >= 0 ? String(row[c] ?? "").trim() : "")).filter((o) => o.length > 0);
     let correctAnswer: string | null = null;
+    let correctIndex = -1;
     if (answerCol >= 0) {
       const rawAnswer = String(row[answerCol] ?? "").trim();
       if (/^[A-Ea-e]$/.test(rawAnswer)) {
-        const idx = rawAnswer.toUpperCase().charCodeAt(0) - 65;
-        correctAnswer = options[idx] ?? null;
+        correctIndex = rawAnswer.toUpperCase().charCodeAt(0) - 65;
+        correctAnswer = options[correctIndex] ?? null;
       } else if (/^[1-5]$/.test(rawAnswer)) {
-        const idx = Number(rawAnswer) - 1;
-        correctAnswer = options[idx] ?? null;
+        correctIndex = Number(rawAnswer) - 1;
+        correctAnswer = options[correctIndex] ?? null;
       } else if (rawAnswer) {
         // Full text answer already, or matches an option case-insensitively.
-        const byText = options.find((o) => o.toLowerCase() === rawAnswer.toLowerCase());
-        correctAnswer = byText ?? rawAnswer;
+        const byIndex = options.findIndex((o) => o.toLowerCase() === rawAnswer.toLowerCase());
+        correctIndex = byIndex;
+        correctAnswer = byIndex >= 0 ? options[byIndex] : rawAnswer;
       }
     }
-    const explanation = explanationCol >= 0 ? String(row[explanationCol] ?? "").trim() || null : null;
+    // optionCols and explanationCols share the same A-E index order, but
+    // optionCols may have gaps (a file with only A-D, no E) — filter
+    // explanations down to the same positions that actually produced an
+    // option above, so indices stay aligned with the filtered `options`.
+    const optionExplanations = hasPerOptionExplanations
+      ? optionCols.map((c, idx) => (c >= 0 ? (explanationCols[idx] >= 0 ? String(row[explanationCols[idx]] ?? "").trim() || null : null) : undefined)).filter((v) => v !== undefined) as (string | null)[]
+      : null;
+    const explanation = explanationCol >= 0 ? String(row[explanationCol] ?? "").trim() || null : (optionExplanations && correctIndex >= 0 ? optionExplanations[correctIndex] : null);
     const reference = referenceCol >= 0 ? String(row[referenceCol] ?? "").trim() || null : null;
-    candidates.push({ question, options, correctAnswer, explanation, reference, needsReview: options.length < 2 || !correctAnswer });
+    candidates.push({ question, options, correctAnswer, explanation, optionExplanations: optionExplanations && optionExplanations.some((e) => e != null) ? optionExplanations : null, reference, needsReview: options.length < 2 || !correctAnswer });
   }
   return candidates;
 }

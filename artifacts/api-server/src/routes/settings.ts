@@ -66,6 +66,21 @@ const EDITABLE_KEYS = [
   "AI_API_KEY",
   "AI_MODEL", // optional override; each provider has a sensible default if left blank
   "AI_BASE_URL", // required only when AI_PROVIDER = "custom" — an OpenAI-compatible /chat/completions base URL
+  // Persistent file storage (Supabase Storage) — same "configurable from the
+  // admin panel, no server env-var access needed" pattern as the AI keys
+  // above. Without these set (here or as env vars), uploads fall back to
+  // this server's local disk, which is wiped on redeploy/restart on most
+  // hosts (Netlify included) — see lib/storage.ts. SUPABASE_SERVICE_ROLE_KEY
+  // is masked on the way out the same way AI_API_KEY is.
+  "SUPABASE_URL",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "SUPABASE_STORAGE_BUCKET", // optional — defaults to "medschool-uploads"
+  // Cloudinary — used for large files (books/resources, or anything over
+  // ~5MB regardless of folder). Same masked-secret pattern as
+  // SUPABASE_SERVICE_ROLE_KEY for CLOUDINARY_API_SECRET.
+  "CLOUDINARY_CLOUD_NAME",
+  "CLOUDINARY_API_KEY",
+  "CLOUDINARY_API_SECRET",
 ] as const;
 
 // Subset visible to students at signup — everything else in admin settings
@@ -99,13 +114,21 @@ function withResolvedMedia(view: Record<string, string>): Record<string, string>
   return { ...view, SITE_FAVICON_URL: resolveFileUrl(view.SITE_FAVICON_PATH) ?? "", PAYMENT_QR_CODE_URL: resolveFileUrl(view.PAYMENT_QR_CODE_PATH) ?? "" };
 }
 
-// AI_API_KEY is a secret — never send the real value back down once saved.
-// The admin UI shows AI_API_KEY_SET/AI_API_KEY_MASKED and only sends a new
-// AI_API_KEY in the PATCH body when the admin is actually changing it.
-function withAiKeyMasked(view: Record<string, string>): Record<string, string> {
-  const raw = view.AI_API_KEY ?? "";
-  const { AI_API_KEY: _drop, ...rest } = view;
-  return { ...rest, AI_API_KEY_SET: raw ? "true" : "false", AI_API_KEY_MASKED: raw ? `${"•".repeat(Math.max(0, raw.length - 4))}${raw.slice(-4)}` : "" };
+// Secrets — never sent back down in full once saved. The admin UI shows a
+// masked preview per key and only sends a new value in the PATCH body when
+// the admin is actually changing it (see the blank-value skip in the PATCH
+// handler below).
+const SECRET_KEYS = ["AI_API_KEY", "SUPABASE_SERVICE_ROLE_KEY", "CLOUDINARY_API_SECRET"] as const;
+function withSecretsMasked(view: Record<string, string>): Record<string, string> {
+  const masked: Record<string, string> = {};
+  const rest = { ...view };
+  for (const key of SECRET_KEYS) {
+    const raw = rest[key] ?? "";
+    delete rest[key];
+    masked[`${key}_SET`] = raw ? "true" : "false";
+    masked[`${key}_MASKED`] = raw ? `${"•".repeat(Math.max(0, raw.length - 4))}${raw.slice(-4)}` : "";
+  }
+  return { ...rest, ...masked };
 }
 
 router.get("/payment-details", async (_req, res): Promise<void> => {
@@ -123,14 +146,14 @@ router.get("/payment-details", async (_req, res): Promise<void> => {
 router.get("/admin/settings", requireAdmin, async (_req, res): Promise<void> => {
   const settings = await getAllSettings();
   const view = Object.fromEntries(EDITABLE_KEYS.map((key) => [key, settings[key] ?? ""]));
-  // Not an editable setting — tells the admin UI whether uploads (favicon,
-  // payment QR, payment proofs, books, team photos) are going to durable
-  // object storage or to this server's local disk. Local disk doesn't
-  // survive redeploys/restarts on most hosts (Vercel, Railway, Render
-  // without a persistent volume), which is why an upload can appear to
-  // succeed and then show a broken image moments later — see storage.ts.
-  const storageBackend = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY ? "supabase" : "local";
-  res.json({ ...withAiKeyMasked(withResolvedMedia(view)), STORAGE_BACKEND: storageBackend });
+  // Not an editable setting — tells the admin UI which storage backends are
+  // actually configured and reachable for uploads, since there's no local-
+  // disk fallback anymore (see storage.ts) — an upload throws outright if
+  // neither is set. Checks the DB-backed settings first (the ones the admin
+  // can set right here) before falling back to env vars.
+  const supabaseConfigured = !!((view.SUPABASE_URL && view.SUPABASE_SERVICE_ROLE_KEY) || (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY));
+  const cloudinaryConfigured = !!((view.CLOUDINARY_CLOUD_NAME && view.CLOUDINARY_API_KEY && view.CLOUDINARY_API_SECRET) || (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET));
+  res.json({ ...withSecretsMasked(withResolvedMedia(view)), SUPABASE_CONFIGURED: String(supabaseConfigured), CLOUDINARY_CONFIGURED: String(cloudinaryConfigured) });
 });
 
 const SettingsBody = z.object(Object.fromEntries(EDITABLE_KEYS.map((key) => [key, z.string().max(4000).optional()])) as Record<(typeof EDITABLE_KEYS)[number], z.ZodOptional<z.ZodString>>);
@@ -140,14 +163,14 @@ router.patch("/admin/settings", requireAdmin, async (req, res): Promise<void> =>
   if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message }); return; }
   for (const [key, value] of Object.entries(parsed.data)) {
     if (value === undefined) continue;
-    // AI_API_KEY comes back masked from GET — an empty string here means
+    // Secret fields come back masked from GET — an empty string here means
     // "the admin didn't touch this field," not "clear the key."
-    if (key === "AI_API_KEY" && value === "") continue;
+    if ((SECRET_KEYS as readonly string[]).includes(key) && value === "") continue;
     await setSetting(key, value);
   }
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "SETTINGS_UPDATED", entity: "platform_settings", metadata: JSON.stringify(Object.keys(parsed.data)) });
   const settings = await getAllSettings();
-  res.json(withAiKeyMasked(withResolvedMedia(Object.fromEntries(EDITABLE_KEYS.map((key) => [key, settings[key] ?? ""])))));
+  res.json(withSecretsMasked(withResolvedMedia(Object.fromEntries(EDITABLE_KEYS.map((key) => [key, settings[key] ?? ""])))));
 });
 
 router.post("/admin/settings/rotate-admin-code", requireAdmin, async (req, res): Promise<void> => {

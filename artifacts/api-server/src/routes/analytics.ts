@@ -186,21 +186,36 @@ router.get("/leaderboard", requireAuth, async (req, res): Promise<void> => {
     })
     .from(practiceAttemptsTable)
     .where(gte(practiceAttemptsTable.createdAt, since))
-    .groupBy(practiceAttemptsTable.userId)
-    .orderBy(desc(sql`sum(${practiceAttemptsTable.correctCount})`));
+    .groupBy(practiceAttemptsTable.userId);
 
-  const userIds = rows.map((r) => r.userId);
+  // Points formula (section 4 fix notes): ranking by raw correct-answer
+  // count rewards pure volume — a student who blitzes through 500 easy
+  // questions outranks one with excellent accuracy on fewer, harder ones.
+  // 10 points per correct answer, minus 3 per wrong answer (floored at 0)
+  // rewards genuine mastery over guessing/volume-farming, since spamming
+  // wrong answers actively costs points instead of just not helping.
+  // These weights are a reasonable default, not a spec — easy to retune.
+  const ranked = rows.map((row) => {
+    const correct = Number(row.totalCorrect ?? 0);
+    const total = Number(row.totalQuestions ?? 0);
+    const wrong = Math.max(0, total - correct);
+    const points = Math.max(0, correct * 10 - wrong * 3);
+    return { ...row, points, correct, total };
+  }).sort((a, b) => b.points - a.points);
+
+  const userIds = ranked.map((r) => r.userId);
   const users = userIds.length ? await db.select().from(usersTable) : [];
   const userMap = new Map(users.filter((u) => userIds.includes(u.id)).map((u) => [u.id, u]));
 
-  res.json(rows.map((row, index) => ({
+  res.json(ranked.map((row, index) => ({
     rank: index + 1,
     userId: row.userId,
     name: userMap.get(row.userId)?.name ?? "Student",
     sessions: Number(row.sessions),
-    questionsAnswered: Number(row.totalQuestions ?? 0),
-    correct: Number(row.totalCorrect ?? 0),
-    accuracy: row.totalQuestions ? Number(((Number(row.totalCorrect ?? 0) / Number(row.totalQuestions)) * 100).toFixed(1)) : 0,
+    questionsAnswered: row.total,
+    correct: row.correct,
+    points: row.points,
+    accuracy: row.total ? Number(((row.correct / row.total) * 100).toFixed(1)) : 0,
     isYou: row.userId === req.user!.id,
   })));
 });

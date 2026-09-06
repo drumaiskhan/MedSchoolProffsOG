@@ -118,6 +118,7 @@ const CommitBody = z.object({
     options: z.array(z.string().min(1)).min(2).max(6),
     correctAnswer: z.string().nullable().optional(),
     explanation: z.string().nullable().optional(),
+    optionExplanations: z.array(z.string().nullable()).nullable().optional(),
     reference: z.string().nullable().optional(),
   })).min(1).max(2000),
 }).refine(
@@ -137,6 +138,7 @@ router.post("/admin/mcq-import/commit", requireAdmin, async (req, res): Promise<
         options: mcq.options,
         correctAnswer: mcq.correctAnswer ?? null,
         explanation: mcq.explanation ?? null,
+        optionExplanations: mcq.optionExplanations ?? null,
         explanationStatus: mcq.explanation?.trim() ? "APPROVED" as const : "PENDING" as const,
         reference: mcq.reference ?? null,
         status: data.status,

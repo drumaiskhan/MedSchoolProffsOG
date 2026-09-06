@@ -466,6 +466,17 @@ CREATE TABLE IF NOT EXISTS med_saved_sessions (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS med_ai_visualizer_logs (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  prompt TEXT NOT NULL,
+  status TEXT NOT NULL,
+  visualization_type TEXT,
+  error_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS med_flagged_mcqs (
   id SERIAL PRIMARY KEY,
   user_id INTEGER NOT NULL,

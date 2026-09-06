@@ -106,8 +106,10 @@ this project's Replit origins). Use WSL or Git Bash rather than PowerShell/cmd.
    `medschoolproffs-web` service's `VITE_API_BASE_URL` env var, then
    redeploy the frontend (env vars are baked in at build time for a Vite app).
 4. `JWT_SECRET` and `DATABASE_URL` are wired automatically by the blueprint.
-   Set the SMTP/Supabase vars from `.env.example` if you want real email and
-   persistent file storage (local disk doesn't survive redeploys on Render).
+   Set the SMTP/Supabase/Cloudinary vars from `.env.example` for real email
+   and persistent file storage — required, not optional: there's no local-
+   disk fallback (Render wipes local disk on every redeploy, which is why an
+   upload could previously appear to succeed and vanish later).
 
 ### Railway
 
@@ -179,7 +181,8 @@ See `.env.example` for the full list with comments. The essentials:
 | `VITE_API_BASE_URL` | Split deploys only | Set on the frontend build |
 | `COOKIE_CROSS_SITE` | Split deploys only | Set on the backend |
 | `SMTP_*` | No | Without it, emails log to the console instead of sending |
-| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Recommended for production | Without it, uploads go to local disk, which most platforms wipe on redeploy |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | **Yes** | No local-disk fallback exists — uploads throw an error without this |
+| `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | **Yes** | Used for large files (books/resources, or anything over ~5MB) |
 
 ## What I could and couldn't verify
 

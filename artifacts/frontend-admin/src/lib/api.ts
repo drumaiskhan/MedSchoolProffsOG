@@ -88,6 +88,7 @@ export interface PlatformSettings {
   PLATFORM_DESCRIPTION: string; SOCIAL_FACEBOOK: string; SOCIAL_YOUTUBE: string; SOCIAL_LINKEDIN: string; SOCIAL_INSTAGRAM: string;
   CONTACT_EMAIL: string; CONTACT_LOCATION: string; SUPPORT_HOURS: string; COPYRIGHT_NOTICE: string; FEATURES_LIST: string; QUICK_LINKS: string;
   AI_PROVIDER: string; AI_API_KEY_SET: string; AI_API_KEY_MASKED: string; AI_API_KEY: string;
+  SUPABASE_URL: string; SUPABASE_SERVICE_ROLE_KEY: string; SUPABASE_SERVICE_ROLE_KEY_SET: string; SUPABASE_SERVICE_ROLE_KEY_MASKED: string; SUPABASE_STORAGE_BUCKET: string;
 }
 
 export interface BankAccount { id: string; label: string; accountHolder: string; bankName: string; accountNumber: string; ifsc: string; branch: string; isPrimary: boolean }
@@ -106,7 +107,7 @@ export interface PaymentRow { id: number; studentName: string; institution: stri
 export const STUDENT_STATUSES = ['UNVERIFIED', 'VERIFIED', 'PAYMENT_PENDING_REVIEW', 'ACTIVE', 'EXPIRED', 'SUSPENDED', 'REJECTED', 'DELETED'] as const;
 
 export interface McqImportProfile { id: number; name: string; questionPattern: string; optionPattern: string; answerPattern: string; explanationPattern: string; isDefault: boolean }
-export interface McqCandidate { question: string; options: string[]; correctAnswer: string | null; explanation: string | null; reference: string | null; needsReview: boolean; rawBlock?: string }
+export interface McqCandidate { question: string; options: string[]; correctAnswer: string | null; explanation: string | null; optionExplanations: (string | null)[] | null; reference: string | null; needsReview: boolean; rawBlock?: string }
 export interface McqParseResult { fileName: string; totalFound: number; needsReviewCount: number; candidates: McqCandidate[] }
 
 export const DEFAULT_IMPORT_PATTERNS = {
@@ -159,7 +160,7 @@ export interface AdminExam extends Exam { questionCount: number; attemptCount: n
 export interface StudentExam extends Exam { attemptsUsed: number; canStart: boolean; inProgressAttemptId: number | null; windowStatus: 'upcoming' | 'open' | 'closed' }
 export interface ExamQuestion { id: number; question: string; options: string[]; difficulty: string }
 export interface ExamStartResponse { attemptId: number; startedAt: string; durationMinutes: number; questions: ExamQuestion[] }
-export interface ExamAttemptRow { id: number; examId: number; userId: number; studentName: string; attemptNumber: number; startedAt: string; submittedAt: string | null; totalQuestions: number; correctCount: number; wrongCount: number; unansweredCount: number; score: number; percentage: number; passed: boolean | null; status: string; resultsReleasedAt: string | null }
+export interface ExamAttemptRow { id: number; examId: number; userId: number; studentName: string; institution: string; attemptNumber: number; startedAt: string; submittedAt: string | null; totalQuestions: number; correctCount: number; wrongCount: number; unansweredCount: number; score: number; percentage: number; passed: boolean | null; status: string; resultsReleasedAt: string | null }
 export interface ExamResult {
   released: boolean; status?: string; totalQuestions?: number; correctCount?: number; wrongCount?: number; unansweredCount?: number;
   score?: number | null; percentage?: number | null; passed?: boolean | null;
@@ -223,7 +224,7 @@ export const membershipPlansAdminApi = {
 };
 
 export interface AdminMcqRow {
-  id: number; question: string; options: string[]; correctAnswer: string | null; explanation: string | null;
+  id: number; question: string; options: string[]; correctAnswer: string | null; explanation: string | null; optionExplanations: (string | null)[] | null;
   explanationStatus: ExplanationStatus; reference: string | null; difficulty: string; tags: string[]; imagePath: string | null;
   status: string; source: string; moduleId: number | null; subjectId: number | null; topicId: number | null; pastPaperId: number | null;
   createdAt: string; updatedAt: string;
@@ -231,14 +232,14 @@ export interface AdminMcqRow {
 export const mcqAdminApi = {
   remove: (id: number) => request<{ ok: true }>(`/mcqs/${id}`, { method: 'DELETE' }),
   list: () => request<AdminMcqRow[]>('/admin/mcqs'),
-  update: (id: number, body: Partial<{ question: string; options: string[]; correctAnswer: string | null; explanation: string | null; reference: string | null; difficulty: string; status: string; moduleId: number; subjectId: number; topicId: number }>) =>
+  update: (id: number, body: Partial<{ question: string; options: string[]; correctAnswer: string | null; explanation: string | null; optionExplanations: (string | null)[] | null; reference: string | null; difficulty: string; status: string; moduleId: number; subjectId: number; topicId: number }>) =>
     request<AdminMcqRow>(`/mcqs/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   bulkRemove: (body: { ids: number[] } | { all: true; filters?: { search?: string; moduleId?: number; subjectId?: number; topicId?: number; difficulty?: string } }) =>
     request<{ ok: true; deleted: number }>('/admin/mcqs/bulk', { method: 'DELETE', body: JSON.stringify(body) }),
   bulkCreate: (mcqs: Array<Partial<AdminMcqRow> & { question: string; options: string[] }>) =>
     request<{ ok: true; created: number; mcqs: AdminMcqRow[] }>('/admin/mcqs/bulk', { method: 'POST', body: JSON.stringify({ mcqs }) }),
   generateAi: (topicId: number, count: number) =>
-    request<{ drafts: Array<{ question: string; options: string[]; correctAnswer: string; explanation: string }>; topicLabel: string }>('/admin/mcqs/generate', { method: 'POST', body: JSON.stringify({ topicId, count }) }),
+    request<{ drafts: Array<{ question: string; options: string[]; correctAnswer: string; explanation: string; optionExplanations?: (string | null)[] }>; topicLabel: string }>('/admin/mcqs/generate', { method: 'POST', body: JSON.stringify({ topicId, count }) }),
 };
 
 export const mcqImportApi = {
@@ -434,4 +435,23 @@ export const analyticsApi = {
   leaderboard: (range = '30d') => request<LeaderboardRow[]>(`/leaderboard?range=${range}`),
   submitSession: (body: { moduleId?: number; subjectId?: number; topicId?: number; mode?: 'timed' | 'untimed'; answers: { mcqId: number; selectedAnswer: string | null }[] }) =>
     request<{ id: number; scorePercent: number; correctCount: number; totalQuestions: number }>('/practice-sessions', { method: 'POST', body: JSON.stringify(body) }),
+};
+
+// ---------------------------------------------------------------------------
+// AI Visualizer activity log (admin, read-only) — students generate
+// visualizations from frontend-student; this app only ever lists what they
+// generated for moderation/visibility purposes.
+// ---------------------------------------------------------------------------
+
+export interface AiVisualizerLogEntry {
+  id: number;
+  prompt: string;
+  status: 'success' | 'error';
+  visualizationType: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  student: { name: string; email: string };
+}
+export const aiVisualizerAdminApi = {
+  list: (limit = 100) => request<AiVisualizerLogEntry[]>(`/admin/ai-visualizer-logs?limit=${limit}`),
 };

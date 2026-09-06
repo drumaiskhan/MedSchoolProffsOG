@@ -145,11 +145,11 @@ export interface AdminExam extends Exam { questionCount: number; attemptCount: n
 export interface StudentExam extends Exam { attemptsUsed: number; canStart: boolean; inProgressAttemptId: number | null; windowStatus: 'upcoming' | 'open' | 'closed' }
 export interface ExamQuestion { id: number; question: string; options: string[]; difficulty: string }
 export interface ExamStartResponse { attemptId: number; startedAt: string; durationMinutes: number; questions: ExamQuestion[] }
-export interface ExamAttemptRow { id: number; examId: number; userId: number; studentName: string; attemptNumber: number; startedAt: string; submittedAt: string | null; totalQuestions: number; correctCount: number; wrongCount: number; unansweredCount: number; score: number; percentage: number; passed: boolean | null; status: string; resultsReleasedAt: string | null }
+export interface ExamAttemptRow { id: number; examId: number; userId: number; studentName: string; institution: string; attemptNumber: number; startedAt: string; submittedAt: string | null; totalQuestions: number; correctCount: number; wrongCount: number; unansweredCount: number; score: number; percentage: number; passed: boolean | null; status: string; resultsReleasedAt: string | null }
 export interface ExamResult {
   released: boolean; status?: string; totalQuestions?: number; correctCount?: number; wrongCount?: number; unansweredCount?: number;
   score?: number | null; percentage?: number | null; passed?: boolean | null;
-  breakdown?: Array<{ mcqId: number; question: string; options: string[]; selectedAnswer: string | null; correctAnswer: string | null; explanation: string | null; correct: boolean | null }>;
+  breakdown?: Array<{ mcqId: number; question: string; options: string[]; selectedAnswer: string | null; correctAnswer: string | null; explanation: string | null; optionExplanations: (string | null)[] | null; correct: boolean | null }>;
 }
 
 export type ExplanationStatus = 'PENDING' | 'AI_GENERATED' | 'REVIEWED' | 'APPROVED';
@@ -231,7 +231,7 @@ export interface FeedbackEntry { id: number; userId: number | null; category: st
 export interface FeedbackReply { id: number; feedbackId: number; authorId: number; authorRole: 'admin' | 'student'; message: string; createdAt: string }
 export interface MyFeedbackEntry extends FeedbackEntry { replies: FeedbackReply[] }
 export interface Analytics { range: string; totalSessions: number; averageScore: number; questionsAnswered: number; timeSpentMinutes: number; currentStreak: number; longestStreak: number }
-export interface LeaderboardRow { rank: number; userId: number; name: string; sessions: number; questionsAnswered: number; correct: number; accuracy: number; isYou: boolean }
+export interface LeaderboardRow { rank: number; userId: number; name: string; sessions: number; questionsAnswered: number; correct: number; points: number; accuracy: number; isYou: boolean }
 export interface PaymentDetails { PAYMENT_INSTRUCTIONS: string; PAYMENT_ACCOUNT_HOLDER: string; PAYMENT_ACCOUNT_NUMBER: string; PAYMENT_BANK_NAME: string; PAYMENT_IFSC_OR_ROUTING: string; PAYMENT_UPI_ID: string; PAYMENT_QR_CODE_PATH: string; PAYMENT_QR_CODE_URL?: string; PAYMENT_RAAST_ID: string; PAYMENT_WALLET_PROVIDER: string; PAYMENT_WALLET_NUMBER: string; PAYMENT_WALLET_ACCOUNT_NAME: string; PAYMENT_BANK_ACCOUNTS: string; PAYMENT_METHODS_CONFIG: string; PAYMENT_LATE_FEE_NOTE: string; PAYMENT_REFUND_POLICY: string; DEFAULT_CURRENCY: string; bankAccounts: BankAccount[]; methods: PaymentMethodConfig[] }
 
 // ---------------------------------------------------------------------------
@@ -356,4 +356,37 @@ export const analyticsApi = {
   leaderboard: (range = '30d') => request<LeaderboardRow[]>(`/leaderboard?range=${range}`),
   submitSession: (body: { moduleId?: number; subjectId?: number; topicId?: number; mode?: 'timed' | 'untimed'; durationSeconds?: number; answers: { mcqId: number; selectedAnswer: string | null }[] }) =>
     request<{ id: number; scorePercent: number; correctCount: number; totalQuestions: number }>('/practice-sessions', { method: 'POST', body: JSON.stringify(body) }),
+  practiceOverview: () => request<{ totalTopics: number; totalQuestions: number; avgQuestions: number; avgDurationMinutes: number; moduleCount: number }>('/student/practice-overview'),
+};
+
+// ---------------------------------------------------------------------------
+// AI Visualizer (student-only) — hand-written fetches, same pattern as
+// explanationsApi. Not part of the generated api-zod/api-client-react
+// pipeline (none of the existing AI routes are either).
+// ---------------------------------------------------------------------------
+
+export type VizPoint = { x: number; y: number };
+export type VizElement =
+  | { kind: 'shape'; id: string; shapeType: 'circle' | 'rect' | 'ellipse'; x: number; y: number; width?: number; height?: number; radius?: number; color?: string; label?: string }
+  | { kind: 'label'; id: string; text: string; x: number; y: number }
+  | { kind: 'arrow'; id: string; fromId: string; toId: string; label?: string; style?: 'solid' | 'dashed' }
+  | { kind: 'particle'; id: string; text?: string; color?: string; fromId: string; toId: string };
+
+export type VizStep = { title: string; description: string; elements: VizElement[]; highlightIds?: string[] };
+
+export type FormulaNode = { op: 'add' | 'subtract' | 'multiply' | 'divide'; left: FormulaNode; right: FormulaNode } | { var: string } | { const: number };
+
+export type VisualizationSpec =
+  | { type: 'process' | 'cycle'; title: string; description: string; loop?: boolean; steps: VizStep[] }
+  | { type: 'flowchart'; title: string; description: string; nodes: Array<{ id: string; label: string; x: number; y: number }>; edges: Array<{ fromId: string; toId: string; label?: string }> }
+  | { type: 'timeline'; title: string; description: string; events: Array<{ label: string; time: string; description: string }> }
+  | { type: 'equation'; title: string; description: string; displayFormula: string; variables: Array<{ name: string; label: string; unit?: string; min: number; max: number; default: number; step?: number }>; resultLabel: string; resultUnit?: string; formula: FormulaNode }
+  | { type: 'comparison'; title: string; description: string; items: Array<{ name: string; attributes: Array<{ label: string; value: string }> }> }
+  | { type: 'graph'; title: string; description: string; chartType: 'line' | 'bar'; xLabel: string; yLabel: string; series: Array<{ name: string; points: Array<{ x: string | number; y: number }> }> }
+  | { type: 'anatomy'; title: string; description: string; elements: VizElement[] };
+
+export const aiVisualizerApi = {
+  generate: (prompt: string) => request<{ visualization: VisualizationSpec }>('/ai/visualizer', { method: 'POST', body: JSON.stringify({ prompt }) }),
+  explainStep: (overallTitle: string, stepTitle: string, stepDescription: string) =>
+    request<{ explanation: string }>('/ai/visualizer/explain-step', { method: 'POST', body: JSON.stringify({ overallTitle, stepTitle, stepDescription }) }),
 };

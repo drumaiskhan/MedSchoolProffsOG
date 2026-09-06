@@ -137,6 +137,7 @@ export interface Module {
   subtitle: string;
   subjectCount: number;
   topicCount: number;
+  mcqCount: number;
   progress: number;
   active: boolean;
 }
@@ -170,6 +171,8 @@ export interface Mcq {
   correctAnswer?: string | null;
   /** @nullable */
   explanation?: string | null;
+  /** @nullable */
+  optionExplanations?: (string | null)[] | null;
   /** @nullable */
   reference?: string | null;
   difficulty: string;

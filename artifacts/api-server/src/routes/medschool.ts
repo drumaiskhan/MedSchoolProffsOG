@@ -66,6 +66,7 @@ import {
   feedbackTable,
   practiceAnswersTable,
   examAnswersTable,
+  examQuestionsTable,
 } from "@workspace/db";
 import { requireAuth, requireAdmin, requireActiveMembership, isAdminRole } from "../middlewares/auth";
 import { getStudentTargeting, getVisibleModuleIds, describeModuleTargeting } from "../lib/contentVisibility";
@@ -76,10 +77,39 @@ const router: IRouter = Router();
 
 // Shared count helpers so module/subject cards never drift out of sync with
 // hardcoded 0s again (see section 4 of the fix notes).
-async function getModuleCounts(moduleId: number): Promise<{ subjectCount: number; topicCount: number }> {
+async function getModuleCounts(moduleId: number): Promise<{ subjectCount: number; topicCount: number; mcqCount: number }> {
   const [subjectCount] = await db.select({ count: sql<number>`count(*)` }).from(subjectsTable).where(eq(subjectsTable.moduleId, moduleId));
   const [topicCount] = await db.select({ count: sql<number>`count(*)` }).from(topicsTable).innerJoin(subjectsTable, eq(topicsTable.subjectId, subjectsTable.id)).where(eq(subjectsTable.moduleId, moduleId));
-  return { subjectCount: Number(subjectCount?.count ?? 0), topicCount: Number(topicCount?.count ?? 0) };
+  const [mcqCount] = await db.select({ count: sql<number>`count(*)` }).from(mcqsTable).where(and(eq(mcqsTable.moduleId, moduleId), eq(mcqsTable.status, "published")));
+  return { subjectCount: Number(subjectCount?.count ?? 0), topicCount: Number(topicCount?.count ?? 0), mcqCount: Number(mcqCount?.count ?? 0) };
+}
+
+// Real hard delete (fix-notes section 1) — no DB-level FOREIGN KEY
+// constraints exist on any of these mcqId columns (checked
+// lib/db/ensure-schema.sql — plain integer columns, no REFERENCES), so a
+// bare DELETE FROM med_mcqs would never actually throw an FK error. It would
+// however leave dangling mcqId references sitting around, which is worse
+// (silent orphans instead of a loud failure) — so this still cleans up every
+// referencing table before deleting the MCQ itself, in one transaction:
+//   - practice_answers / exam_answers / exam_questions / flagged_mcqs: the
+//     MCQ is the whole point of these rows, so they're deleted with it. The
+//     parent practiceAttempt/examAttempt rows keep their own stored
+//     aggregate counts (correctCount, score, etc.), so losing the per-
+//     question rows doesn't corrupt a student's overall history — it only
+//     means that one question's row won't show up in a detailed breakdown.
+//   - notebook_entries: mcqId is nullable and the note's own content isn't
+//     about the MCQ id, it's the student's own writing — so this un-links
+//     rather than deletes the note.
+async function hardDeleteMcqs(ids: number[]): Promise<void> {
+  if (!ids.length) return;
+  await db.transaction(async (tx) => {
+    await tx.delete(practiceAnswersTable).where(inArray(practiceAnswersTable.mcqId, ids));
+    await tx.delete(examAnswersTable).where(inArray(examAnswersTable.mcqId, ids));
+    await tx.delete(examQuestionsTable).where(inArray(examQuestionsTable.mcqId, ids));
+    await tx.delete(flaggedMcqsTable).where(inArray(flaggedMcqsTable.mcqId, ids));
+    await tx.update(notebookEntriesTable).set({ mcqId: null }).where(inArray(notebookEntriesTable.mcqId, ids));
+    await tx.delete(mcqsTable).where(inArray(mcqsTable.id, ids));
+  });
 }
 
 async function getSubjectTopicCount(subjectId: number): Promise<number> {
@@ -375,10 +405,30 @@ router.get("/modules", requireAuth, async (req, res): Promise<void> => {
     isAdmin ? undefined : eq(modulesTable.active, true),
     visibleIds ? inArray(modulesTable.id, visibleIds) : undefined,
   )).orderBy(modulesTable.displayOrder);
+
+  // Real per-module progress (was hardcoded to 0 here — same underlying
+  // formula GET /student/dashboard already computes correctly: distinct
+  // topics this student has attempted at least once, divided by the
+  // module's total topic count. Ported here since this is the endpoint the
+  // actual Modules page calls, not the dashboard one.
+  const topicAttemptRows = await db.selectDistinct({ moduleId: subjectsTable.moduleId, topicId: practiceAttemptsTable.topicId })
+    .from(practiceAttemptsTable)
+    .innerJoin(topicsTable, eq(topicsTable.id, practiceAttemptsTable.topicId))
+    .innerJoin(subjectsTable, eq(subjectsTable.id, topicsTable.subjectId))
+    .where(and(eq(practiceAttemptsTable.userId, req.user!.id), sql`${practiceAttemptsTable.topicId} IS NOT NULL`));
+  const attemptedTopicsByModule = new Map<number, Set<number>>();
+  for (const r of topicAttemptRows) {
+    if (r.moduleId == null || r.topicId == null) continue;
+    if (!attemptedTopicsByModule.has(r.moduleId)) attemptedTopicsByModule.set(r.moduleId, new Set());
+    attemptedTopicsByModule.get(r.moduleId)!.add(r.topicId);
+  }
+
   const withCounts = await Promise.all(rows.map(async (row) => {
     const counts = await getModuleCounts(row.id);
+    const attempted = attemptedTopicsByModule.get(row.id)?.size ?? 0;
+    const progress = counts.topicCount ? Math.round((attempted / counts.topicCount) * 100) : 0;
     return {
-      id: row.id, name: row.name, subtitle: row.subtitle, subjectCount: counts.subjectCount, topicCount: counts.topicCount, progress: 0, active: row.active,
+      id: row.id, name: row.name, subtitle: row.subtitle, subjectCount: counts.subjectCount, topicCount: counts.topicCount, mcqCount: counts.mcqCount, progress, active: row.active,
       ...(isAdmin ? { programTargetKind: row.programTargetKind, yearTargetNumber: row.yearTargetNumber, targetingLabel: describeModuleTargeting(row.programTargetKind, row.yearTargetNumber) } : {}),
     };
   }));
@@ -445,6 +495,33 @@ router.delete("/modules/:id/permanent", requireAdmin, async (req, res): Promise<
 
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MODULE_PERMANENTLY_DELETED", entity: "module", entityId: id });
   res.json({ ok: true });
+});
+
+// Aggregate stats for the "Practice" landing page stat bar (Total topics,
+// Avg duration, Avg questions, Total questions) — kept as its own endpoint
+// rather than folded into GET /modules so existing callers of that (which
+// expect a bare Module[] array) don't break.
+router.get("/student/practice-overview", requireAuth, async (req, res): Promise<void> => {
+  const isAdmin = isAdminRole(req.user!.role);
+  let visibleIds: number[] | null = null;
+  if (!isAdmin) {
+    const targeting = await getStudentTargeting(req.user!.id);
+    visibleIds = await getVisibleModuleIds(targeting);
+  }
+  const moduleRows = await db.select({ id: modulesTable.id }).from(modulesTable).where(and(isAdmin ? undefined : eq(modulesTable.active, true), visibleIds ? inArray(modulesTable.id, visibleIds) : undefined));
+  const counts = await Promise.all(moduleRows.map((m) => getModuleCounts(m.id)));
+  const totalTopics = counts.reduce((sum, c) => sum + c.topicCount, 0);
+  const totalQuestions = counts.reduce((sum, c) => sum + c.mcqCount, 0);
+  const avgQuestions = moduleRows.length ? Math.round(totalQuestions / moduleRows.length) : 0;
+
+  // Average session duration across everyone's completed practice sessions
+  // (platform-wide, not just this student) — matches how a "recommended
+  // avg duration" stat is normally framed. Falls back to 0 (frontend hides
+  // the card) if no sessions have been recorded yet.
+  const [durationRow] = await db.select({ avgSeconds: sql<number>`avg(extract(epoch from (${practiceAttemptsTable.completedAt} - ${practiceAttemptsTable.startedAt})))` }).from(practiceAttemptsTable);
+  const avgDurationMinutes = durationRow?.avgSeconds ? Math.round(Number(durationRow.avgSeconds) / 60) : 0;
+
+  res.json({ totalTopics, totalQuestions, avgQuestions, avgDurationMinutes, moduleCount: moduleRows.length });
 });
 
 router.get("/subjects", requireAuth, async (req, res): Promise<void> => {
@@ -514,7 +591,19 @@ router.get("/topics", requireAuth, async (req, res): Promise<void> => {
   const rows = await db.select({ id: topicsTable.id, subjectId: topicsTable.subjectId, name: topicsTable.name, moduleId: subjectsTable.moduleId })
     .from(topicsTable).innerJoin(subjectsTable, eq(topicsTable.subjectId, subjectsTable.id))
     .where(and(subjectFilter, visibleModuleIds ? inArray(subjectsTable.moduleId, visibleModuleIds) : undefined));
-  res.json(ListTopicsResponse.parse(rows.map((row) => ({ id: row.id, subjectId: row.subjectId, name: row.name, questionCount: 0, completed: false }))));
+  // Real per-topic MCQ count (was hardcoded to 0 — see fix-notes section 2).
+  // Grouped in one query rather than N+1'd per topic; filtered to published
+  // for non-admins the same way GET /mcqs is, so a student never sees a
+  // count that includes drafts they can't actually practice.
+  const topicIds = rows.map((r) => r.id);
+  const countsByTopic = new Map<number, number>();
+  if (topicIds.length) {
+    const countRows = await db.select({ topicId: mcqsTable.topicId, count: sql<number>`count(*)` }).from(mcqsTable)
+      .where(and(inArray(mcqsTable.topicId, topicIds), isAdmin ? undefined : eq(mcqsTable.status, "published")))
+      .groupBy(mcqsTable.topicId);
+    for (const row of countRows) if (row.topicId != null) countsByTopic.set(row.topicId, Number(row.count));
+  }
+  res.json(ListTopicsResponse.parse(rows.map((row) => ({ id: row.id, subjectId: row.subjectId, name: row.name, questionCount: countsByTopic.get(row.id) ?? 0, completed: false }))));
 });
 
 router.post("/topics", requireAdmin, async (req, res): Promise<void> => {
@@ -581,12 +670,19 @@ router.get("/mcqs", requireAuth, requireActiveMembership, async (req, res): Prom
 router.get("/admin/mcqs", requireAdmin, async (req, res): Promise<void> => {
   const params = ListMcqsQueryParams.safeParse(req.query);
   if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  // Bug fix: this never excluded archived (soft-deleted) rows, so clicking
+  // Delete would archive the question server-side but it kept sitting right
+  // there in the admin bank list — looked exactly like the delete button
+  // wasn't working. Excluded by default now; ?includeArchived=true opts back
+  // in for admins who want to audit/restore something they deleted.
+  const includeArchived = req.query.includeArchived === "true";
   const rows = await db.select().from(mcqsTable).where(and(
     params.data.search ? ilike(mcqsTable.question, `%${params.data.search}%`) : undefined,
     params.data.moduleId ? eq(mcqsTable.moduleId, params.data.moduleId) : undefined,
     params.data.subjectId ? eq(mcqsTable.subjectId, params.data.subjectId) : undefined,
     params.data.topicId ? eq(mcqsTable.topicId, params.data.topicId) : undefined,
     params.data.difficulty ? eq(mcqsTable.difficulty, params.data.difficulty) : undefined,
+    includeArchived ? undefined : ne(mcqsTable.status, "archived"),
   )).orderBy(desc(mcqsTable.createdAt));
   res.json(rows);
 });
@@ -629,8 +725,10 @@ router.post("/mcqs/:id/publish", requireAdmin, async (req, res): Promise<void> =
 
 router.delete("/mcqs/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = Number(req.params.id);
-  const [mcq] = await db.update(mcqsTable).set({ status: "archived" }).where(eq(mcqsTable.id, id)).returning();
+  const [mcq] = await db.select({ id: mcqsTable.id }).from(mcqsTable).where(eq(mcqsTable.id, id));
   if (!mcq) { res.status(404).json({ error: "MCQ not found" }); return; }
+  await hardDeleteMcqs([id]);
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MCQ_DELETED", entity: "mcq", entityId: id });
   res.json({ ok: true });
 });
 
@@ -674,7 +772,7 @@ router.delete("/admin/mcqs/bulk", requireAdmin, async (req, res): Promise<void> 
 
   if (!idsToDelete.length) { res.json({ ok: true, deleted: 0 }); return; }
 
-  await db.update(mcqsTable).set({ status: "archived" }).where(inArray(mcqsTable.id, idsToDelete));
+  await hardDeleteMcqs(idsToDelete);
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MCQ_BULK_DELETED", entity: "mcq", entityId: 0, metadata: JSON.stringify({ ids: idsToDelete, count: idsToDelete.length }) });
   res.json({ ok: true, deleted: idsToDelete.length });
 });

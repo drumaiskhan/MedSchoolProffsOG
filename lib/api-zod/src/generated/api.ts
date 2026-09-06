@@ -463,6 +463,7 @@ export const ListMcqsResponseItem = zod.object({
   "options": zod.array(zod.string()),
   "correctAnswer": zod.string().nullish(),
   "explanation": zod.string().nullish(),
+  "optionExplanations": zod.array(zod.string().nullable()).nullish(),
   "reference": zod.string().nullish(),
   "difficulty": zod.string(),
   "status": zod.string(),
@@ -481,6 +482,10 @@ export const CreateMcqBody = zod.object({
   "options": zod.array(zod.string()),
   "correctAnswer": zod.string().optional(),
   "explanation": zod.string().optional(),
+  // Index-aligned with "options" — optionExplanations[i] explains why
+  // options[i] is right or wrong. Optional/nullable per-entry: a question
+  // can have this filled in for some options and not others.
+  "optionExplanations": zod.array(zod.string().nullable()).optional(),
   "reference": zod.string().optional(),
   "difficulty": zod.string(),
   "moduleId": zod.int(),
@@ -494,6 +499,7 @@ export const CreateMcqResponse = zod.object({
   "options": zod.array(zod.string()),
   "correctAnswer": zod.string().nullish(),
   "explanation": zod.string().nullish(),
+  "optionExplanations": zod.array(zod.string().nullable()).nullish(),
   "reference": zod.string().nullish(),
   "difficulty": zod.string(),
   "status": zod.string(),

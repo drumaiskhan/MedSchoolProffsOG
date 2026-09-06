@@ -72,4 +72,10 @@ CREATE TABLE IF NOT EXISTS med_feedback_replies (
 -- needed here) — 'replied' is just a new string value the column already
 -- accepts.
 
+-- ---------------------------------------------------------------------
+-- K: Per-option MCQ explanations — why each wrong option is wrong, not
+-- just why the correct one is right. Index-aligned with med_mcqs.options.
+-- ---------------------------------------------------------------------
+ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS option_explanations TEXT[];
+
 COMMIT;

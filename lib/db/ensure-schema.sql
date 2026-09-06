@@ -239,6 +239,7 @@ CREATE TABLE IF NOT EXISTS med_mcqs (
   options TEXT[] NOT NULL,
   correct_answer TEXT,
   explanation TEXT,
+  option_explanations TEXT[],
   explanation_status TEXT NOT NULL DEFAULT 'PENDING',
   reference TEXT,
   difficulty TEXT NOT NULL DEFAULT 'moderate',
@@ -467,6 +468,17 @@ CREATE TABLE IF NOT EXISTS med_saved_sessions (
   user_id INTEGER NOT NULL,
   name TEXT NOT NULL,
   config TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS med_ai_visualizer_logs (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  prompt TEXT NOT NULL,
+  status TEXT NOT NULL,
+  visualization_type TEXT,
+  error_message TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

@@ -9,7 +9,8 @@ import {
   TrendingUp, TrendingDown, Minus, Users, X, Zap, Bell, SlidersHorizontal, FileStack, NotebookPen, Bookmark,
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
   GraduationCap, CalendarDays, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
-  RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Link2 as LinkIcon
+  RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Link2 as LinkIcon, Lightbulb,
+  LayoutGrid, Presentation, Wand2, Loader2
 } from 'lucide-react';
 import {
   getListMembershipPlansQueryKey, getListPaymentsQueryKey, getListMcqsQueryKey, getListModulesQueryKey, getListStudentsQueryKey, getListNotificationsQueryKey, getGetCurrentUserQueryKey,
@@ -29,7 +30,10 @@ import { toast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
-import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, type MyFeedbackEntry, analyticsApi, type ProgressTrend, mcqImportApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, examsAdminApi, examsApi, explanationsApi, booksApi, type AdminBookStudent, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type StudentDetail, type SiteContent, type TeamMember, type AdminModule, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type PaymentDetails } from '@/lib/api';
+import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, type MyFeedbackEntry, analyticsApi, type ProgressTrend, mcqImportApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, examsAdminApi, examsApi, explanationsApi, booksApi, type AdminBookStudent, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type StudentDetail, type SiteContent, type TeamMember, type AdminModule, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type PaymentDetails, aiVisualizerApi, type VisualizationSpec } from '@/lib/api';
+import { VisualizationRenderer, isStepBased } from '@/components/visualizer/VisualizationRenderer';
+import { StepControls } from '@/components/visualizer/StepControls';
+import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 import './index.css';
 
 const queryClient = new QueryClient();
@@ -93,7 +97,7 @@ function Logo({ dark = false }: { dark?: boolean }) {
 type NavItem = [string, string, typeof LayoutDashboard];
 const navGroups: Array<{ label: string; items: NavItem[] }> = [
   { label: 'Study desk', items: [
-    ['/', 'Overview', LayoutDashboard], ['/modules', 'Modules', BookOpen], ['/exams', 'Pre-Proffs Exams', ClipboardCheck], ['/past-papers', 'Past papers', FileStack], ['/flashcards', 'Flashcards', Zap], ['/books', 'Books', Library], ['/resources', 'Resources', FolderOpen],
+    ['/', 'Overview', LayoutDashboard], ['/modules', 'Modules', BookOpen], ['/exams', 'Pre-Proffs Exams', ClipboardCheck], ['/past-papers', 'Past papers', FileStack], ['/flashcards', 'Flashcards', Zap], ['/ai-visualizer', 'AI Visualizer', Wand2], ['/books', 'Books', Library], ['/resources', 'Resources', FolderOpen],
   ] },
   { label: 'Your tools', items: [
     ['/notebook', 'My notebook', NotebookPen], ['/saved-sessions', 'Saved sessions', Bookmark], ['/flagged-mcqs', 'Flagged MCQs', Flag], ['/leaderboard', 'Leaderboard', Trophy],
@@ -203,8 +207,12 @@ function Dashboard() {
 
 function Modules() {
   const q = useListModules(); const modules = q.data ?? []; const [search, setSearch] = useState('');
+  const overviewQ = useQuery({ queryKey: ['practice-overview'], queryFn: analyticsApi.practiceOverview });
+  const overview = overviewQ.data;
   const filtered = modules.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()));
-  return <>{q.isLoading ? <SkeletonPage /> : <div><SectionHeader eyebrow="Curriculum map" title="Learning modules" action={<div className="flex gap-2"><div className="relative"><Search className="absolute left-3 top-2.5 text-muted-foreground" size={15} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Find a module" className="h-9 w-40 rounded-xl border border-border bg-card pl-9 pr-3 text-xs outline-none focus:ring-2 focus:ring-primary/20" data-testid="input-search-modules" /></div></div>} /><div className="grid gap-4 md:grid-cols-2">{filtered.map((m, i) => <Link href={`/modules/${m.id}`} key={m.id} className="card-lift group rounded-2xl border border-border bg-card p-6" data-testid={`card-module-${m.id}`}><div className="flex items-start justify-between"><div className={cn('grid size-11 place-items-center rounded-xl', i % 2 ? 'bg-[#fff0cb] text-[#94651c]' : 'bg-[#d7eee4] text-[#287058]')}><BookOpen size={20} /></div><MoreHorizontal size={18} className="text-muted-foreground" /></div><h3 className="mt-6 text-lg font-extrabold tracking-[-.03em]">{m.name}</h3><p className="mt-1 text-xs text-muted-foreground">{m.subtitle}</p><div className="mt-7 flex items-center justify-between text-[11px] text-muted-foreground"><span>{m.subjectCount} subjects · {m.topicCount} topics</span><span className="font-mono-app text-foreground">{m.progress}%</span></div><div className="mt-2"><Progress value={m.progress} color={i % 2 ? 'bg-[#e5a952]' : 'bg-primary'} /></div><div className="mt-5 flex items-center gap-1 text-xs font-bold text-primary opacity-80 group-hover:opacity-100">Open module <ArrowRight size={14} /></div></Link>)}</div>{!filtered.length && <EmptyState icon={BookOpen} title={modules.length ? 'No modules found' : 'No modules yet'} body={modules.length ? 'Try a shorter search or explore the full curriculum.' : 'Your academic team hasn\'t published any modules yet.'} />}</div>}</>;
+  return <>{q.isLoading ? <SkeletonPage /> : <div><SectionHeader eyebrow="Curriculum map" title="Learning modules" action={<div className="flex gap-2"><div className="relative"><Search className="absolute left-3 top-2.5 text-muted-foreground" size={15} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Find a module" className="h-9 w-40 rounded-xl border border-border bg-card pl-9 pr-3 text-xs outline-none focus:ring-2 focus:ring-primary/20" data-testid="input-search-modules" /></div></div>} />
+    {overview && <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4"><Stat label="Total topics" value={overview.totalTopics} /><Stat label="Total questions" value={overview.totalQuestions} /><Stat label="Avg questions" value={overview.avgQuestions} />{overview.avgDurationMinutes > 0 && <Stat label="Avg duration" value={`${overview.avgDurationMinutes} min`} />}</div>}
+    <div className="grid gap-4 md:grid-cols-2">{filtered.map((m, i) => <Link href={`/modules/${m.id}`} key={m.id} className="card-lift group rounded-2xl border border-border bg-card p-6" data-testid={`card-module-${m.id}`}><div className="flex items-start justify-between"><div className={cn('grid size-11 place-items-center rounded-xl', i % 2 ? 'bg-[#fff0cb] text-[#94651c]' : 'bg-[#d7eee4] text-[#287058]')}><BookOpen size={20} /></div><ChevronRight size={18} className="text-muted-foreground transition-transform group-hover:translate-x-0.5" /></div><h3 className="mt-6 text-lg font-extrabold tracking-[-.03em]">{m.name}</h3><p className="mt-1 text-xs text-muted-foreground">{m.subtitle}</p><div className="mt-7 flex items-center justify-between text-[11px] text-muted-foreground"><span>{m.subjectCount} subject{m.subjectCount === 1 ? '' : 's'} · {m.mcqCount} question{m.mcqCount === 1 ? '' : 's'}</span><span className="font-mono-app text-foreground">{m.progress}%</span></div><div className="mt-2"><Progress value={m.progress} color={i % 2 ? 'bg-[#e5a952]' : 'bg-primary'} /></div><div className="mt-5 flex items-center gap-1 text-xs font-bold text-primary opacity-80 group-hover:opacity-100">Open module <ArrowRight size={14} /></div></Link>)}</div>{!filtered.length && <EmptyState icon={BookOpen} title={modules.length ? 'No modules found' : 'No modules yet'} body={modules.length ? 'Try a shorter search or explore the full curriculum.' : 'Your academic team hasn\'t published any modules yet.'} />}</div>}</>;
 }
 
 function Subjects({ topics = false }: { topics?: boolean }) {
@@ -230,54 +238,60 @@ function Practice() {
   const mcqId = Number(params.get('mcqId')) || undefined;
   const q = useListMcqs(mcqId ? { mcqId } : pastPaperId ? { pastPaperId } : topicId ? { topicId } : undefined);
   const [index, setIndex] = useState(0);
-  const [selected, setSelected] = useState<string | null>(null);
-  // "locked" = the student has confirmed their choice and it has been
-  // scored; "revealed" = they've additionally chosen to see the answer.
-  // These used to be one step ("submitted") which forced the correct
-  // answer + explanation on screen immediately — see section 6c fix notes.
-  const [locked, setLocked] = useState(false);
-  const [revealed, setRevealed] = useState(false);
-  const [sessionCorrect, setSessionCorrect] = useState(0);
-  const [sessionTotal, setSessionTotal] = useState(0);
-  const [flagged, setFlagged] = useState(false);
+  // Every answer picked so far, keyed by mcq id — lets the student jump
+  // freely between questions (via the number grid or Prev/Next) without
+  // losing earlier answers, matching a real exam engine rather than a
+  // strictly-linear drill.
+  const [answers, setAnswers] = useState<Record<number, string | null>>({});
+  const [flaggedIds, setFlaggedIds] = useState<Set<number>>(new Set());
+  const [savedIds, setSavedIds] = useState<Set<number>>(new Set());
+  const [panel, setPanel] = useState<'hint' | 'explain' | 'references' | null>(null);
+  const [paused, setPaused] = useState(false);
   const [finished, setFinished] = useState(false);
   // Timed/untimed setup gate — null means "not chosen yet, show the setup
-  // screen"; the session clock (sessionStartRef) only starts once a mode is
-  // picked, so a student lingering on the setup screen doesn't eat into
-  // their own timed session.
+  // screen". Timed mode counts DOWN from an exam-style time budget
+  // (~90s/question, a standard board-exam pace) rather than counting up,
+  // and auto-submits at zero.
   const [mode, setMode] = useState<'timed' | 'untimed' | null>(null);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [remainingSeconds, setRemainingSeconds] = useState(0);
   const mcqs: Mcq[] = q.data ?? [];
   const current = mcqs[index];
-  // Accumulate every answer for the current run client-side and submit ONE
-  // POST /practice-sessions call when the run actually finishes, instead of
-  // once per question — otherwise each question becomes its own row in
-  // practiceAttemptsTable, inflating "sessions" on the leaderboard and
-  // leaving "time spent" stuck near 0 (startedAt/completedAt end up
-  // identical for every single-question row).
-  const sessionAnswersRef = useRef<Array<{ mcqId: number; selectedAnswer: string | null }>>([]);
   const sessionStartRef = useRef<number>(Date.now());
   const submitAnswer = useMutation({ mutationFn: analyticsApi.submitSession });
-  const flag = useMutation({ mutationFn: flaggedMcqsApi.create });
+  const saveNote = useMutation({ mutationFn: notebookApi.create });
   // current can be undefined while loading/empty — askAi's mutationFn is only
   // ever invoked from a click once `current` is guaranteed to exist below,
   // but the hook itself must still be declared unconditionally every render.
   const askAi = useMutation({ mutationFn: () => explanationsApi.askAi(current!.id) });
-  const restartSession = () => { setIndex(0); setSessionCorrect(0); setSessionTotal(0); setSelected(null); setLocked(false); setRevealed(false); setFinished(false); setMode(null); setElapsedSeconds(0); askAi.reset(); sessionAnswersRef.current = []; };
+  const answeredCount = Object.values(answers).filter((v) => v != null).length;
+  const percentAnswered = mcqs.length ? Math.round((answeredCount / mcqs.length) * 100) : 0;
+
+  const finishSession = () => {
+    const sessionAnswers = mcqs.map((m) => ({ mcqId: m.id, selectedAnswer: answers[m.id] ?? null })).filter((a) => a.selectedAnswer != null);
+    const durationSeconds = Math.max(0, Math.round((Date.now() - sessionStartRef.current) / 1000));
+    if (sessionAnswers.length) submitAnswer.mutate({ topicId, answers: sessionAnswers, durationSeconds, mode: mode ?? undefined });
+    setFinished(true);
+  };
+  const restartSession = () => { setIndex(0); setAnswers({}); setFlaggedIds(new Set()); setSavedIds(new Set()); setPanel(null); setPaused(false); setFinished(false); setMode(null); setRemainingSeconds(0); askAi.reset(); };
 
   useEffect(() => {
-    if (mode !== 'timed' || finished) return;
-    const id = setInterval(() => setElapsedSeconds(Math.round((Date.now() - sessionStartRef.current) / 1000)), 1000);
+    if (mode !== 'timed' || finished || paused) return;
+    const id = setInterval(() => setRemainingSeconds((s) => {
+      if (s <= 1) { finishSession(); return 0; }
+      return s - 1;
+    }), 1000);
     return () => clearInterval(id);
-  }, [mode, finished]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, finished, paused]);
 
   if (!q.isLoading && !mcqs.length) {
-    return <div className="max-w-5xl"><SectionHeader eyebrow="Daily practice" title="Practice with purpose" action={<Link href={pastPaperId ? '/past-papers' : '/modules'} className="text-xs font-bold text-primary" data-testid="link-practice-back-modules"><ArrowLeft size={13} className="mr-1 inline" /> {pastPaperId ? 'Past papers' : 'Modules'}</Link>} /><EmptyState icon={Target} title={pastPaperId ? 'No questions in this paper yet' : topicId ? 'No questions here yet' : 'Pick a topic to practice'} body={pastPaperId ? "Your academic team hasn't uploaded questions for this past paper yet." : topicId ? "Your academic team hasn't published MCQs for this topic yet." : 'Head to Modules → a subject → a topic, then hit Start to begin a focused practice session.'} /></div>;
+    return <div className="max-w-6xl"><SectionHeader eyebrow="Daily practice" title="Practice with purpose" action={<Link href={pastPaperId ? '/past-papers' : '/modules'} className="text-xs font-bold text-primary" data-testid="link-practice-back-modules"><ArrowLeft size={13} className="mr-1 inline" /> {pastPaperId ? 'Past papers' : 'Modules'}</Link>} /><EmptyState icon={Target} title={pastPaperId ? 'No questions in this paper yet' : topicId ? 'No questions here yet' : 'Pick a topic to practice'} body={pastPaperId ? "Your academic team hasn't uploaded questions for this past paper yet." : topicId ? "Your academic team hasn't published MCQs for this topic yet." : 'Head to Modules → a subject → a topic, then hit Start to begin a focused practice session.'} /></div>;
   }
   if (q.isLoading) return <SkeletonPage />;
 
   if (finished) {
-    return <div className="max-w-5xl"><SectionHeader eyebrow="Daily practice" title="Session complete" /><PracticeResultCard correct={sessionCorrect} total={sessionTotal} onRestart={restartSession} backHref={pastPaperId ? '/past-papers' : '/modules'} backLabel={pastPaperId ? 'Back to past papers' : 'Back to modules'} /></div>;
+    const correct = mcqs.filter((m) => answers[m.id] != null && answers[m.id] === m.correctAnswer).length;
+    return <div className="max-w-6xl"><SectionHeader eyebrow="Daily practice" title="Session complete" /><PracticeResultCard correct={correct} total={answeredCount} onRestart={restartSession} backHref={pastPaperId ? '/past-papers' : '/modules'} backLabel={pastPaperId ? 'Back to past papers' : 'Back to modules'} /></div>;
   }
 
   if (!mode) {
@@ -287,7 +301,7 @@ function Practice() {
         <h2 className="mt-5 font-display text-xl">How do you want to practice?</h2>
         <p className="mt-2 text-xs text-muted-foreground">{mcqs.length} question{mcqs.length === 1 ? '' : 's'} in this set.</p>
         <div className="mt-7 grid gap-3 sm:grid-cols-2">
-          <button onClick={() => { setMode('timed'); sessionStartRef.current = Date.now(); }} className="card-lift rounded-2xl border-2 border-primary bg-[#eef7f1] p-5 text-left" data-testid="button-mode-timed"><Clock3 size={18} className="text-primary" /><div className="mt-3 text-sm font-extrabold text-[#164b4b]">Timed</div><p className="mt-1 text-[11px] text-muted-foreground">See a live stopwatch while you practice.</p></button>
+          <button onClick={() => { setMode('timed'); setRemainingSeconds(mcqs.length * 90); sessionStartRef.current = Date.now(); }} className="card-lift rounded-2xl border-2 border-primary bg-[#eef7f1] p-5 text-left" data-testid="button-mode-timed"><Clock3 size={18} className="text-primary" /><div className="mt-3 text-sm font-extrabold text-[#164b4b]">Timed</div><p className="mt-1 text-[11px] text-muted-foreground">A countdown timer, exam-style — {Math.round(mcqs.length * 1.5)} min for this set.</p></button>
           <button onClick={() => { setMode('untimed'); sessionStartRef.current = Date.now(); }} className="card-lift rounded-2xl border border-border bg-card p-5 text-left" data-testid="button-mode-untimed"><Target size={18} className="text-muted-foreground" /><div className="mt-3 text-sm font-extrabold">Untimed</div><p className="mt-1 text-[11px] text-muted-foreground">Go at your own pace, no clock on screen.</p></button>
         </div>
       </div>
@@ -296,44 +310,78 @@ function Practice() {
 
   if (!current) return <SkeletonPage />;
 
-  const isCorrect = selected === current.correctAnswer;
-  const confirmAnswer = () => {
-    setLocked(true);
-    setSessionTotal((t) => t + 1);
-    if (isCorrect) setSessionCorrect((c) => c + 1);
-    sessionAnswersRef.current = [...sessionAnswersRef.current, { mcqId: current.id, selectedAnswer: selected }];
+  const selectOption = (option: string) => { if (paused) return; setAnswers((prev) => ({ ...prev, [current.id]: option })); };
+  const goTo = (i: number) => { setIndex(i); setPanel(null); askAi.reset(); };
+  // Session-local "flag for review" (like a real exam engine's flag icon) —
+  // distinct from the separate flaggedMcqsApi "report this question to
+  // admin" feature used on the standalone Flagged MCQs page. Deliberately
+  // not persisted past this session.
+  const toggleFlag = () => setFlaggedIds((prev) => { const next = new Set(prev); next.has(current.id) ? next.delete(current.id) : next.add(current.id); return next; });
+  const saveQuestion = () => { if (savedIds.has(current.id)) return; saveNote.mutate({ content: current.question, mcqId: current.id }); setSavedIds((prev) => new Set(prev).add(current.id)); };
+  const mm = String(Math.floor(remainingSeconds / 60)).padStart(2, '0');
+  const ss = String(remainingSeconds % 60).padStart(2, '0');
+  const stateForIndex = (i: number): 'current' | 'answered' | 'flagged' | 'new' => {
+    if (i === index) return 'current';
+    const id = mcqs[i].id;
+    if (flaggedIds.has(id)) return 'flagged';
+    if (answers[id] != null) return 'answered';
+    return 'new';
   };
-  const nextQuestion = () => {
-    if (index + 1 >= mcqs.length) {
-      const durationSeconds = Math.max(0, Math.round((Date.now() - sessionStartRef.current) / 1000));
-      if (sessionAnswersRef.current.length) {
-        submitAnswer.mutate({ topicId, answers: sessionAnswersRef.current, durationSeconds, mode: mode ?? undefined });
-      }
-      setFinished(true);
-      return;
-    }
-    setIndex((i) => i + 1); setSelected(null); setLocked(false); setRevealed(false); setFlagged(false); askAi.reset();
-  };
-  const mm = String(Math.floor(elapsedSeconds / 60)).padStart(2, '0');
-  const ss = String(elapsedSeconds % 60).padStart(2, '0');
 
-  return <div className="max-w-5xl"><SectionHeader eyebrow="Daily practice" title="Practice with purpose" action={<div className="flex items-center gap-2">{mode === 'timed' && <span className="font-mono-app inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-bold" data-testid="text-session-stopwatch"><Clock3 size={13} /> {mm}:{ss}</span>}<button onClick={restartSession} className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-xs font-bold hover:bg-muted" data-testid="button-restart-session"><RotateCcw size={14} /> Restart session</button></div>} /><div className="grid gap-6 lg:grid-cols-1 xl:grid-cols-[1fr_280px]"><div className="rounded-3xl border border-border bg-card p-5 sm:p-6 md:p-9"><div className="flex items-center justify-between"><Badge tone="blue">{current.difficulty}</Badge><span className="font-mono-app text-[10px] text-muted-foreground">Question {String(index + 1).padStart(2, '0')} / {mcqs.length}</span></div><h2 className="mt-8 max-w-2xl text-lg font-extrabold leading-7 tracking-[-.025em] sm:text-xl sm:leading-8">{current.question}</h2><div className="mt-7 space-y-3">{current.options.map((option, i) => <button key={option} onClick={() => !locked && setSelected(option)} className={cn('flex w-full items-center gap-3 rounded-xl border p-4 text-left text-sm transition-colors', selected === option ? revealed && option === current.correctAnswer ? 'border-primary bg-[#e6f3ed] text-[#287058]' : revealed && !isCorrect ? 'border-[#e7b1a5] bg-[#fff1ed]' : 'border-primary bg-[#e6f3ed]' : revealed && option === current.correctAnswer ? 'border-primary bg-[#e6f3ed] text-[#287058]' : 'border-border hover:bg-muted')} data-testid={`button-answer-${i}`}><span className="grid size-7 shrink-0 place-items-center rounded-lg bg-muted font-mono-app text-[11px]">{String.fromCharCode(65 + i)}</span><span className="flex-1">{option}</span>{revealed && option === current.correctAnswer && <CheckCircle2 className="ml-auto shrink-0 text-primary" size={17} />}</button>)}</div>
-    {locked && !revealed && <div className={cn('mt-6 rounded-xl p-4 text-sm', isCorrect ? 'bg-[#e6f3ed] text-[#287058]' : 'bg-[#fff1ed] text-[#a34c3e]')} data-testid="text-answer-locked-in">Answer recorded. Tap "Show answer" to see how you did, or move on to the next question.</div>}
-    {revealed && <div className={cn('mt-6 rounded-xl p-4 text-sm leading-6', isCorrect ? 'bg-[#e6f3ed] text-[#287058]' : 'bg-[#fff1ed] text-[#a34c3e]')} data-testid="text-answer-revealed">
-      {isCorrect ? <div className="flex items-center gap-2 font-bold"><CheckCircle2 size={16} /> Correct!</div> : <div className="font-bold">Correct answer: {current.correctAnswer}</div>}
-      {!isCorrect && <p className="mt-1 text-xs">{current.explanation}</p>}
-      {!isCorrect && !askAi.data && <button onClick={() => askAi.mutate()} disabled={askAi.isPending} className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-[#a34c3e]/30 bg-white/60 px-3 py-1.5 text-[11px] font-bold text-[#a34c3e] disabled:opacity-50" data-testid="button-ask-ai">{askAi.isPending ? 'Thinking…' : <><Sparkles size={11} /> Ask AI to explain differently</>}</button>}
-      {isCorrect && !askAi.data && <button onClick={() => askAi.mutate()} disabled={askAi.isPending} className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-[#287058]/30 bg-white/60 px-3 py-1.5 text-[11px] font-bold text-[#287058] disabled:opacity-50" data-testid="button-show-explanation-anyway">{askAi.isPending ? 'Thinking…' : 'Show explanation anyway'}</button>}
-      {askAi.data && <div className="mt-3 rounded-lg bg-white/60 p-3 text-xs leading-5"><div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide">{isCorrect ? current.explanation : ''}{isCorrect && <br />}<Sparkles size={10} /> AI explanation</div>{askAi.data.explanation}</div>}
-      {askAi.isError && <p className="mt-2 text-[11px] font-semibold text-destructive">{askAi.error instanceof ApiRequestError ? askAi.error.message : 'Could not reach AI right now.'}</p>}
-    </div>}
-    <div className="mt-8 flex flex-wrap items-center gap-3">
-      {!locked ? <button disabled={!selected} onClick={confirmAnswer} className="w-full rounded-xl bg-primary px-5 py-3.5 text-xs font-extrabold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto" data-testid="button-submit-answer">Confirm answer <ArrowRight size={14} className="ml-1 inline" /></button> : <>
-        {!revealed && <button onClick={() => setRevealed(true)} className="flex-1 rounded-xl border border-border bg-card px-5 py-3.5 text-xs font-bold sm:flex-none" data-testid="button-show-answer">Show answer</button>}
-        <button onClick={nextQuestion} className={cn('rounded-xl px-5 py-3.5 text-xs font-extrabold', revealed ? 'flex-1 bg-primary text-primary-foreground sm:flex-none' : 'flex-1 bg-primary text-primary-foreground sm:flex-none')} data-testid="button-next-question">{index + 1 >= mcqs.length ? 'Finish session' : 'Next question'}</button>
-      </>}
-      <button onClick={() => { if (!flagged) { flag.mutate({ mcqId: current.id }); setFlagged(true); } }} disabled={flagged} className={cn('inline-flex w-full items-center justify-center gap-1.5 rounded-xl border px-3 py-3.5 text-xs font-bold sm:w-auto', flagged ? 'border-[#e5a952] bg-[#fff0cb] text-[#8a5a12]' : 'border-border bg-card')} data-testid="button-flag-question"><Flag size={13} /> {flagged ? 'Flagged' : 'Flag'}</button>
-    </div></div><div className="space-y-4"><div className="rounded-2xl bg-[#164b4b] p-5 text-[#eaf2e9]"><Target size={18} className="text-[#e5a952]" /><h3 className="mt-5 font-display text-2xl">A little,<br />often.</h3><p className="mt-2 text-xs leading-5 text-[#bfd4cb]">Short recall sessions beat cramming. Your next 10 minutes are enough.</p></div><div className="rounded-2xl border border-border bg-card p-5"><div className="text-[10px] font-bold uppercase tracking-[.14em] text-muted-foreground">This session</div><div className="mt-4 font-display text-4xl">{sessionTotal ? Math.round((sessionCorrect / sessionTotal) * 100) : 0}%</div><Progress value={sessionTotal ? (sessionCorrect / sessionTotal) * 100 : 0} /><div className="mt-3 text-[11px] text-muted-foreground">{sessionCorrect} correct of {sessionTotal} attempts</div></div></div></div></div>;
+  const controlPanel = <div className="space-y-3">
+    <div className="rounded-2xl border border-border bg-card p-4">
+      <div className="flex items-center justify-between text-xs font-bold"><span className="flex items-center gap-1.5"><Clock3 size={14} /> Timer</span>{mode === 'timed' ? <span className={cn('font-mono-app rounded-full px-2.5 py-1 text-[11px]', remainingSeconds < 60 ? 'bg-[#fce3dc] text-[#a34c3e]' : 'bg-[#d7eee4] text-[#287058]')} data-testid="text-timer">{mm}:{ss}</span> : <span className="text-[11px] font-normal text-muted-foreground">Untimed</span>}</div>
+      <div className="mt-3 text-[11px] text-muted-foreground">{percentAnswered}% answered</div>
+      <div className="mt-1"><Progress value={percentAnswered} /></div>
+      <div className="mt-3 text-[11px] text-muted-foreground">Difficulty: <Badge tone="blue">{current.difficulty}</Badge></div>
+    </div>
+    <button onClick={() => setPaused((p) => !p)} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#32647b] px-4 py-3 text-xs font-extrabold text-white" data-testid="button-pause-session">{paused ? <><Zap size={14} /> Resume</> : <><Clock3 size={14} /> Pause</>}</button>
+    <button onClick={saveQuestion} disabled={savedIds.has(current.id)} className={cn('flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-xs font-extrabold', savedIds.has(current.id) ? 'bg-[#e6dcf3] text-[#6a4c93]' : 'bg-gradient-to-r from-[#6a4c93] to-[#815276] text-white')} data-testid="button-save-question"><Bookmark size={14} /> {savedIds.has(current.id) ? 'Saved to notebook' : 'Save'}</button>
+    <button onClick={finishSession} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#c0503f] px-4 py-3 text-xs font-extrabold text-white" data-testid="button-exit-session"><X size={14} /> Exit &amp; submit</button>
+    <div className="rounded-2xl border border-border bg-card p-4">
+      <div className="grid grid-cols-5 gap-1.5">{mcqs.map((m, i) => { const st = stateForIndex(i); return <button key={m.id} onClick={() => goTo(i)} className={cn('grid aspect-square place-items-center rounded-lg text-[11px] font-bold transition-colors', st === 'current' && 'border-2 border-primary bg-card text-primary', st === 'answered' && 'bg-[#32647b] text-white', st === 'flagged' && 'bg-[#e5a952] text-white', st === 'new' && 'bg-muted text-muted-foreground')} data-testid={`button-goto-question-${i}`}>{i + 1}</button>; })}</div>
+      <div className="mt-3 flex flex-wrap gap-3 text-[10px] text-muted-foreground"><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-[#32647b]" /> Answered</span><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-[#e5a952]" /> Flagged</span><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-muted" /> New</span></div>
+    </div>
+  </div>;
+
+  if (paused) {
+    return <div className="max-w-6xl"><SectionHeader eyebrow="Daily practice" title="Practice with purpose" />
+      <div className="grid gap-6 xl:grid-cols-[280px_1fr]"><div className="xl:order-1">{controlPanel}</div><div className="rounded-3xl border border-border bg-card p-9 text-center xl:order-2"><Clock3 size={28} className="mx-auto text-muted-foreground" /><h2 className="mt-4 font-display text-xl">Session paused</h2><p className="mt-2 text-xs text-muted-foreground">Your progress and timer are on hold. Hit Resume in the panel to keep going.</p></div></div>
+    </div>;
+  }
+
+  return <div className="max-w-6xl"><SectionHeader eyebrow="Daily practice" title="Practice with purpose" action={<span className="font-mono-app text-[11px] text-muted-foreground">{index + 1} / {mcqs.length}</span>} />
+    <div className="grid gap-6 xl:grid-cols-[280px_1fr]">
+      <div className="xl:order-1">{controlPanel}</div>
+      <div className="rounded-3xl border border-border bg-card p-5 sm:p-6 md:p-9 xl:order-2">
+        <div className="flex items-center justify-between"><Badge tone="blue">{current.difficulty}</Badge><button onClick={toggleFlag} className={cn('rounded-lg p-1.5', flaggedIds.has(current.id) ? 'text-[#e5a952]' : 'text-muted-foreground hover:text-foreground')} data-testid="button-flag-question"><Flag size={17} fill={flaggedIds.has(current.id) ? 'currentColor' : 'none'} /></button></div>
+        <h2 className="mt-6 max-w-2xl text-lg font-extrabold leading-7 tracking-[-.025em] sm:text-xl sm:leading-8">{current.question}</h2>
+        <div className="mt-7 space-y-3">{current.options.map((option, i) => <button key={option} onClick={() => selectOption(option)} className={cn('flex w-full items-center gap-3 rounded-xl border p-4 text-left text-sm transition-colors', answers[current.id] === option ? 'border-primary bg-[#e6f3ed]' : 'border-border hover:bg-muted')} data-testid={`button-answer-${i}`}><span className="grid size-7 shrink-0 place-items-center rounded-lg bg-muted font-mono-app text-[11px]">{String.fromCharCode(65 + i)}</span><span className="flex-1">{option}</span></button>)}</div>
+
+        <div className="mt-6 flex flex-wrap gap-2">
+          <button onClick={() => setPanel(panel === 'hint' ? null : 'hint')} className={cn('inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2.5 text-xs font-bold', panel === 'hint' ? 'bg-[#e5a952] text-white' : 'border border-[#e5a952]/40 bg-[#fff4de] text-[#8a5a12]')} data-testid="button-hint"><Lightbulb size={13} /> Hint</button>
+          <button onClick={() => setPanel(panel === 'explain' ? null : 'explain')} className={cn('inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2.5 text-xs font-bold', panel === 'explain' ? 'bg-[#32647b] text-white' : 'border border-[#32647b]/40 bg-[#dceaf1] text-[#32647b]')} data-testid="button-explain"><CircleHelp size={13} /> Explain</button>
+          <button onClick={() => setPanel(panel === 'references' ? null : 'references')} className={cn('inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2.5 text-xs font-bold', panel === 'references' ? 'bg-[#6a4c93] text-white' : 'border border-[#6a4c93]/40 bg-[#efe8f7] text-[#6a4c93]')} data-testid="button-references"><BookOpen size={13} /> References</button>
+        </div>
+
+        {panel === 'hint' && <div className="mt-4 rounded-xl bg-[#fff4de] p-4 text-xs leading-6 text-[#8a5a12]" data-testid="panel-hint"><div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide"><Lightbulb size={10} /> Hint</div>{current.reference ? current.reference : 'Re-read the question stem carefully — focus on the specific mechanism or finding it\'s asking about, and rule out options that don\'t fit that exact scenario.'}</div>}
+        {panel === 'references' && <div className="mt-4 rounded-xl bg-[#efe8f7] p-4 text-xs leading-6 text-[#6a4c93]" data-testid="panel-references"><div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide"><BookOpen size={10} /> References</div>{current.reference || 'No reference has been attached to this question yet.'}</div>}
+        {panel === 'explain' && <div className="mt-4 rounded-xl bg-[#dceaf1] p-4 text-xs leading-6 text-[#32647b]" data-testid="panel-explain">
+          <div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide"><CircleHelp size={10} /> Explanation</div>
+          {current.optionExplanations?.some((e) => e?.trim()) ? <div className="space-y-2">{current.options.map((opt, oi) => { const optExplanation = current.optionExplanations?.[oi]; const isCorrectOpt = opt === current.correctAnswer; return <div key={opt} className={cn('rounded-lg p-2.5', isCorrectOpt ? 'bg-white/70' : 'bg-white/30')}><div className={cn('text-[11px] font-bold', isCorrectOpt ? 'text-[#287058]' : 'text-[#a34c3e]')}>{String.fromCharCode(65 + oi)}. {opt} {isCorrectOpt ? '(correct)' : ''}</div>{optExplanation && <div className="mt-1 text-[11px] leading-5">{optExplanation}</div>}</div>; })}</div> : (current.explanation || 'No written explanation is available for this question yet.')}
+          {!askAi.data && <button onClick={() => askAi.mutate()} disabled={askAi.isPending} className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-[#32647b]/30 bg-white/60 px-3 py-1.5 text-[11px] font-bold text-[#32647b] disabled:opacity-50" data-testid="button-ask-ai">{askAi.isPending ? 'Thinking…' : <><Sparkles size={11} /> Ask AI to explain differently</>}</button>}
+          {askAi.data && <div className="mt-3 rounded-lg bg-white/60 p-3 text-xs leading-5"><div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide"><Sparkles size={10} /> AI explanation</div>{askAi.data.explanation}</div>}
+          {askAi.isError && <p className="mt-2 text-[11px] font-semibold text-destructive">{askAi.error instanceof ApiRequestError ? askAi.error.message : 'Could not reach AI right now.'}</p>}
+        </div>}
+
+
+        <div className="mt-8 flex items-center justify-between gap-3">
+          <button disabled={index === 0} onClick={() => goTo(index - 1)} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-5 py-3 text-xs font-bold disabled:opacity-40" data-testid="button-prev-question"><ArrowLeft size={14} /> Prev</button>
+          {index + 1 >= mcqs.length ? <button onClick={finishSession} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-5 py-3 text-xs font-extrabold text-primary-foreground" data-testid="button-finish-session">Finish session <CheckCircle2 size={14} /></button> : <button onClick={() => goTo(index + 1)} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-5 py-3 text-xs font-extrabold text-primary-foreground" data-testid="button-next-question">Next <ArrowRight size={14} /></button>}
+        </div>
+      </div>
+    </div>
+  </div>;
 }
 
 function Flashcards() {
@@ -344,39 +392,91 @@ function Flashcards() {
   const modules = modulesQ.data ?? [];
   const [moduleId, setModuleId] = useState('');
   const subjectsQ = useListSubjects(moduleId ? { moduleId: Number(moduleId) } : undefined);
+  // Unfiltered — used only to compute the "Subjects"/"Topics" stat cards
+  // across everything the student can see, independent of the cascading
+  // module/subject/topic filter below.
+  const allSubjectsQ = useListSubjects();
+  const allTopicsQ = useListTopics();
   const [subjectId, setSubjectId] = useState('');
   const topicsQ = useListTopics(subjectId ? { subjectId: Number(subjectId) } : undefined);
   const [topicId, setTopicId] = useState(urlTopicId ? String(urlTopicId) : '');
   const activeTopicId = Number(topicId) || undefined;
+  const [queryText, setQueryText] = useState('');
+  const [view, setView] = useState<'grid' | 'study'>('grid');
+  const [flippedIds, setFlippedIds] = useState<Set<number>>(new Set());
+  // Streak badge (top-right) — same data source as the dashboard's streak card.
+  const streakQ = useQuery({ queryKey: ['analytics', '7d'], queryFn: () => analyticsApi.get('7d') });
+
   // Program/year scoping already happens server-side via getVisibleModuleIds
   // (same as past papers/exams) — these selects just let the student narrow
   // *within* what they can already see, so they get flashcards relevant to
   // what they're actually studying instead of a random mixed deck.
   const q = useListFlashcards(activeTopicId ? { topicId: activeTopicId } : undefined);
+  // Unfiltered — drives the "Total Available" stat regardless of the
+  // module/subject/topic filter currently applied to the deck/grid below.
+  const allCardsQ = useListFlashcards();
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [known, setKnown] = useState<Record<number, boolean>>({});
   const cards: Flashcard[] = q.data ?? [];
-  const card = cards[index % cards.length];
+  const visibleCards = queryText.trim() ? cards.filter((c) => c.front.toLowerCase().includes(queryText.trim().toLowerCase()) || c.back.toLowerCase().includes(queryText.trim().toLowerCase())) : cards;
+  const card = cards[index % Math.max(cards.length, 1)];
   const knownCount = Object.values(known).filter(Boolean).length;
   const askAi = useMutation({ mutationFn: () => explanationsApi.askAiFlashcard(card!.id) });
 
   const advance = (isKnown: boolean) => { setKnown((prev) => ({ ...prev, [card.id]: isKnown })); setIndex((i) => i + 1); setFlipped(false); askAi.reset(); };
   const resetDeck = () => { setIndex(0); setKnown({}); setFlipped(false); askAi.reset(); };
+  const toggleGridFlip = (id: number) => setFlippedIds((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
 
-  const filterBar = <div className="mb-5 flex flex-wrap gap-2">
-    <select value={moduleId} onChange={(e) => { setModuleId(e.target.value); setSubjectId(''); setTopicId(''); navigate('/flashcards'); resetDeck(); }} className="h-9 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-flashcard-module"><option value="">All modules</option>{modules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
-    <select value={subjectId} onChange={(e) => { setSubjectId(e.target.value); setTopicId(''); resetDeck(); }} disabled={!moduleId} className="h-9 rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-flashcard-subject"><option value="">All subjects</option>{(subjectsQ.data || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
-    <select value={topicId} onChange={(e) => { setTopicId(e.target.value); resetDeck(); }} disabled={!subjectId} className="h-9 rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-flashcard-topic"><option value="">All topics</option>{(topicsQ.data || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
+  const stats: Array<[string, number]> = [
+    ['Total Available', allCardsQ.data?.length ?? 0],
+    ['Topics', allTopicsQ.data?.length ?? 0],
+    ['Subjects', allSubjectsQ.data?.length ?? 0],
+    ['Modules', modules.length],
+  ];
+
+  const header = <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+    <div className="flex items-start gap-3"><div className="grid size-11 shrink-0 place-items-center rounded-xl bg-[#164b4b] text-white"><Zap size={20} /></div><div><h2 className="text-[22px] font-extrabold tracking-[-.03em]">Study Flashcards</h2><p className="mt-0.5 text-xs text-muted-foreground">Master your knowledge with interactive flashcards</p></div></div>
+    {(streakQ.data?.currentStreak ?? 0) > 0 && <span className="inline-flex items-center gap-1.5 rounded-full bg-[#fff0cb] px-3 py-1.5 text-[11px] font-bold text-[#8d6420]" data-testid="text-flashcard-streak"><Flame size={13} /> {streakQ.data?.currentStreak} day streak</span>}
+  </div>;
+
+  const toolbar = <div className="mb-5 flex flex-wrap items-center gap-2">
+    <div className="flex overflow-hidden rounded-xl border border-border bg-card">
+      <button onClick={() => setView('grid')} className={cn('grid size-9 place-items-center', view === 'grid' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')} title="Grid view" data-testid="button-flashcard-view-grid"><LayoutGrid size={15} /></button>
+      <button onClick={() => setView('study')} className={cn('grid size-9 place-items-center border-l border-border', view === 'study' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')} title="Study mode" data-testid="button-flashcard-view-study"><Presentation size={15} /></button>
+    </div>
+    <button onClick={() => { resetDeck(); setFlippedIds(new Set()); }} className="grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted" title="Restart" data-testid="button-flashcard-refresh"><RotateCcw size={15} /></button>
+  </div>;
+
+  const statCards = <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">{stats.map(([label, value]) => <div key={label} className="rounded-2xl border border-border bg-card p-4 text-center"><div className="font-display text-2xl">{value}</div><div className="mt-1 text-[11px] font-semibold text-muted-foreground">{label}</div></div>)}</div>;
+
+  const filterBar = <div className="mb-5 space-y-2 rounded-2xl border border-border bg-card p-4">
+    <select value={moduleId} onChange={(e) => { setModuleId(e.target.value); setSubjectId(''); setTopicId(''); navigate('/flashcards'); resetDeck(); }} className="h-10 w-full rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-flashcard-module"><option value="">All Modules</option>{modules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
+    <select value={subjectId} onChange={(e) => { setSubjectId(e.target.value); setTopicId(''); resetDeck(); }} disabled={!moduleId} className="h-10 w-full rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-flashcard-subject"><option value="">All Subjects</option>{(subjectsQ.data || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+    <select value={topicId} onChange={(e) => { setTopicId(e.target.value); resetDeck(); }} disabled={!subjectId} className="h-10 w-full rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-flashcard-topic"><option value="">All Topics</option>{(topicsQ.data || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
+    <div className="relative"><Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><input value={queryText} onChange={(e) => setQueryText(e.target.value)} placeholder="Search flashcards..." className="h-10 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-xs" data-testid="input-flashcard-search" /></div>
   </div>;
 
   if (!q.isLoading && !cards.length) {
-    return <div className="mx-auto max-w-3xl"><SectionHeader eyebrow="Recall studio" title="Flashcards" />{filterBar}<EmptyState icon={Zap} title={activeTopicId ? 'No flashcards here yet' : 'No flashcards yet'} body={activeTopicId ? "Your academic team hasn't published flashcards for this topic yet." : "Your academic team hasn't published any flashcards yet."} /></div>;
+    return <div className="mx-auto max-w-3xl">{header}{toolbar}{statCards}{filterBar}<EmptyState icon={Zap} title={activeTopicId ? 'No flashcards here yet' : 'No flashcards yet'} body={activeTopicId ? "Your academic team hasn't published flashcards for this topic yet." : "Your academic team hasn't published any flashcards yet."} /></div>;
   }
-  if (q.isLoading || !card) return <div className="mx-auto max-w-3xl"><SectionHeader eyebrow="Recall studio" title="Flashcards" />{filterBar}<SkeletonPage /></div>;
+  if (q.isLoading || !card) return <div className="mx-auto max-w-3xl">{header}{toolbar}{statCards}{filterBar}<SkeletonPage /></div>;
 
-  return <div className="mx-auto max-w-3xl"><SectionHeader eyebrow="Recall studio" title="Flashcards" action={<span className="font-mono-app text-[11px] text-muted-foreground">Card {(index % cards.length) + 1} / {cards.length} · {knownCount} known</span>} />
-    {filterBar}
+  if (view === 'grid') {
+    return <div className="mx-auto max-w-3xl">{header}{toolbar}{statCards}{filterBar}
+      {!visibleCards.length ? <EmptyState icon={Search} title="No matches" body="No flashcards match your search — try a different term." /> : <div className="space-y-4">{visibleCards.map((c, i) => { const isFlipped = flippedIds.has(c.id); return (
+        <button key={c.id} onClick={() => toggleGridFlip(c.id)} className="card-lift block w-full rounded-2xl border border-border bg-card p-6 text-left transition-colors hover:border-primary/30" data-testid={`card-flashcard-grid-${c.id}`}>
+          <div className="flex flex-wrap items-center gap-2"><span className="rounded-full border border-border px-2.5 py-1 text-[10px] font-bold">Question {i + 1}</span><Badge tone="blue">{c.topic}</Badge></div>
+          <p className="mt-6 text-center text-base font-bold leading-7">{isFlipped ? c.back : c.front}</p>
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-2"><Badge tone="neutral">{c.module}</Badge>{isFlipped && <Badge tone="green">Answer</Badge>}</div>
+          <div className="mt-4 text-center text-[11px] text-muted-foreground">{isFlipped ? 'Click to flip back' : 'Click to flip'}</div>
+        </button>
+      ); })}</div>}
+    </div>;
+  }
+
+  return <div className="mx-auto max-w-3xl">{header}{toolbar}{statCards}{filterBar}
+    <div className="mb-3 flex justify-end"><span className="font-mono-app text-[11px] text-muted-foreground">Card {(index % cards.length) + 1} / {cards.length} · {knownCount} known</span></div>
     <div className="mb-4 flex justify-center gap-1.5">{cards.map((c, i) => <div key={c.id} className={cn('h-1.5 w-6 rounded-full transition-colors', i === index % cards.length ? 'bg-primary' : known[c.id] === true ? 'bg-[#8bcbb8]' : known[c.id] === false ? 'bg-[#e5a952]' : 'bg-muted')} />)}</div>
     <div className="[perspective:1600px]"><button onClick={() => setFlipped(!flipped)} className="relative min-h-[350px] w-full [transform-style:preserve-3d] transition-transform duration-500 md:min-h-[420px]" style={{ transform: flipped ? 'rotateY(180deg)' : 'none' }} data-testid="button-flashcard">
       <div className="absolute inset-0 flex flex-col rounded-3xl border border-border bg-[#164b4b] p-9 text-left text-[#eaf2e9] shadow-lg [backface-visibility:hidden] md:p-14"><div className="flex items-center justify-between text-[10px] uppercase tracking-[.18em] text-[#8bcbb8]"><span>{card.module}</span><span>Prompt</span></div><div className="flex flex-1 items-center justify-center text-center"><h2 className="mx-auto max-w-xl font-display text-3xl leading-tight md:text-5xl">{card.front}</h2></div><div className="flex justify-center text-xs text-[#8bcbb8]">Click to reveal the answer <ArrowRight size={14} className="ml-2" /></div></div>
@@ -385,6 +485,89 @@ function Flashcards() {
     {flipped && <div className="mt-4 flex justify-center">{!askAi.data ? <button onClick={() => askAi.mutate()} disabled={askAi.isPending} className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-[#eef7f1] px-3 py-1.5 text-[11px] font-bold text-primary disabled:opacity-50" data-testid="button-ask-ai-flashcard">{askAi.isPending ? 'Thinking…' : <><Sparkles size={11} /> Ask AI to explain differently</>}</button> : <div className="max-w-xl rounded-xl bg-[#eef7f1] p-3 text-xs leading-5"><div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-primary"><Sparkles size={10} /> AI explanation</div>{askAi.data.explanation}</div>}{askAi.isError && <p className="mt-2 text-[11px] font-semibold text-destructive">{askAi.error instanceof ApiRequestError ? askAi.error.message : 'Could not reach AI right now.'}</p>}</div>}
     <div className="mt-6 flex justify-center gap-3">{flipped ? <><button onClick={() => advance(false)} className="inline-flex items-center gap-2 rounded-xl border border-[#e5a952] bg-[#fff0cb] px-5 py-3 text-xs font-bold text-[#8a5a12] transition-transform hover:-translate-y-0.5" data-testid="button-still-learning"><ThumbsDown size={14} /> Still learning</button><button onClick={() => advance(true)} className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-xs font-bold text-primary-foreground transition-transform hover:-translate-y-0.5" data-testid="button-know-it"><ThumbsUp size={14} /> I know this</button></> : <button onClick={() => setFlipped(true)} className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-6 py-3 text-xs font-bold hover:bg-muted" data-testid="button-reveal-card">Reveal answer <ChevronRight size={14} /></button>}</div>
     <div className="mt-3 flex justify-center"><button onClick={resetDeck} className="inline-flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground hover:text-foreground" data-testid="button-restart-deck"><RotateCcw size={12} /> Restart deck</button></div>
+  </div>;
+}
+
+const AI_VISUALIZER_EXAMPLES = [
+  'Create an interactive step-by-step visualization of skeletal muscle contraction, from action potential through calcium release, cross-bridge cycling, and relaxation.',
+  'Show me how preload affects stroke volume via the Frank-Starling mechanism.',
+  'Explain cardiac output with an interactive HR and SV control.',
+  'Compare Type 1 and Type 2 diabetes mellitus.',
+];
+
+function AiVisualizer() {
+  const [prompt, setPrompt] = useState('');
+  const [spec, setSpec] = useState<VisualizationSpec | null>(null);
+  const [stepIndex, setStepIndex] = useState(0);
+
+  const generate = useMutation({
+    mutationFn: (p: string) => aiVisualizerApi.generate(p),
+    onSuccess: (data) => { setSpec(data.visualization); setStepIndex(0); },
+  });
+
+  const stepBased = spec ? isStepBased(spec) : false;
+  const stepCount = spec && isStepBased(spec) ? spec.steps.length : 0;
+  const loop = spec && isStepBased(spec) ? (spec.type === 'cycle' || !!spec.loop) : false;
+
+  const submit = () => { if (prompt.trim().length >= 3) generate.mutate(prompt.trim()); };
+  const startOver = () => { setSpec(null); generate.reset(); };
+
+  return <div className="mx-auto max-w-3xl">
+    <div className="mb-5 flex items-start gap-3">
+      <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-[#164b4b] text-white"><Wand2 size={20} /></div>
+      <div><h2 className="text-[22px] font-extrabold tracking-[-.03em]">AI Visualizer</h2><p className="mt-0.5 text-xs text-muted-foreground">Describe a process, cycle, equation, or comparison and see it come to life</p></div>
+    </div>
+
+    {!spec && (
+      <div className="rounded-2xl border border-border bg-card p-5">
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="e.g. Create an interactive step-by-step visualization of skeletal muscle contraction…"
+          className="min-h-32 w-full resize-none rounded-xl border border-border bg-background p-3 text-xs leading-6 outline-none focus:ring-2 focus:ring-primary/20"
+          data-testid="textarea-visualizer-prompt"
+        />
+        <div className="mt-3 flex flex-wrap gap-2">
+          {AI_VISUALIZER_EXAMPLES.map((ex, i) => (
+            <button key={i} onClick={() => setPrompt(ex)} className="rounded-full border border-border px-3 py-1.5 text-[11px] font-semibold text-muted-foreground hover:bg-muted hover:text-foreground" data-testid={`button-visualizer-example-${i}`}>{ex.length > 60 ? `${ex.slice(0, 57)}…` : ex}</button>
+          ))}
+        </div>
+        <button
+          onClick={submit}
+          disabled={generate.isPending || prompt.trim().length < 3}
+          className="mt-4 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-xs font-extrabold text-primary-foreground transition-transform hover:-translate-y-0.5 disabled:opacity-50"
+          data-testid="button-generate-visualization"
+        >
+          {generate.isPending ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
+          {generate.isPending ? 'Generating…' : 'Generate Visualization'}
+        </button>
+
+        {generate.isPending && <div className="mt-5"><SkeletonPage /></div>}
+        {generate.isError && (
+          <div className="mt-4 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-xs text-destructive" data-testid="text-visualizer-error">
+            {generate.error instanceof ApiRequestError ? generate.error.message : "Couldn't generate a visualization right now."}
+            <button onClick={submit} className="ml-3 font-bold underline" data-testid="button-visualizer-regenerate-error">Regenerate</button>
+          </div>
+        )}
+      </div>
+    )}
+
+    {spec && (
+      <div>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div><h3 className="text-sm font-extrabold" data-testid="text-visualizer-title">{spec.title}</h3><p className="mt-0.5 text-xs text-muted-foreground">{spec.description}</p></div>
+        </div>
+
+        <VisualizationRenderer spec={spec} stepIndex={stepIndex} />
+        {stepBased && <StepControls stepCount={stepCount} stepIndex={stepIndex} onStepChange={setStepIndex} loop={loop} />}
+        <ExplanationPanel spec={spec} stepIndex={stepIndex} />
+
+        <div className="mt-5 flex flex-wrap justify-center gap-3">
+          <button onClick={() => generate.mutate(prompt)} disabled={generate.isPending} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-4 py-2.5 text-xs font-bold hover:bg-muted disabled:opacity-50" data-testid="button-visualizer-regenerate">{generate.isPending ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />} Regenerate</button>
+          <button onClick={startOver} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-4 py-2.5 text-xs font-bold hover:bg-muted" data-testid="button-visualizer-new">New visualization</button>
+        </div>
+      </div>
+    )}
   </div>;
 }
 
@@ -841,11 +1024,33 @@ function FlaggedMcqs() {
   return <div><SectionHeader eyebrow="Your tools" title="Flagged MCQs" action={<span className="text-[10px] text-muted-foreground">Questions you marked for review</span>} /><div className="space-y-3">{(flags.data || []).map((flag: FlaggedMcq) => <div key={flag.id} className="flex items-center justify-between rounded-2xl border border-border bg-card p-4" data-testid={`card-flag-${flag.id}`}><div><div className="text-sm font-bold">MCQ #{flag.mcqId}</div>{flag.reason && <div className="text-[11px] text-muted-foreground">{flag.reason}</div>}<span className={cn('mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-bold', flag.status === 'open' ? 'bg-[#fdeecb] text-[#8a5a12]' : 'bg-[#d7eee4] text-[#164b4b]')}>{flag.status}</span></div><button onClick={() => remove.mutate(flag.id)} className="rounded-lg border border-border px-3 py-1.5 text-xs font-bold text-destructive" data-testid={`button-unflag-${flag.id}`}>Remove</button></div>)}{!flags.data?.length && <EmptyState icon={Flag} title="Nothing flagged" body="Flag a question from a practice session to come back to it later." />}</div></div>;
 }
 
+function Podium({ rows }: { rows: LeaderboardRow[] }) {
+  const [first, second, third] = rows;
+  const Slot = ({ row, place }: { row: LeaderboardRow; place: 1 | 2 | 3 }) => {
+    const config = { 1: { height: 'h-28', ring: 'ring-4 ring-[#e5a952]', badge: 'bg-[#e5a952] text-white', icon: Trophy, order: 'order-2' }, 2: { height: 'h-20', ring: 'ring-2 ring-[#c7d1da]', badge: 'bg-[#8a97a3] text-white', icon: Trophy, order: 'order-1' }, 3: { height: 'h-16', ring: 'ring-2 ring-[#cf9a6b]', badge: 'bg-[#b57c4c] text-white', icon: Trophy, order: 'order-3' } }[place];
+    return <div className={cn('flex flex-1 flex-col items-center', config.order)} data-testid={`podium-place-${place}`}>
+      <div className={cn('grid size-14 place-items-center rounded-full bg-[#d7eee4] text-sm font-extrabold text-[#164b4b]', config.ring)}>{initials(row.name)}</div>
+      <div className="mt-2 max-w-[90px] truncate text-center text-xs font-extrabold">{row.name}{row.isYou && <span className="block text-[9px] font-bold text-primary">(you)</span>}</div>
+      <div className="mt-0.5 font-mono-app text-[11px] text-muted-foreground">{row.points} pts</div>
+      <div className={cn('mt-2 flex w-full flex-col items-center justify-end rounded-t-xl pb-2 pt-3', config.height, place === 1 ? 'bg-[#fdeecb]' : place === 2 ? 'bg-[#eef1f4]' : 'bg-[#fbe9dc]')}><span className={cn('grid size-6 place-items-center rounded-full text-[11px] font-extrabold', config.badge)}>{place}</span></div>
+    </div>;
+  };
+  return <div className="mb-6 flex items-end justify-center gap-2 rounded-2xl border border-border bg-card p-6 pt-8 sm:gap-4">
+    {second && <Slot row={second} place={2} />}
+    {first && <Slot row={first} place={1} />}
+    {third && <Slot row={third} place={3} />}
+  </div>;
+}
+
 function Leaderboard() {
   const [range, setRange] = useState('30d');
   const board = useQuery({ queryKey: ['leaderboard', range], queryFn: () => analyticsApi.leaderboard(range), refetchInterval: 10_000, refetchIntervalInBackground: true });
+  const rows = board.data || [];
+  const top3 = rows.slice(0, 3);
+  const rest = rows.slice(3);
   return <div><SectionHeader eyebrow="Community" title="Leaderboard" action={<div className="flex items-center gap-3"><span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground"><span className="relative flex size-1.5"><span className="absolute inline-flex size-full animate-ping rounded-full bg-[#8bcbb8] opacity-75" /><span className="relative inline-flex size-1.5 rounded-full bg-primary" /></span>Live</span><div className="flex gap-1.5">{['7d', '30d', '3m', '1y'].map((r) => <button key={r} onClick={() => setRange(r)} className={cn('rounded-lg px-2.5 py-1.5 text-[11px] font-bold', range === r ? 'bg-primary text-primary-foreground' : 'bg-muted')} data-testid={`button-range-${r}`}>{r.toUpperCase()}</button>)}</div></div>} />
-    <div className="overflow-hidden rounded-2xl border border-border bg-card">{(board.data || []).map((row) => <div key={row.userId} className={cn('flex items-center justify-between border-b border-border px-4 py-3 last:border-0', row.isYou && 'bg-[#eef7f1]')} data-testid={`row-leaderboard-${row.userId}`}><div className="flex items-center gap-3"><span className="w-6 text-center text-sm font-extrabold text-muted-foreground">{row.rank}</span><div className="grid size-8 place-items-center rounded-full bg-[#d7eee4] text-[11px] font-extrabold text-[#164b4b]">{initials(row.name)}</div><div className="text-sm font-bold">{row.name}{row.isYou && <span className="ml-1.5 text-[10px] font-bold text-primary">(you)</span>}</div></div><div className="text-right"><div className="text-sm font-extrabold">{row.accuracy}%</div><div className="text-[10px] text-muted-foreground">{row.questionsAnswered} questions · {row.sessions} sessions</div></div></div>)}{!board.data?.length && <EmptyState icon={Trophy} title="No activity yet" body="Complete a practice session to appear on the leaderboard." />}</div>
+    {top3.length >= 1 && <Podium rows={top3} />}
+    <div className="overflow-hidden rounded-2xl border border-border bg-card">{rest.map((row) => <div key={row.userId} className={cn('flex items-center justify-between border-b border-border px-4 py-3 last:border-0', row.isYou && 'bg-[#eef7f1]')} data-testid={`row-leaderboard-${row.userId}`}><div className="flex items-center gap-3"><span className="w-6 text-center text-sm font-extrabold text-muted-foreground">{row.rank}</span><div className="grid size-8 place-items-center rounded-full bg-[#d7eee4] text-[11px] font-extrabold text-[#164b4b]">{initials(row.name)}</div><div className="text-sm font-bold">{row.name}{row.isYou && <span className="ml-1.5 text-[10px] font-bold text-primary">(you)</span>}</div></div><div className="text-right"><div className="text-sm font-extrabold">{row.points} pts</div><div className="text-[10px] text-muted-foreground">{row.accuracy}% acc · {row.questionsAnswered} questions · {row.sessions} sessions</div></div></div>)}{!rows.length && <EmptyState icon={Trophy} title="No activity yet" body="Complete a practice session to appear on the leaderboard." />}</div>
   </div>;
 }
 
@@ -962,7 +1167,7 @@ function ExamResult() {
   if (q.isLoading) return <SkeletonPage />;
   if (!r?.released) return <div className="mx-auto max-w-md rounded-2xl border border-border bg-card p-8 text-center"><Clock3 size={28} className="mx-auto text-muted-foreground" /><h2 className="mt-4 font-bold">Results not released yet</h2><p className="mt-2 text-xs text-muted-foreground">Your admin will release results according to this exam's settings. Check back soon.</p><Link href="/exams" className="mt-5 inline-block text-xs font-bold text-primary" data-testid="link-back-to-exams">Back to exams</Link></div>;
   return <div className="max-w-3xl"><div className="rounded-3xl border border-border bg-card p-8 text-center"><div className={cn('mx-auto grid size-16 place-items-center rounded-full', r.passed === false ? 'bg-destructive/10 text-destructive' : 'bg-[#d7eee4] text-[#164b4b]')}>{r.passed === false ? <X size={28} /> : <CheckCircle2 size={28} />}</div>{r.percentage != null && <div className="mt-5 font-display text-5xl">{r.percentage.toFixed(1)}%</div>}{r.passed !== null && <Badge tone={r.passed ? 'green' : 'red'}>{r.passed ? 'Passed' : 'Not passed'}</Badge>}<div className="mt-5 grid grid-cols-3 gap-3 text-xs"><div><div className="font-display text-xl">{r.correctCount}</div><div className="text-muted-foreground">Correct</div></div><div><div className="font-display text-xl">{r.wrongCount}</div><div className="text-muted-foreground">Wrong</div></div><div><div className="font-display text-xl">{r.unansweredCount}</div><div className="text-muted-foreground">Skipped</div></div></div></div>
-    {!!r.breakdown?.length && <div className="mt-6 space-y-3">{r.breakdown.map((b, i) => <div key={b.mcqId} className={cn('rounded-2xl border p-5', b.correct ? 'border-[#d7eee4]' : 'border-[#f0d3cc]')}><div className="text-xs font-bold text-muted-foreground">Q{i + 1}</div><p className="mt-1 text-sm font-bold">{b.question}</p><div className="mt-2 text-xs">{b.options.map((opt) => <div key={opt} className={cn('rounded-lg px-2 py-1', opt === b.correctAnswer ? 'bg-[#e6f3ed] font-bold text-[#287058]' : opt === b.selectedAnswer ? 'bg-[#fff1ed]' : '')}>{opt}</div>)}</div>{b.explanation && <p className="mt-2 text-xs text-muted-foreground">{b.explanation}</p>}</div>)}</div>}
+    {!!r.breakdown?.length && <div className="mt-6 space-y-3">{r.breakdown.map((b, i) => <div key={b.mcqId} className={cn('rounded-2xl border p-5', b.correct ? 'border-[#d7eee4]' : 'border-[#f0d3cc]')}><div className="text-xs font-bold text-muted-foreground">Q{i + 1}</div><p className="mt-1 text-sm font-bold">{b.question}</p><div className="mt-2 space-y-1.5 text-xs">{b.options.map((opt, oi) => { const optExplanation = b.optionExplanations?.[oi]; const isCorrectOpt = opt === b.correctAnswer; return <div key={opt} className={cn('rounded-lg px-2.5 py-1.5', isCorrectOpt ? 'bg-[#e6f3ed]' : opt === b.selectedAnswer ? 'bg-[#fff1ed]' : 'bg-muted/40')}><div className={cn(isCorrectOpt && 'font-bold text-[#287058]')}>{opt}{opt === b.selectedAnswer && !isCorrectOpt && <span className="ml-2 text-[10px] font-bold text-[#a34c3e]">Your answer</span>}</div>{optExplanation && <div className={cn('mt-1 text-[11px] leading-4', isCorrectOpt ? 'text-[#287058]' : 'text-muted-foreground')}>{optExplanation}</div>}</div>; })}</div>{!b.optionExplanations && b.explanation && <p className="mt-2 text-xs text-muted-foreground">{b.explanation}</p>}</div>)}</div>}
   </div>;
 }
 
@@ -981,6 +1186,6 @@ function useFaviconSync() {
 
 function AppRoutes() {
  useFaviconSync();
- return <Switch><Route path="/login" component={Login} /><Route path="/register" component={Register} /><Route path="/forgot-password" component={ForgotPassword} /><Route path="/reset-password" component={ResetPassword} /><Route path="/verify-email" component={VerifyEmail} /><Route path="/"><Shell><Dashboard /></Shell></Route><Route path="/modules"><Shell><Modules /></Shell></Route><Route path="/modules/:id"><Shell><Subjects /></Shell></Route><Route path="/subjects"><Shell><Subjects /></Shell></Route><Route path="/subjects/:id"><Shell><Subjects topics /></Shell></Route><Route path="/topics"><Shell><Subjects topics /></Shell></Route><Route path="/practice"><Shell><Practice /></Shell></Route><Route path="/exams"><Shell><Exams /></Shell></Route><Route path="/exams/take/:attemptId"><Shell><TakeExam /></Shell></Route><Route path="/exams/result/:attemptId"><Shell><ExamResult /></Shell></Route><Route path="/past-papers"><Shell><PastPapers /></Shell></Route><Route path="/flashcards"><Shell><Flashcards /></Shell></Route><Route path="/books"><Shell><Books /></Shell></Route><Route path="/resources"><Shell><Resources /></Shell></Route><Route path="/notebook"><Shell><Notebook /></Shell></Route><Route path="/saved-sessions"><Shell><SavedSessions /></Shell></Route><Route path="/flagged-mcqs"><Shell><FlaggedMcqs /></Shell></Route><Route path="/leaderboard"><Shell><Leaderboard /></Shell></Route><Route path="/notifications"><Shell><Notifications /></Shell></Route><Route path="/payments"><Shell><Payments /></Shell></Route><Route path="/feedback"><Shell><Feedback /></Shell></Route><Route path="/profile"><Shell><Profile /></Shell></Route><Route component={NotFound} /></Switch>; }
+ return <Switch><Route path="/login" component={Login} /><Route path="/register" component={Register} /><Route path="/forgot-password" component={ForgotPassword} /><Route path="/reset-password" component={ResetPassword} /><Route path="/verify-email" component={VerifyEmail} /><Route path="/"><Shell><Dashboard /></Shell></Route><Route path="/modules"><Shell><Modules /></Shell></Route><Route path="/modules/:id"><Shell><Subjects /></Shell></Route><Route path="/subjects"><Shell><Subjects /></Shell></Route><Route path="/subjects/:id"><Shell><Subjects topics /></Shell></Route><Route path="/topics"><Shell><Subjects topics /></Shell></Route><Route path="/practice"><Shell><Practice /></Shell></Route><Route path="/exams"><Shell><Exams /></Shell></Route><Route path="/exams/take/:attemptId"><Shell><TakeExam /></Shell></Route><Route path="/exams/result/:attemptId"><Shell><ExamResult /></Shell></Route><Route path="/past-papers"><Shell><PastPapers /></Shell></Route><Route path="/flashcards"><Shell><Flashcards /></Shell></Route><Route path="/ai-visualizer"><Shell><AiVisualizer /></Shell></Route><Route path="/books"><Shell><Books /></Shell></Route><Route path="/resources"><Shell><Resources /></Shell></Route><Route path="/notebook"><Shell><Notebook /></Shell></Route><Route path="/saved-sessions"><Shell><SavedSessions /></Shell></Route><Route path="/flagged-mcqs"><Shell><FlaggedMcqs /></Shell></Route><Route path="/leaderboard"><Shell><Leaderboard /></Shell></Route><Route path="/notifications"><Shell><Notifications /></Shell></Route><Route path="/payments"><Shell><Payments /></Shell></Route><Route path="/feedback"><Shell><Feedback /></Shell></Route><Route path="/profile"><Shell><Profile /></Shell></Route><Route component={NotFound} /></Switch>; }
 function App() { return <QueryClientProvider client={queryClient}><TooltipProvider><WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}><ErrorBoundary><AppRoutes /></ErrorBoundary></WouterRouter><Toaster /></TooltipProvider></QueryClientProvider>; }
 export default App;

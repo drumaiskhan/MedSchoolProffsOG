@@ -50,8 +50,14 @@ app.use(
 // explicitly in production.
 const allowedOrigins = process.env.APP_URL?.split(",").map((o) => o.trim()).filter(Boolean);
 app.use(cors({ origin: allowedOrigins && allowedOrigins.length > 0 ? allowedOrigins : true, credentials: true }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Default body-parser limit is 100kb — plenty for a single MCQ/flashcard,
+// but a bulk "Add multiple" submission (e.g. 20+ flashcards or MCQs pasted
+// at once) can exceed that easily, and the request gets rejected with a
+// "PayloadTooLargeError" before it ever reaches the route handler. Raised
+// generously so real bulk-import/bulk-create payloads (including base64
+// file uploads sent as JSON) go through.
+app.use(express.json({ limit: "25mb" }));
+app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 app.use(cookieParser());
 app.use(attachUser);
 
@@ -78,6 +84,15 @@ app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
   if (res.headersSent) return;
   if (err instanceof multer.MulterError) {
     res.status(400).json({ error: err.code === "LIMIT_FILE_SIZE" ? "File is too large." : err.message });
+    return;
+  }
+  // body-parser throws a plain Error with a `type`/`status` for malformed or
+  // oversized request bodies (e.g. "entity.too.large") — surface a real
+  // message and status instead of a generic 500, so a bulk create/import
+  // that's still too big shows "request too large", not an opaque failure.
+  if (err && typeof err === "object" && "type" in err && typeof (err as { status?: unknown }).status === "number") {
+    const bodyErr = err as { type?: string; status: number; message?: string };
+    res.status(bodyErr.status).json({ error: bodyErr.type === "entity.too.large" ? "That request is too large — try submitting fewer items at once." : (bodyErr.message || "Invalid request body.") });
     return;
   }
   const message = err instanceof Error ? err.message : "Something went wrong. Please try again.";

@@ -123,8 +123,8 @@ router.get("/admin/exams/:id/attempts", requireAdmin, async (req, res): Promise<
   const rows = await db.select().from(examAttemptsTable).where(eq(examAttemptsTable.examId, examId)).orderBy(desc(examAttemptsTable.startedAt));
   const userIds = [...new Set(rows.map((r) => r.userId))];
   const users = userIds.length ? await db.select().from(usersTable) : [];
-  const userMap = new Map(users.filter((u) => userIds.includes(u.id)).map((u) => [u.id, u.name]));
-  res.json(rows.map((r) => ({ ...r, score: Number(r.score), percentage: Number(r.percentage), studentName: userMap.get(r.userId) ?? "Unknown" })));
+  const userMap = new Map(users.filter((u) => userIds.includes(u.id)).map((u) => [u.id, u]));
+  res.json(rows.map((r) => { const u = userMap.get(r.userId); return { ...r, score: Number(r.score), percentage: Number(r.percentage), studentName: u?.name ?? "Unknown", institution: u?.institution ?? "—" }; }));
 });
 
 router.post("/admin/exam-attempts/:id/release", requireAdmin, async (req, res): Promise<void> => {
@@ -286,14 +286,14 @@ router.get("/exam-attempts/:id/result", requireAuth, async (req, res): Promise<v
     : true;
   if (!released) { res.json({ released: false }); return; }
 
-  let breakdown: Array<{ mcqId: number; question: string; options: string[]; selectedAnswer: string | null; correctAnswer: string | null; explanation: string | null; correct: boolean | null }> = [];
+  let breakdown: Array<{ mcqId: number; question: string; options: string[]; selectedAnswer: string | null; correctAnswer: string | null; explanation: string | null; optionExplanations: (string | null)[] | null; correct: boolean | null }> = [];
   if (exam.showCorrectAnswers) {
     const questions = await db.select({ examQuestion: examQuestionsTable, mcq: mcqsTable }).from(examQuestionsTable).innerJoin(mcqsTable, eq(examQuestionsTable.mcqId, mcqsTable.id)).where(eq(examQuestionsTable.examId, attempt.examId)).orderBy(examQuestionsTable.displayOrder);
     const answers = await db.select().from(examAnswersTable).where(eq(examAnswersTable.attemptId, attemptId));
     const answerMap = new Map(answers.map((a) => [a.mcqId, a]));
     breakdown = questions.map(({ mcq }) => {
       const a = answerMap.get(mcq.id);
-      return { mcqId: mcq.id, question: mcq.question, options: mcq.options, selectedAnswer: a?.selectedAnswer ?? null, correctAnswer: mcq.correctAnswer, explanation: mcq.explanation, correct: a?.correct ?? null };
+      return { mcqId: mcq.id, question: mcq.question, options: mcq.options, selectedAnswer: a?.selectedAnswer ?? null, correctAnswer: mcq.correctAnswer, explanation: mcq.explanation, optionExplanations: mcq.optionExplanations, correct: a?.correct ?? null };
     });
   }
 

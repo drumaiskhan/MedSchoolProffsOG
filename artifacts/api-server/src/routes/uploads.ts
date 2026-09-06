@@ -1,15 +1,31 @@
 import { Router, type IRouter } from "express";
 import multer from "multer";
-import path from "node:path";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
-import { uploadFile, resolveFileUrl, localUploadDir } from "../lib/storage";
+import { uploadFile, resolveFileUrl } from "../lib/storage";
 import { checkRateLimit } from "../lib/rateLimit";
 
 const router: IRouter = Router();
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB — payment proofs/profile pictures
+  fileFilter: (_req, file, cb) => {
+    const allowed = ["image/png", "image/jpeg", "image/webp", "application/pdf"];
+    if (!allowed.includes(file.mimetype)) {
+      cb(new Error("Only PNG, JPEG, WEBP, or PDF files are allowed"));
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+// Books and resources now route to Cloudinary (see lib/storage.ts), which
+// comfortably handles larger files than the 10MB cap above — raised here so
+// a genuinely large textbook PDF isn't rejected at the multer layer before
+// it even reaches uploadFile()'s own size-based routing check.
+const uploadLarge = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
   fileFilter: (_req, file, cb) => {
     const allowed = ["image/png", "image/jpeg", "image/webp", "application/pdf"];
     if (!allowed.includes(file.mimetype)) {
@@ -71,7 +87,7 @@ router.post("/uploads/profile-picture", requireAuth, upload.single("file"), asyn
   res.status(201).json({ storagePath, url: resolveFileUrl(storagePath) });
 });
 
-router.post("/uploads/resource", requireAuth, upload.single("file"), async (req, res): Promise<void> => {
+router.post("/uploads/resource", requireAuth, uploadLarge.single("file"), async (req, res): Promise<void> => {
   if (!req.file) {
     res.status(400).json({ error: "No file uploaded" });
     return;
@@ -81,7 +97,7 @@ router.post("/uploads/resource", requireAuth, upload.single("file"), async (req,
 });
 
 // Books library — admin-only PDF (and optional cover image) uploads.
-router.post("/uploads/book", requireAdmin, upload.single("file"), async (req, res): Promise<void> => {
+router.post("/uploads/book", requireAdmin, uploadLarge.single("file"), async (req, res): Promise<void> => {
   if (!req.file) {
     res.status(400).json({ error: "No file uploaded" });
     return;
@@ -103,25 +119,9 @@ router.post("/uploads/favicon", requireAdmin, uploadFavicon.single("file"), asyn
   res.status(201).json({ storagePath, url: resolveFileUrl(storagePath), mimeType: req.file.mimetype });
 });
 
-// Serves locally-stored uploads (only reached when Supabase Storage isn't
-// configured). Payment proofs and profile pictures are personal/financial
-// documents, so those folders must never be reachable by an anonymous or
-// unrelated caller — requireAuth is the floor. We don't further restrict to
-// owner-or-admin here because folder/filename alone doesn't identify the
-// owning user without an extra DB lookup per request; if that's needed,
-// join storagePath back to the owning payment/user record before serving.
-// The favicon folder is the one exception: it holds nothing sensitive and
-// browsers request it without credentials, so it's served publicly.
-router.get("/uploads/:folder/:filename", (req, res, next): void => {
-  const folder = path.basename(req.params.folder);
-  if (folder === "favicon") { next(); return; }
-  requireAuth(req, res, next);
-}, (req, res): void => {
-  const folder = path.basename(req.params.folder);
-  const filename = path.basename(req.params.filename);
-  res.sendFile(path.join(localUploadDir(), folder, filename), (err) => {
-    if (err) res.status(404).json({ error: "File not found" });
-  });
-});
+// Local-disk file serving (/api/uploads/:folder/:filename) has been removed
+// — uploadFile() no longer writes to local disk at all (see lib/storage.ts),
+// so there's nothing left for this route to serve. Every storagePath now
+// resolves directly to a Supabase or Cloudinary URL via resolveFileUrl().
 
 export default router;

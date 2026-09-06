@@ -14,6 +14,7 @@ import siteContentRouter from "./site-content";
 import examsRouter from "./exams";
 import explanationsRouter from "./explanations";
 import booksRouter from "./books";
+import aiVisualizerRouter from "./ai-visualizer";
 
 const router: IRouter = Router();
 
@@ -31,6 +32,7 @@ router.use(siteContentRouter);
 router.use(examsRouter);
 router.use(explanationsRouter);
 router.use(booksRouter);
+router.use(aiVisualizerRouter);
 router.use(medschoolRouter);
 
 export default router;

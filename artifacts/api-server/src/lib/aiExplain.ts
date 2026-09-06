@@ -1,6 +1,8 @@
 /* ============================================================
-  AI PROVIDERS
-  ============================================================ */
+   AI PROVIDERS
+   ============================================================ */
+
+import { getSetting } from "./settings";
 
 export type AIProvider =
   | "openai"
@@ -9,13 +11,21 @@ export type AIProvider =
   | "groq"
   | "custom";
 
+export const AI_PROVIDERS: readonly AIProvider[] = [
+  "openai",
+  "gemini",
+  "anthropic",
+  "groq",
+  "custom",
+];
+
 /* ============================================================
-  ERRORS
-  ============================================================ */
+   ERRORS
+   ============================================================ */
 
 export class AiNotConfiguredError extends Error {
   constructor(
-    message = "AI is not configured. Please configure the AI environment variables.",
+    message = "AI is not configured. Configure it from Admin → Platform Settings → AI, or set the appropriate backend environment variables.",
   ) {
     super(message);
     this.name = "AiNotConfiguredError";
@@ -23,8 +33,8 @@ export class AiNotConfiguredError extends Error {
 }
 
 /* ============================================================
-  TYPES
-  ============================================================ */
+   TYPES
+   ============================================================ */
 
 export interface ExplanationRequest {
   question: string;
@@ -49,9 +59,24 @@ export interface FlashcardGenerationMcq {
 }
 
 export interface FlashcardGenerationRequest {
+  /**
+   * Either explicit source text or MCQ material.
+   */
   sourceText?: string;
+
+  /**
+   * MCQs that the AI may use as source material.
+   */
   mcqs?: FlashcardGenerationMcq[];
+
+  /**
+   * Optional topic to focus the generated cards on.
+   */
   topicLabel?: string;
+
+  /**
+   * Number of cards requested.
+   */
   count: number;
 }
 
@@ -71,6 +96,14 @@ export interface GeneratedMcq {
   options: string[];
   correctAnswer: string;
   explanation: string;
+
+  /**
+   * Index-aligned with options.
+   *
+   * Each entry explains why that specific option is correct
+   * or incorrect.
+   */
+  optionExplanations: string[];
 }
 
 interface AIConfig {
@@ -81,8 +114,8 @@ interface AIConfig {
 }
 
 /* ============================================================
-  LIMITS
-  ============================================================ */
+   LIMITS
+   ============================================================ */
 
 const MAX_FLASHCARDS = 100;
 const FLASHCARD_BATCH_SIZE = 20;
@@ -93,8 +126,20 @@ const MCQ_BATCH_SIZE = 20;
 const MAX_GENERATION_ATTEMPTS = 4;
 
 /* ============================================================
-  HELPERS
-  ============================================================ */
+   DEFAULT MODELS
+   ============================================================ */
+
+const DEFAULT_MODELS: Record<AIProvider, string> = {
+  openai: "gpt-4o-mini",
+  gemini: "gemini-2.0-flash",
+  anthropic: "claude-sonnet-4-6",
+  groq: "llama-3.3-70b-versatile",
+  custom: "gpt-4o-mini",
+};
+
+/* ============================================================
+   HELPERS
+   ============================================================ */
 
 function normalizeText(value: unknown): string {
   if (value === null || value === undefined) {
@@ -107,6 +152,10 @@ function normalizeText(value: unknown): string {
     .trim();
 }
 
+function getEnv(name: string): string {
+  return normalizeText(process.env[name]);
+}
+
 function isProvider(value: string): value is AIProvider {
   return (
     value === "openai" ||
@@ -117,78 +166,151 @@ function isProvider(value: string): value is AIProvider {
   );
 }
 
-function getEnv(name: string): string {
-  return normalizeText(process.env[name]);
+function getDefaultModel(provider: AIProvider): string {
+  return DEFAULT_MODELS[provider];
 }
 
 /* ============================================================
-  AI CONFIGURATION
-  ============================================================ */
+   AI CONFIGURATION
+   ============================================================ */
 
 /**
- * AI configuration comes ONLY from backend environment variables.
+ * Configuration priority:
  *
- * Required:
- *   AI_PROVIDER
- *   AI_API_KEY
- *   AI_MODEL
+ * 1. Admin database settings
+ * 2. Generic AI_* environment variables
+ * 3. Provider-specific environment variables
  *
- * Optional:
- *   AI_BASE_URL
+ * Admin settings therefore allow the AI provider/API key/model
+ * to be changed without modifying the server environment.
  *
- * Example:
+ * Supported generic env vars:
  *
- *   AI_PROVIDER=groq
- *   AI_API_KEY=your_api_key
- *   AI_MODEL=your_model
- *   AI_BASE_URL=
+ * AI_PROVIDER
+ * AI_API_KEY
+ * AI_MODEL
+ * AI_BASE_URL
  *
- * The Admin Panel/database is NOT used for AI configuration.
+ * Supported provider-specific fallback keys:
+ *
+ * OPENAI_API_KEY
+ * GEMINI_API_KEY
+ * ANTHROPIC_API_KEY
+ * GROQ_API_KEY
  */
+async function getAIConfig(): Promise<AIConfig> {
+  const dbProvider = normalizeText(
+    await getSetting("AI_PROVIDER", null),
+  ).toLowerCase();
 
-function getAIConfig(): AIConfig {
-  const providerValue = getEnv("AI_PROVIDER").toLowerCase();
+  const dbApiKey = normalizeText(
+    await getSetting("AI_API_KEY", null),
+  );
 
-  if (!providerValue) {
+  const dbModel = normalizeText(
+    await getSetting("AI_MODEL", null),
+  );
+
+  const dbBaseUrl = normalizeText(
+    await getSetting("AI_BASE_URL", null),
+  );
+
+  const envProvider = getEnv("AI_PROVIDER").toLowerCase();
+  const envApiKey = getEnv("AI_API_KEY");
+  const envModel = getEnv("AI_MODEL");
+  const envBaseUrl = getEnv("AI_BASE_URL");
+
+  /*
+   * Provider-specific API key fallback.
+   */
+  const providerSpecificKeys: Record<AIProvider, string> = {
+    openai: getEnv("OPENAI_API_KEY"),
+    gemini: getEnv("GEMINI_API_KEY"),
+    anthropic: getEnv("ANTHROPIC_API_KEY"),
+    groq: getEnv("GROQ_API_KEY"),
+    custom: "",
+  };
+
+  /*
+   * Prefer the database provider when configured.
+   */
+  const providerValue = (
+    dbProvider ||
+    envProvider
+  ).toLowerCase();
+
+  /*
+   * If no explicit provider was configured, automatically
+   * detect a provider from provider-specific API keys.
+   */
+  let detectedProvider = providerValue;
+
+  if (!detectedProvider) {
+    if (providerSpecificKeys.anthropic) {
+      detectedProvider = "anthropic";
+    } else if (providerSpecificKeys.openai) {
+      detectedProvider = "openai";
+    } else if (providerSpecificKeys.gemini) {
+      detectedProvider = "gemini";
+    } else if (providerSpecificKeys.groq) {
+      detectedProvider = "groq";
+    }
+  }
+
+  if (!detectedProvider) {
     throw new AiNotConfiguredError(
-      "AI provider is not configured. Set AI_PROVIDER in the backend environment variables.",
+      "No AI provider is configured. Configure AI from Admin → Platform Settings → AI, or set AI_PROVIDER in the backend environment.",
     );
   }
 
-  if (!isProvider(providerValue)) {
+  if (!isProvider(detectedProvider)) {
     throw new AiNotConfiguredError(
-      `Unsupported AI provider: ${providerValue}`,
+      `Unsupported AI provider: ${detectedProvider}`,
     );
   }
 
-  const provider = providerValue;
+  const provider = detectedProvider;
 
-  const apiKey = getEnv("AI_API_KEY");
-  const model = getEnv("AI_MODEL");
-  const baseUrl = getEnv("AI_BASE_URL");
+  /*
+   * Database API key takes priority over environment variables.
+   */
+  const apiKey =
+    dbApiKey ||
+    envApiKey ||
+    providerSpecificKeys[provider] ||
+    "";
+
+  const model =
+    dbModel ||
+    envModel ||
+    getDefaultModel(provider);
+
+  const baseUrl =
+    dbBaseUrl ||
+    envBaseUrl ||
+    undefined;
 
   if (!model) {
     throw new AiNotConfiguredError(
-      "AI model is missing. Set AI_MODEL in the backend environment variables.",
+      "AI model is missing. Configure AI_MODEL or select a model from Admin → Platform Settings → AI.",
     );
   }
 
   /*
-   * Official providers require an API key.
+   * Official providers require API keys.
    *
-   * Custom OpenAI-compatible endpoints may optionally
-   * operate without a key, allowing local/self-hosted
-   * AI servers.
+   * Custom endpoints may operate without a key because
+   * locally/self-hosted models may not require authentication.
    */
   if (provider !== "custom" && !apiKey) {
     throw new AiNotConfiguredError(
-      "AI API key is missing. Set AI_API_KEY in the backend environment variables.",
+      `AI API key is missing for ${provider}. Configure it from Admin → Platform Settings → AI or set the appropriate environment variable.`,
     );
   }
 
   if (provider === "custom" && !baseUrl) {
     throw new AiNotConfiguredError(
-      "Custom AI requires AI_BASE_URL in the backend environment variables.",
+      "Custom AI requires AI_BASE_URL. Configure it from Admin → Platform Settings → AI.",
     );
   }
 
@@ -196,15 +318,17 @@ function getAIConfig(): AIConfig {
     provider,
     apiKey: apiKey || undefined,
     model,
-    baseUrl: baseUrl || undefined,
+    baseUrl,
   };
 }
 
 /* ============================================================
-  RESPONSE HANDLING
-  ============================================================ */
+   RESPONSE HANDLING
+   ============================================================ */
 
-async function parseResponse(response: Response): Promise<any> {
+async function parseResponse(
+  response: Response,
+): Promise<any> {
   const text = await response.text();
 
   let data: any;
@@ -214,12 +338,18 @@ async function parseResponse(response: Response): Promise<any> {
   } catch {
     if (!response.ok) {
       throw new Error(
-        `AI provider returned HTTP ${response.status}: ${text.slice(0, 500)}`,
+        `AI provider returned HTTP ${response.status}: ${text.slice(
+          0,
+          500,
+        )}`,
       );
     }
 
     throw new Error(
-      `AI provider returned an invalid response: ${text.slice(0, 500)}`,
+      `AI provider returned an invalid response: ${text.slice(
+        0,
+        500,
+      )}`,
     );
   }
 
@@ -228,7 +358,9 @@ async function parseResponse(response: Response): Promise<any> {
       data?.error?.message ||
       data?.error?.type ||
       data?.message ||
-      (typeof data?.error === "string" ? data.error : undefined) ||
+      (typeof data?.error === "string"
+        ? data.error
+        : undefined) ||
       `AI request failed with HTTP ${response.status}`;
 
     throw new Error(String(message));
@@ -240,9 +372,20 @@ async function parseResponse(response: Response): Promise<any> {
 function cleanAIJson(text: string): string {
   let cleaned = text.trim();
 
-  cleaned = cleaned.replace(/^```json\s*/i, "");
-  cleaned = cleaned.replace(/^```\s*/i, "");
-  cleaned = cleaned.replace(/\s*```$/i, "");
+  cleaned = cleaned.replace(
+    /^```json\s*/i,
+    "",
+  );
+
+  cleaned = cleaned.replace(
+    /^```\s*/i,
+    "",
+  );
+
+  cleaned = cleaned.replace(
+    /\s*```$/i,
+    "",
+  );
 
   return cleaned.trim();
 }
@@ -253,16 +396,22 @@ function extractJsonArray(text: string): string {
   const start = cleaned.indexOf("[");
   const end = cleaned.lastIndexOf("]");
 
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error("AI did not return a valid JSON array.");
+  if (
+    start === -1 ||
+    end === -1 ||
+    end <= start
+  ) {
+    throw new Error(
+      "AI did not return a valid JSON array.",
+    );
   }
 
   return cleaned.slice(start, end + 1);
 }
 
 /* ============================================================
-  PROVIDER: ANTHROPIC
-  ============================================================ */
+   PROVIDER: ANTHROPIC
+   ============================================================ */
 
 async function callAnthropic(
   config: AIConfig,
@@ -310,10 +459,12 @@ async function callAnthropic(
 
   const text = content
     .filter(
-      (item: any) => item?.type === "text",
+      (item: any) =>
+        item?.type === "text",
     )
     .map(
-      (item: any) => item?.text || "",
+      (item: any) =>
+        item?.text || "",
     )
     .join("\n")
     .trim();
@@ -328,8 +479,8 @@ async function callAnthropic(
 }
 
 /* ============================================================
-  PROVIDER: OPENAI / GROQ / CUSTOM
-  ============================================================ */
+   PROVIDER: OPENAI / GROQ / CUSTOM
+   ============================================================ */
 
 async function callOpenAICompatible(
   config: AIConfig,
@@ -340,19 +491,23 @@ async function callOpenAICompatible(
 
   if (!baseUrl) {
     if (config.provider === "openai") {
-      baseUrl = "https://api.openai.com/v1";
+      baseUrl =
+        "https://api.openai.com/v1";
     } else if (config.provider === "groq") {
-      baseUrl = "https://api.groq.com/openai/v1";
+      baseUrl =
+        "https://api.groq.com/openai/v1";
     } else {
       throw new AiNotConfiguredError(
-        "Custom AI requires AI_BASE_URL in the backend environment variables.",
+        "Custom AI requires AI_BASE_URL.",
       );
     }
   }
 
   baseUrl = baseUrl.replace(/\/+$/, "");
 
-  const url = baseUrl.endsWith("/chat/completions")
+  const url = baseUrl.endsWith(
+    "/chat/completions",
+  )
     ? baseUrl
     : `${baseUrl}/chat/completions`;
 
@@ -361,7 +516,8 @@ async function callOpenAICompatible(
   };
 
   if (config.apiKey) {
-    headers.Authorization = `Bearer ${config.apiKey}`;
+    headers.Authorization =
+      `Bearer ${config.apiKey}`;
   }
 
   const response = await fetch(url, {
@@ -419,8 +575,8 @@ async function callOpenAICompatible(
 }
 
 /* ============================================================
-  PROVIDER: GEMINI
-  ============================================================ */
+   PROVIDER: GEMINI
+   ============================================================ */
 
 async function callGemini(
   config: AIConfig,
@@ -485,7 +641,8 @@ async function callGemini(
 
   const text = parts
     .map(
-      (part: any) => part?.text || "",
+      (part: any) =>
+        part?.text || "",
     )
     .join("")
     .trim();
@@ -500,14 +657,14 @@ async function callGemini(
 }
 
 /* ============================================================
-  CENTRAL AI DISPATCHER
-  ============================================================ */
+   CENTRAL AI DISPATCHER
+   ============================================================ */
 
 async function generateText(
   systemPrompt: string,
   userPrompt: string,
 ): Promise<string> {
-  const config = getAIConfig();
+  const config = await getAIConfig();
 
   switch (config.provider) {
     case "gemini":
@@ -541,8 +698,61 @@ async function generateText(
 }
 
 /* ============================================================
-  MCQ EXPLANATIONS
-  ============================================================ */
+   GENERIC PROMPT
+   ============================================================ */
+
+function buildPrompt(
+  request: ExplanationRequest,
+): string {
+  const options = request.options || [];
+
+  const optionList =
+    options.length > 0
+      ? options
+          .map(
+            (option, index) =>
+              `${String.fromCharCode(
+                65 + index,
+              )}. ${option}`,
+          )
+          .join("\n")
+      : "Not provided";
+
+  return [
+    "You are an expert medical education assistant for MedschoolProffs.",
+    "",
+    "Write a concise, medically accurate explanation for an MBBS/BDS-level MCQ.",
+    "",
+    "Explain why the correct answer is correct.",
+    "When options are provided, briefly explain why the other options are incorrect.",
+    "Do not invent unsupported medical facts.",
+    "Use the reference material when provided.",
+    "Keep the explanation focused and useful for exam revision.",
+    "Do not mention that you are an AI.",
+    "",
+    request.topicLabel
+      ? `Topic: ${request.topicLabel}`
+      : "",
+    "",
+    `Question: ${request.question}`,
+    "",
+    `Options:\n${optionList}`,
+    "",
+    `Correct answer: ${
+      request.correctAnswer || "Not provided"
+    }`,
+    "",
+    `Reference: ${
+      request.reference || "Not provided"
+    }`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/* ============================================================
+   MCQ EXPLANATIONS
+   ============================================================ */
 
 export async function generateExplanation(
   request: ExplanationRequest,
@@ -550,7 +760,7 @@ export async function generateExplanation(
   const systemPrompt = `
 You are an expert medical education assistant for MedschoolProffs.
 
-Your task is to explain medical MCQs accurately for MBBS students.
+Your task is to explain medical MCQs accurately for MBBS/BDS students.
 
 Rules:
 - Explain why the correct answer is correct.
@@ -562,34 +772,7 @@ Rules:
 - Do not mention that you are an AI.
 `.trim();
 
-  const optionsText =
-    request.options &&
-    request.options.length > 0
-      ? request.options
-          .map(
-            (option, index) =>
-              `${index + 1}. ${option}`,
-          )
-          .join("\n")
-      : "Not provided";
-
-  const userPrompt = `
-${request.topicLabel ? `Topic: ${request.topicLabel}\n` : ""}
-
-Question:
-${request.question}
-
-Options:
-${optionsText}
-
-Correct Answer:
-${request.correctAnswer || "Not provided"}
-
-Reference:
-${request.reference || "Not provided"}
-
-Provide a concise but educational explanation.
-`.trim();
+  const userPrompt = buildPrompt(request);
 
   return generateText(
     systemPrompt,
@@ -598,8 +781,33 @@ Provide a concise but educational explanation.
 }
 
 /* ============================================================
-  FLASHCARD EXPLANATION
-  ============================================================ */
+   FLASHCARD EXPLANATION
+   ============================================================ */
+
+function buildFlashcardPrompt(
+  request: FlashcardExplanationRequest,
+): string {
+  return [
+    "You are helping a medical student understand a flashcard.",
+    "Explain the medical concept behind the answer.",
+    "Use a mechanism walkthrough, analogy, or clinical example where useful.",
+    "Be medically accurate.",
+    "Do not introduce unsupported claims.",
+    "Keep the explanation concise and revision-friendly.",
+    "Do not use markdown headers.",
+    "Do not mention that you are an AI.",
+    "",
+    request.topicLabel
+      ? `Topic: ${request.topicLabel}`
+      : "",
+    "",
+    `Flashcard front: ${request.front}`,
+    "",
+    `Flashcard back: ${request.back}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
 
 export async function generateFlashcardExplanation(
   request: FlashcardExplanationRequest,
@@ -618,21 +826,8 @@ Rules:
 - Do not mention that you are an AI.
 `.trim();
 
-  const userPrompt = `
-${
-  request.topicLabel
-    ? `Topic: ${request.topicLabel}\n`
-    : ""
-}
-
-Flashcard Front:
-${request.front}
-
-Flashcard Back:
-${request.back}
-
-Provide a concise educational explanation.
-`.trim();
+  const userPrompt =
+    buildFlashcardPrompt(request);
 
   return generateText(
     systemPrompt,
@@ -641,8 +836,8 @@ Provide a concise educational explanation.
 }
 
 /* ============================================================
-  FLASHCARD SOURCE MATERIAL
-  ============================================================ */
+   FLASHCARD SOURCE MATERIAL
+   ============================================================ */
 
 function buildSourceMaterial(
   request: FlashcardGenerationRequest,
@@ -709,8 +904,8 @@ ${mcq.explanation || ""}
 }
 
 /* ============================================================
-  FLASHCARD PARSER
-  ============================================================ */
+   FLASHCARD PARSER
+   ============================================================ */
 
 function parseFlashcards(
   text: string,
@@ -805,8 +1000,8 @@ function deduplicateFlashcards(
 }
 
 /* ============================================================
-  FLASHCARD GENERATION
-  ============================================================ */
+   FLASHCARD GENERATION
+   ============================================================ */
 
 async function generateFlashcardBatch(
   request: FlashcardGenerationRequest,
@@ -849,10 +1044,21 @@ Rules:
 - Make them useful for active recall.
 - Keep answers concise but sufficient.
 - Do not invent information not supported by the material.
+${
+  request.topicLabel
+    ? `- Keep every card specifically relevant to the topic "${request.topicLabel}".`
+    : ""
+}
 `.trim();
 
   const userPrompt = `
-Create ${count} medical flashcards from the following material.
+Create exactly ${count} medical flashcards from the following material.
+
+${
+  request.topicLabel
+    ? `Selected topic: ${request.topicLabel}\n`
+    : ""
+}
 
 ${sourceMaterial}
 `.trim();
@@ -874,8 +1080,8 @@ ${sourceMaterial}
       const cards =
         parseFlashcards(response);
 
-      if (cards.length > 0) {
-        return cards;
+      if (cards.length >= 1) {
+        return cards.slice(0, count);
       }
 
       lastError = new Error(
@@ -944,8 +1150,8 @@ export async function generateFlashcardSet(
 }
 
 /* ============================================================
-  MCQ PARSER
-  ============================================================ */
+   MCQ PARSER
+   ============================================================ */
 
 function parseMcqs(
   text: string,
@@ -981,33 +1187,40 @@ function parseMcqs(
     const record =
       item as Record<string, unknown>;
 
-    const question =
-      normalizeText(
-        record.question,
-      );
+    const question = normalizeText(
+      record.question,
+    );
 
-    const explanation =
-      normalizeText(
-        record.explanation,
-      );
+    const explanation = normalizeText(
+      record.explanation,
+    );
 
     const options =
       Array.isArray(record.options)
         ? record.options
-            .map((option) =>
-              normalizeText(option),
-            )
+            .map(normalizeText)
             .filter(Boolean)
         : [];
 
-    const answer =
-      normalizeText(
-        record.correctAnswer ||
-          record.answer,
-      );
+    const answer = normalizeText(
+      record.correctAnswer ||
+        record.answer,
+    );
+
+    const rawOptionExplanations =
+      record.optionExplanations;
+
+    const optionExplanations =
+      Array.isArray(
+        rawOptionExplanations,
+      )
+        ? rawOptionExplanations
+            .map(normalizeText)
+        : [];
 
     /*
-     * Require exactly four options.
+     * Every generated MCQ must have exactly
+     * four options.
      */
     if (
       !question ||
@@ -1018,8 +1231,8 @@ function parseMcqs(
     }
 
     /*
-     * Correct answer must exactly match
-     * one of the four options.
+     * Correct answer must exactly match one
+     * of the four options, ignoring case.
      */
     const matchingOption =
       options.find(
@@ -1032,16 +1245,33 @@ function parseMcqs(
       continue;
     }
 
+    /*
+     * Require one explanation per option.
+     * If the AI failed to provide them, create
+     * safe empty entries rather than misaligning
+     * the explanations.
+     */
+    const normalizedOptionExplanations =
+      optionExplanations.length === 4
+        ? optionExplanations
+        : ["", "", "", ""];
+
     mcqs.push({
       question,
       options,
       correctAnswer: matchingOption,
       explanation,
+      optionExplanations:
+        normalizedOptionExplanations,
     });
   }
 
   return deduplicateMcqs(mcqs);
 }
+
+/* ============================================================
+   MCQ DEDUPLICATION
+   ============================================================ */
 
 function deduplicateMcqs(
   mcqs: GeneratedMcq[],
@@ -1067,9 +1297,24 @@ function deduplicateMcqs(
 }
 
 /* ============================================================
-  MCQ GENERATION PROMPT
-  ============================================================ */
+   MCQ GENERATION PROMPT
+   ============================================================ */
 
+/**
+ * This prompt intentionally locks the AI to the selected topic.
+ *
+ * This prevents situations such as:
+ *
+ * Selected topic:
+ * "Blood"
+ *
+ * AI:
+ * "What is the smallest bone in the body?"
+ *
+ * Existing questions are used only to avoid duplicates
+ * and match difficulty. They are NOT treated as source
+ * material for the subject matter.
+ */
 function buildMcqGenerationPrompt(
   request: McqGenerationRequest,
   count: number,
@@ -1093,7 +1338,15 @@ function buildMcqGenerationPrompt(
       ? `
 Existing questions already present in this topic.
 
-DO NOT repeat or closely paraphrase these:
+These are provided ONLY to prevent duplicates.
+
+DO NOT:
+- Repeat them.
+- Closely paraphrase them.
+- Copy their wording.
+- Use an unrelated subject from them.
+
+Use them only to understand difficulty level.
 
 ${existingQuestions
   .map(
@@ -1109,15 +1362,64 @@ There are no existing questions to avoid.
   const systemPrompt = `
 You are an expert medical MCQ writer for MedschoolProffs.
 
-Generate exactly ${count} high-quality medical MCQs.
+THE SELECTED TOPIC IS:
 
-The questions MUST specifically belong to this topic:
+"${topicLabel}"
 
-${topicLabel}
+Every single question MUST specifically test knowledge of this exact topic.
+
+Do NOT generate generic medical trivia.
+
+For example, if the selected topic is "Blood", do not generate questions about:
+- smallest bone
+- cranial nerves
+- unrelated anatomy
+- unrelated physiology
+- unrelated pharmacology
+- unrelated pathology
+
+unless that subject is directly part of the selected topic.
+
+Before finalizing EVERY question, perform this test:
+
+"Does this question directly test knowledge of ${topicLabel}?"
+
+If the answer is NO:
+DISCARD THE QUESTION AND GENERATE A DIFFERENT ONE.
+
+Generate exactly ${count} high-quality single-best-answer MCQs.
+
+Each question must:
+- Be appropriate for MBBS/BDS medical education.
+- Be medically accurate.
+- Stay strictly within "${topicLabel}".
+- Have exactly 4 options.
+- Have only one correct answer.
+- Have a correctAnswer that exactly matches one option.
+- Have a concise explanation.
+- Have one explanation for EACH option.
+- Avoid duplicates.
+- Avoid vague wording.
+- Be clinically useful and/or high-yield.
+- Vary question stems.
+- Vary clinical and factual framing where appropriate.
+
+For optionExplanations:
+- There must be exactly 4 entries.
+- Entry 1 explains option 1.
+- Entry 2 explains option 2.
+- Entry 3 explains option 3.
+- Entry 4 explains option 4.
+- Explain specifically why each option is correct or incorrect.
+- Do not simply repeat the general explanation.
 
 Return ONLY valid JSON.
 
-Required format:
+Do not use Markdown.
+Do not use code fences.
+Do not write commentary before or after the JSON.
+
+Required JSON shape:
 
 [
   {
@@ -1129,38 +1431,40 @@ Required format:
       "Option D"
     ],
     "correctAnswer": "Exact correct option text",
-    "explanation": "Concise medical explanation"
+    "explanation": "Concise medical explanation",
+    "optionExplanations": [
+      "Why option A is correct or incorrect",
+      "Why option B is correct or incorrect",
+      "Why option C is correct or incorrect",
+      "Why option D is correct or incorrect"
+    ]
   }
 ]
 
-Rules:
-- Generate exactly ${count} questions.
-- Every question must have exactly 4 options.
-- Only one option may be correct.
-- correctAnswer MUST exactly match one of the options.
-- Questions must be medically accurate.
-- Questions must be appropriate for MBBS-level medical education.
-- Avoid duplicate questions.
-- Avoid vague questions.
-- Focus on clinically useful and high-yield knowledge.
-- Stay strictly within the selected topic.
-- Do not drift into unrelated topics.
-- Do not mention these instructions.
-- Do not output Markdown.
-- Do not output code fences.
-- Return JSON only.
+IMPORTANT:
+
+The entire generated set must remain about:
+
+"${topicLabel}"
+
+Nothing else.
 `.trim();
 
   const userPrompt = `
 Selected topic:
 
-${topicLabel}
+"${topicLabel}"
 
 ${existingText}
 
-Generate ${count} new MCQs specifically for this topic.
+Generate exactly ${count} NEW MCQs specifically about:
 
-Make the questions meaningfully different from the existing questions.
+"${topicLabel}"
+
+Make every question meaningfully different from the existing questions.
+
+Final check before returning:
+Every question MUST directly test "${topicLabel}".
 `.trim();
 
   return {
@@ -1170,8 +1474,8 @@ Make the questions meaningfully different from the existing questions.
 }
 
 /* ============================================================
-  MCQ GENERATION BATCH
-  ============================================================ */
+   MCQ GENERATION BATCH
+   ============================================================ */
 
 async function generateMcqBatch(
   request: McqGenerationRequest,
@@ -1212,7 +1516,7 @@ async function generateMcqBatch(
         parseMcqs(response);
 
       if (mcqs.length > 0) {
-        return mcqs;
+        return mcqs.slice(0, count);
       }
 
       lastError = new Error(
@@ -1240,12 +1544,23 @@ async function generateMcqBatch(
 }
 
 /* ============================================================
-  PUBLIC MCQ GENERATION
-  ============================================================ */
+   PUBLIC MCQ GENERATION
+   ============================================================ */
 
 export async function generateMcqSet(
   request: McqGenerationRequest,
 ): Promise<GeneratedMcq[]> {
+  const topicLabel =
+    normalizeText(
+      request.topicLabel,
+    );
+
+  if (!topicLabel) {
+    throw new Error(
+      "Topic is required for MCQ generation.",
+    );
+  }
+
   const requestedCount = Math.max(
     1,
     Math.min(
@@ -1266,7 +1581,7 @@ export async function generateMcqSet(
 
     /*
      * Include questions generated in previous
-     * batches so later batches do not duplicate them.
+     * batches so later batches don't duplicate them.
      */
     const existingQuestions = [
       ...(request.existingQuestions || []),
@@ -1277,6 +1592,7 @@ export async function generateMcqSet(
 
     const batchRequest: McqGenerationRequest = {
       ...request,
+      topicLabel,
       existingQuestions,
     };
 
@@ -1288,8 +1604,18 @@ export async function generateMcqSet(
 
     allMcqs.push(...mcqs);
 
-    remaining -= batchSize;
+    /*
+     * If the model returned fewer questions than
+     * requested, calculate the actual remaining
+     * amount rather than blindly subtracting batchSize.
+     */
+    remaining =
+      requestedCount - allMcqs.length;
 
+    /*
+     * Prevent an infinite loop if the provider
+     * repeatedly returns no valid questions.
+     */
     if (mcqs.length === 0) {
       break;
     }
@@ -1298,4 +1624,73 @@ export async function generateMcqSet(
   return deduplicateMcqs(
     allMcqs,
   ).slice(0, requestedCount);
+}
+
+/* ============================================================
+   SIMPLE GENERIC PROMPT API
+   ============================================================ */
+
+/**
+ * Public helper for other backend features that simply
+ * need to send a prompt through the configured provider.
+ */
+export async function runPrompt(
+  prompt: string,
+  maxTokens = 400,
+): Promise<string> {
+  const config =
+    await getAIConfig();
+
+  /*
+   * Use a neutral system prompt for generic calls.
+   */
+  const systemPrompt = `
+You are the AI assistant for MedschoolProffs.
+
+Provide accurate, concise, useful responses.
+
+When generating structured data, follow the requested
+format exactly.
+
+Do not mention that you are an AI unless explicitly asked.
+`.trim();
+
+  /*
+   * For the generic helper we use the same central
+   * dispatcher. maxTokens is retained for API compatibility.
+   *
+   * Provider-specific generation functions above use
+   * their normal model configuration.
+   */
+  void maxTokens;
+
+  switch (config.provider) {
+    case "gemini":
+      return callGemini(
+        config,
+        systemPrompt,
+        prompt,
+      );
+
+    case "anthropic":
+      return callAnthropic(
+        config,
+        systemPrompt,
+        prompt,
+      );
+
+    case "openai":
+    case "groq":
+    case "custom":
+      return callOpenAICompatible(
+        config,
+        systemPrompt,
+        prompt,
+      );
+
+    default:
+      throw new AiNotConfiguredError(
+        `Unsupported AI provider: ${config.provider}`,
+      );
+  }
 }

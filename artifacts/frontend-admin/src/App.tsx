@@ -9,7 +9,7 @@ import {
   TrendingUp, Users, X, Zap, Bell, SlidersHorizontal, FileStack, NotebookPen, Bookmark,
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
   GraduationCap, CalendarDays, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
-  RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle
+  RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Wand2
 } from 'lucide-react';
 import {
   getListMembershipPlansQueryKey, getListPaymentsQueryKey, getListMcqsQueryKey, getListModulesQueryKey, getListStudentsQueryKey, getListNotificationsQueryKey, getGetCurrentUserQueryKey, getListFlashcardsQueryKey,
@@ -29,7 +29,7 @@ import { toast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
-import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, analyticsApi, mcqImportApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, subjectAdminApi, topicAdminApi, flashcardsAdminApi, flashcardsAiApi, booksAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, examsAdminApi, examsApi, explanationsApi, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type StudentDetail, type SiteContent, type TeamMember, type AdminModule, type AdminSubject, type AdminTopic, type AdminFlashcard, type GeneratedFlashcard, type AdminMcqRow, type AdminBook, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type BankAccount, type PaymentMethodConfig } from '@/lib/api';
+import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, analyticsApi, mcqImportApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, subjectAdminApi, topicAdminApi, flashcardsAdminApi, flashcardsAiApi, booksAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, examsAdminApi, examsApi, explanationsApi, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type StudentDetail, type SiteContent, type TeamMember, type AdminModule, type AdminSubject, type AdminTopic, type AdminFlashcard, type GeneratedFlashcard, type AdminMcqRow, type AdminBook, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type BankAccount, type PaymentMethodConfig, aiVisualizerAdminApi, type AiVisualizerLogEntry } from '@/lib/api';
 import './index.css';
 
 const queryClient = new QueryClient();
@@ -109,7 +109,7 @@ const adminGroups: Array<{ label: string; items: NavItem[] }> = [
     ['/admin/academic-structure', 'Colleges & courses', FolderOpen], ['/admin/content', 'Academic content', Library], ['/admin/mcqs', 'MCQ bank', CircleHelp], ['/admin/flashcards', 'Flashcards', Zap], ['/admin/books', 'Books library', BookOpen], ['/admin/past-papers', 'Past papers', FileStack], ['/admin/exams', 'Pre-Proffs Exams', ClipboardCheck],
   ] },
   { label: 'Community', items: [
-    ['/admin/feedback', 'Feedback inbox', MessageSquare], ['/admin/team', 'Academic team', Users], ['/admin/site-content', 'Site content', Landmark],
+    ['/admin/feedback', 'Feedback inbox', MessageSquare], ['/admin/ai-visualizer-logs', 'AI Visualizer activity', Wand2], ['/admin/team', 'Academic team', Users], ['/admin/site-content', 'Site content', Landmark],
   ] },
   { label: 'Workspace', items: [
     ['/admin/settings', 'Platform settings', Settings],
@@ -549,7 +549,7 @@ function AdminMcqs() {
     onSuccess: (res) => { queryClient.invalidateQueries({ queryKey: getListMcqsQueryKey() }); setSelectedIds(new Set()); setBulkDeleteMode(null); toast({ title: `Deleted ${res.deleted} question${res.deleted === 1 ? '' : 's'}` }); },
     onError: (err: unknown) => toast({ title: 'Bulk delete failed', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
-  const bulkAddRowsInit = () => [{ question: '', a: '', b: '', c: '', d: '', e: '', correct: 'a', explanation: '' }];
+  const bulkAddRowsInit = () => [{ question: '', a: '', b: '', c: '', d: '', e: '', correct: 'a', explanation: '', ea: '', eb: '', ec: '', ed: '', ee: '', showOptionExplanations: false }];
   const [bulkRows, setBulkRows] = useState(bulkAddRowsInit);
   const [aiCount, setAiCount] = useState(5);
   const generateAiMcqs = useMutation({
@@ -560,6 +560,8 @@ function AdminMcqs() {
         a: d.options[0] ?? '', b: d.options[1] ?? '', c: d.options[2] ?? '', d: d.options[3] ?? '', e: d.options[4] ?? '',
         correct: (['a', 'b', 'c', 'd', 'e'][d.options.findIndex((o) => o === d.correctAnswer)] ?? 'a'),
         explanation: d.explanation,
+        ea: d.optionExplanations?.[0] ?? '', eb: d.optionExplanations?.[1] ?? '', ec: d.optionExplanations?.[2] ?? '', ed: d.optionExplanations?.[3] ?? '', ee: d.optionExplanations?.[4] ?? '',
+        showOptionExplanations: !!(d.optionExplanations && d.optionExplanations.some((e) => e?.trim())),
       })));
       toast({ title: `Generated ${res.drafts.length} draft questions`, description: 'Review each before saving — nothing is added to the bank yet.' });
     },
@@ -569,7 +571,10 @@ function AdminMcqs() {
     mutationFn: () => mcqAdminApi.bulkCreate(bulkRows.filter((r) => r.question.trim() && r.a.trim() && r.b.trim()).map((r) => {
       const options = [r.a, r.b, r.c, r.d, r.e].map((o) => o.trim()).filter(Boolean);
       const correctIndex = r.correct.charCodeAt(0) - 97;
-      return { question: r.question.trim(), options, correctAnswer: options[correctIndex] ?? null, explanation: r.explanation.trim() || null, difficulty: 'medium', moduleId: Number(moduleId), subjectId: Number(subjectId), topicId: Number(topicId) } as unknown as Partial<AdminMcqRow> & { question: string; options: string[] };
+      const rawOptionExplanations = [r.ea, r.eb, r.ec, r.ed, r.ee].slice(0, options.length).map((e) => e.trim() || null);
+      const optionExplanations = rawOptionExplanations.some((e) => e) ? rawOptionExplanations : null;
+      const explanation = r.explanation.trim() || rawOptionExplanations[correctIndex] || null;
+      return { question: r.question.trim(), options, correctAnswer: options[correctIndex] ?? null, explanation, optionExplanations, difficulty: 'medium', moduleId: Number(moduleId), subjectId: Number(subjectId), topicId: Number(topicId) } as unknown as Partial<AdminMcqRow> & { question: string; options: string[] };
     })),
     onSuccess: (res) => { queryClient.invalidateQueries({ queryKey: getListMcqsQueryKey() }); setBulkRows(bulkAddRowsInit()); setBulkAddOpen(false); toast({ title: `Added ${res.created} questions` }); },
     onError: (err: unknown) => toast({ title: 'Could not add questions', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
@@ -653,6 +658,10 @@ function AdminMcqs() {
           <div className="mt-2 grid gap-2 sm:grid-cols-2">{[0, 1, 2, 3, 4].map((oi) => <input key={oi} value={c.options[oi] || ''} onChange={(e) => { const opts = [...c.options]; opts[oi] = e.target.value; updateCandidate(i, { options: opts }); }} placeholder={`Option ${String.fromCharCode(65 + oi)}${oi === 4 ? ' (optional)' : ''}`} className="h-9 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`input-candidate-option-${i}-${oi}`} />)}</div>
           <div className="mt-2 flex items-center gap-2"><span className="text-[11px] font-bold text-muted-foreground">Correct:</span><select value={c.correctAnswer ?? ''} onChange={(e) => updateCandidate(i, { correctAnswer: e.target.value || null })} className="h-8 flex-1 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`select-candidate-answer-${i}`}><option value="">Not set</option>{c.options.map((opt, oi) => opt && <option key={oi} value={opt}>{String.fromCharCode(65 + oi)}. {opt.slice(0, 40)}</option>)}</select></div>
           <input value={c.explanation ?? ''} onChange={(e) => updateCandidate(i, { explanation: e.target.value })} placeholder="Explanation (optional)" className="mt-2 h-9 w-full rounded-lg border border-border bg-background px-2 text-xs" data-testid={`input-candidate-explanation-${i}`} />
+          {c.options.some((o) => o.trim()) && <details className="mt-2" open={!!c.optionExplanations?.some((e) => e?.trim())}>
+            <summary className="cursor-pointer text-[11px] font-bold text-primary">Per-option explanations (why each option is right/wrong)</summary>
+            <div className="mt-2 space-y-1.5">{c.options.map((opt, oi) => opt.trim() && <div key={oi} className="flex items-start gap-2"><span className={cn('mt-1.5 grid size-5 shrink-0 place-items-center rounded text-[10px] font-bold', c.correctAnswer === opt ? 'bg-[#d7eee4] text-[#287058]' : 'bg-[#fce3dc] text-[#a34c3e]')}>{String.fromCharCode(65 + oi)}</span><textarea value={c.optionExplanations?.[oi] ?? ''} onChange={(e) => { const next = [...(c.optionExplanations ?? c.options.map(() => null))]; next[oi] = e.target.value || null; updateCandidate(i, { optionExplanations: next }); }} placeholder={c.correctAnswer === opt ? 'Why this is correct...' : 'Why this is wrong...'} className="min-h-9 flex-1 rounded-lg border border-border bg-background p-2 text-xs" data-testid={`input-candidate-option-explanation-${i}-${oi}`} /></div>)}</div>
+          </details>}
         </div>)}</div>
       </div>}
     </div>
@@ -678,7 +687,13 @@ function AdminMcqs() {
           <div className="flex items-center justify-between"><span className="text-[11px] font-bold text-muted-foreground">Question {i + 1}</span>{bulkRows.length > 1 && <button onClick={() => setBulkRows((rows) => rows.filter((_, ri) => ri !== i))} className="text-[11px] font-bold text-destructive" data-testid={`button-remove-bulk-row-${i}`}>Remove</button>}</div>
           <textarea value={row.question} onChange={(e) => setBulkRows((rows) => rows.map((r, ri) => ri === i ? { ...r, question: e.target.value } : r))} placeholder="Write the question..." className="mt-2 min-h-14 w-full rounded-lg border border-border bg-background p-2 text-xs" data-testid={`input-bulk-question-${i}`} />
           <div className="mt-2 grid gap-2 sm:grid-cols-2">{(['a', 'b', 'c', 'd', 'e'] as const).map((x) => <input key={x} value={row[x]} onChange={(e) => setBulkRows((rows) => rows.map((r, ri) => ri === i ? { ...r, [x]: e.target.value } : r))} placeholder={`Option ${x.toUpperCase()}${x === 'e' ? ' (optional)' : ''}`} className="h-9 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`input-bulk-option-${i}-${x}`} />)}</div>
-          <div className="mt-2 flex items-center gap-2"><span className="text-[11px] font-bold text-muted-foreground">Correct:</span><select value={row.correct} onChange={(e) => setBulkRows((rows) => rows.map((r, ri) => ri === i ? { ...r, correct: e.target.value } : r))} className="h-8 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`select-bulk-correct-${i}`}>{['a', 'b', 'c', 'd', 'e'].map((x) => <option key={x} value={x}>{x.toUpperCase()}</option>)}</select></div>
+          <div className="mt-2 flex items-center gap-2"><span className="text-[11px] font-bold text-muted-foreground">Correct:</span><select value={row.correct} onChange={(e) => setBulkRows((rows) => rows.map((r, ri) => ri === i ? { ...r, correct: e.target.value } : r))} className="h-8 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`select-bulk-correct-${i}`}>{['a', 'b', 'c', 'd', 'e'].map((x) => <option key={x} value={x}>{x.toUpperCase()}</option>)}</select>
+            <button type="button" onClick={() => setBulkRows((rows) => rows.map((r, ri) => ri === i ? { ...r, showOptionExplanations: !r.showOptionExplanations } : r))} className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-primary" data-testid={`button-toggle-option-explanations-${i}`}><CircleHelp size={12} /> {row.showOptionExplanations ? 'Hide' : 'Add'} explanations</button>
+          </div>
+          {row.showOptionExplanations && <div className="mt-2 space-y-1.5 rounded-lg bg-muted/50 p-2.5">
+            <p className="text-[10px] text-muted-foreground">Explain why each option is right or wrong — this is what students see when they review the question.</p>
+            {(['a', 'b', 'c', 'd', 'e'] as const).map((x, oi) => row[x].trim() && <div key={x} className="flex items-start gap-2"><span className={cn('mt-1.5 grid size-5 shrink-0 place-items-center rounded text-[10px] font-bold', row.correct === x ? 'bg-[#d7eee4] text-[#287058]' : 'bg-[#fce3dc] text-[#a34c3e]')}>{x.toUpperCase()}</span><textarea value={row[(`e${x}`) as 'ea' | 'eb' | 'ec' | 'ed' | 'ee']} onChange={(e) => setBulkRows((rows) => rows.map((r, ri) => ri === i ? { ...r, [`e${x}`]: e.target.value } : r))} placeholder={row.correct === x ? 'Why this is the correct answer...' : 'Why this option is wrong...'} className="min-h-9 flex-1 rounded-lg border border-border bg-background p-2 text-xs" data-testid={`input-bulk-option-explanation-${i}-${oi}`} /></div>)}
+          </div>}
         </div>)}</div>
         <div className="flex gap-2"><button disabled={!targetReady || bulkCreateMutation.isPending} onClick={() => bulkCreateMutation.mutate()} className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-save-bulk-mcqs">{bulkCreateMutation.isPending ? 'Adding…' : `Add ${bulkRows.filter((r) => r.question.trim()).length} questions`}</button><button onClick={() => { setBulkAddOpen(false); setBulkRows(bulkAddRowsInit()); }} className="rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold" data-testid="button-cancel-bulk-mcqs">Cancel</button></div>
       </div>}
@@ -774,34 +789,72 @@ function AdminSettings() {
   const save = useMutation({ mutationFn: settingsApi.update, onSuccess: (data) => { setForm(null); queryClient.setQueryData(['admin-settings'], data); queryClient.invalidateQueries({ queryKey: ['site-content'] }); } });
   const rotate = useMutation({ mutationFn: settingsApi.rotateAdminCode, onSuccess: (data) => setForm({ ...values, ...data }) });
   const set = (key: string, value: string) => setForm({ ...values, [key]: value });
+  const [tab, setTab] = useState<'general' | 'branding' | 'ai' | 'storage' | 'security'>('general');
+  const storageIssue = values.SUPABASE_CONFIGURED !== 'true' && values.CLOUDINARY_CONFIGURED !== 'true';
 
-  return <div className="max-w-3xl"><SectionHeader eyebrow="Workspace" title="Platform settings" action={<span className="text-[10px] text-muted-foreground">Changes apply to every student instantly</span>} /><div className="space-y-4">
-    <AdminAccountSection />
-    <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">Platform profile</h3><p className="mt-1 text-xs text-muted-foreground">The details students see across their study desk.</p><div className="mt-5 grid gap-4 sm:grid-cols-2">
-      <label className="text-xs font-bold">Platform name<input value={values.PLATFORM_NAME || ''} onChange={(e) => set('PLATFORM_NAME', e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-platform-name" /></label>
-      <label className="text-xs font-bold">Support email<input value={values.SUPPORT_EMAIL || ''} onChange={(e) => set('SUPPORT_EMAIL', e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-support-email" /></label>
-      <label className="text-xs font-bold">WhatsApp support number<input value={values.SUPPORT_WHATSAPP || ''} onChange={(e) => set('SUPPORT_WHATSAPP', e.target.value.replace(/[^\d+]/g, ''))} placeholder="e.g. 923001234567" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-support-whatsapp" /><span className="mt-1 block text-[10px] font-normal text-muted-foreground">Country code + number, digits only. Students get a "Chat on WhatsApp" button that opens this number.</span></label>
-      <label className="text-xs font-bold sm:col-span-2">Tagline<input value={values.PLATFORM_TAGLINE || ''} onChange={(e) => set('PLATFORM_TAGLINE', e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-platform-tagline" /></label>
-      <label className="text-xs font-bold sm:col-span-2">Announcement banner (blank to hide)<input value={values.ANNOUNCEMENT_BANNER || ''} onChange={(e) => set('ANNOUNCEMENT_BANNER', e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-announcement-banner" /></label>
-    </div></div>
-    {values.STORAGE_BACKEND === 'local' && <div className="rounded-2xl border border-[#efc7bc] bg-[#fff5f0] p-5 text-xs text-[#9e4c39]" data-testid="banner-local-storage-warning"><div className="flex items-center gap-2 font-bold"><CircleHelp size={15} /> File uploads aren't set up for permanent storage</div><p className="mt-1.5 leading-5 text-[#a96a5b]">The favicon, payment QR code, payment proofs, and books are currently saved to this server's local disk. On most hosts that storage doesn't survive a restart or redeploy, so an upload can look successful and then show as a broken image later. Set <code className="rounded bg-white/60 px-1 py-0.5">SUPABASE_URL</code> and <code className="rounded bg-white/60 px-1 py-0.5">SUPABASE_SERVICE_ROLE_KEY</code> in this server's environment to store uploads in Supabase Storage instead.</p></div>}
-    <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">Website favicon</h3><p className="mt-1 text-xs text-muted-foreground">The small icon shown in browser tabs and bookmarks.</p><div className="mt-5">
-      <FaviconUploader currentUrl={values.SITE_FAVICON_URL || ''} onUploaded={(storagePath) => set('SITE_FAVICON_PATH', storagePath)} />
-    </div></div>
-    <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">Registration</h3><div className="mt-5 grid gap-4 sm:grid-cols-2">
-      <label className="flex items-center justify-between text-xs font-bold">Open student registration<input type="checkbox" checked={values.REGISTRATION_ENABLED !== 'false'} onChange={(e) => set('REGISTRATION_ENABLED', e.target.checked ? 'true' : 'false')} className="size-4 accent-[#287058]" data-testid="checkbox-registration-enabled" /></label>
-    </div><p className="mt-3 text-[11px] text-muted-foreground">Payment methods, bank accounts, and collection details have moved to <Link href="/admin/payments" className="font-bold text-primary">Payments &amp; collection</Link>.</p></div>
-    <div className="rounded-2xl border border-primary/30 bg-[#eef7f1] p-6"><h3 className="font-bold">Admin sign-up invite code</h3><p className="mt-1 text-xs text-muted-foreground">Share this code with anyone who should be able to create an admin account at <code className="rounded bg-card px-1 py-0.5">/admin-signup/1</code>. Rotate it any time to revoke access for anyone who has the old code.</p><div className="mt-4 flex flex-wrap items-center gap-3"><input value={values.ADMIN_SIGNUP_CODE || ''} onChange={(e) => set('ADMIN_SIGNUP_CODE', e.target.value)} className="h-10 w-56 rounded-xl border border-border bg-card px-3 text-xs font-mono-app tracking-wider" data-testid="input-admin-signup-code" /><button type="button" onClick={() => rotate.mutate()} disabled={rotate.isPending} className="rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold" data-testid="button-rotate-admin-code">{rotate.isPending ? 'Rotating…' : 'Generate new code'}</button></div>
-      {values.ADMIN_SIGNUP_CODE && <div className="mt-3 flex flex-wrap items-center gap-2"><input readOnly value={`${window.location.origin}/admin-signup/1?code=${encodeURIComponent(values.ADMIN_SIGNUP_CODE)}`} className="h-9 min-w-0 flex-1 rounded-xl border border-border bg-card px-3 text-[11px] text-muted-foreground" data-testid="input-admin-invite-link" onFocus={(e) => e.currentTarget.select()} /><button type="button" onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/admin-signup/1?code=${encodeURIComponent(values.ADMIN_SIGNUP_CODE || '')}`); toast({ title: 'Invite link copied' }); }} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-[11px] font-bold text-primary-foreground" data-testid="button-copy-admin-invite-link"><Copy size={12} /> Copy link</button></div>}
+  const TABS: Array<{ id: typeof tab; label: string; icon: typeof Sparkles; badge?: boolean }> = [
+    { id: 'general', label: 'General', icon: Settings },
+    { id: 'branding', label: 'Branding', icon: ImageOff },
+    { id: 'ai', label: 'AI', icon: Sparkles },
+    { id: 'storage', label: 'Storage', icon: UploadCloud, badge: storageIssue },
+    { id: 'security', label: 'Security & access', icon: ShieldCheck },
+  ];
+
+  return <div className="max-w-3xl"><SectionHeader eyebrow="Workspace" title="Platform settings" action={<span className="text-[10px] text-muted-foreground">Changes apply to every student instantly</span>} />
+    <div className="mb-5 flex flex-wrap gap-1.5 rounded-2xl border border-border bg-card p-1.5">{TABS.map((t) => <button key={t.id} onClick={() => setTab(t.id)} className={cn('relative inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors', tab === t.id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')} data-testid={`tab-settings-${t.id}`}><t.icon size={13} /> {t.label}{t.badge && <span className="absolute -right-1 -top-1 size-2 rounded-full bg-[#e5a952]" />}</button>)}</div>
+
+    <div className="space-y-4">
+      {tab === 'general' && <>
+        <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">Platform profile</h3><p className="mt-1 text-xs text-muted-foreground">The details students see across their study desk.</p><div className="mt-5 grid gap-4 sm:grid-cols-2">
+          <label className="text-xs font-bold">Platform name<input value={values.PLATFORM_NAME || ''} onChange={(e) => set('PLATFORM_NAME', e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-platform-name" /></label>
+          <label className="text-xs font-bold">Support email<input value={values.SUPPORT_EMAIL || ''} onChange={(e) => set('SUPPORT_EMAIL', e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-support-email" /></label>
+          <label className="text-xs font-bold">WhatsApp support number<input value={values.SUPPORT_WHATSAPP || ''} onChange={(e) => set('SUPPORT_WHATSAPP', e.target.value.replace(/[^\d+]/g, ''))} placeholder="e.g. 923001234567" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-support-whatsapp" /><span className="mt-1 block text-[10px] font-normal text-muted-foreground">Country code + number, digits only. Students get a "Chat on WhatsApp" button that opens this number.</span></label>
+          <label className="text-xs font-bold sm:col-span-2">Tagline<input value={values.PLATFORM_TAGLINE || ''} onChange={(e) => set('PLATFORM_TAGLINE', e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-platform-tagline" /></label>
+          <label className="text-xs font-bold sm:col-span-2">Announcement banner (blank to hide)<input value={values.ANNOUNCEMENT_BANNER || ''} onChange={(e) => set('ANNOUNCEMENT_BANNER', e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-announcement-banner" /></label>
+        </div></div>
+        <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">Registration</h3><div className="mt-5 grid gap-4 sm:grid-cols-2">
+          <label className="flex items-center justify-between text-xs font-bold">Open student registration<input type="checkbox" checked={values.REGISTRATION_ENABLED !== 'false'} onChange={(e) => set('REGISTRATION_ENABLED', e.target.checked ? 'true' : 'false')} className="size-4 accent-[#287058]" data-testid="checkbox-registration-enabled" /></label>
+        </div><p className="mt-3 text-[11px] text-muted-foreground">Payment methods, bank accounts, and collection details have moved to <Link href="/admin/payments" className="font-bold text-primary">Payments &amp; collection</Link>.</p></div>
+      </>}
+
+      {tab === 'branding' && <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">Website favicon</h3><p className="mt-1 text-xs text-muted-foreground">The small icon shown in browser tabs and bookmarks.</p><div className="mt-5">
+        <FaviconUploader currentUrl={values.SITE_FAVICON_URL || ''} onUploaded={(storagePath) => set('SITE_FAVICON_PATH', storagePath)} />
+      </div></div>}
+
+      {tab === 'ai' && <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">AI ("Ask AI to explain")</h3><p className="mt-1 text-xs text-muted-foreground">Powers the "Ask AI to explain differently" button students see on MCQs and flashcards, plus admin-side AI-generated questions, explanations, and flashcard drafts. Falls back to the server's ANTHROPIC_API_KEY/OPENAI_API_KEY/GEMINI_API_KEY env vars if left blank here.</p><div className="mt-5 grid gap-4 sm:grid-cols-2">
+        <label className="text-xs font-bold">Provider<select value={values.AI_PROVIDER || 'anthropic'} onChange={(e) => set('AI_PROVIDER', e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="select-ai-provider"><option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI</option><option value="gemini">Google Gemini</option><option value="custom">Custom (OpenAI-compatible)</option></select></label>
+        <label className="text-xs font-bold">API key{values.AI_API_KEY_SET === 'true' && <span className="ml-2 font-normal text-muted-foreground">Currently set · {values.AI_API_KEY_MASKED}</span>}<input type="password" value={values.AI_API_KEY || ''} onChange={(e) => set('AI_API_KEY', e.target.value)} placeholder={values.AI_API_KEY_SET === 'true' ? 'Leave blank to keep current key' : 'sk-...'} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-ai-api-key" /></label>
+        <label className="text-xs font-bold">Model <span className="font-normal text-muted-foreground">(optional — leave blank for the provider's default)</span><input value={values.AI_MODEL || ''} onChange={(e) => set('AI_MODEL', e.target.value)} placeholder="e.g. claude-sonnet-4-6, gpt-4o-mini, gemini-2.0-flash" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-ai-model" /></label>
+        {values.AI_PROVIDER === 'custom' && <label className="text-xs font-bold">Base URL <span className="font-normal text-muted-foreground">(required for Custom — an OpenAI-compatible /chat/completions endpoint)</span><input value={values.AI_BASE_URL || ''} onChange={(e) => set('AI_BASE_URL', e.target.value)} placeholder="https://api.example.com/v1" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-ai-base-url" /></label>}
+      </div></div>}
+
+      {tab === 'storage' && <>
+        {storageIssue && <div className="rounded-2xl border border-[#efc7bc] bg-[#fff5f0] p-5 text-xs text-[#9e4c39]" data-testid="banner-storage-warning"><div className="flex items-center gap-2 font-bold"><CircleHelp size={15} /> No file storage is configured</div><p className="mt-1.5 leading-5 text-[#a96a5b]">Every upload (favicon, payment QR code, payment proofs, team photos, MCQ images, books, resources) needs at least one of Supabase or Cloudinary configured below — there's no fallback, so uploads will fail until one is set.</p></div>}
+        <div className="rounded-2xl border border-border bg-card p-6"><h3 className="flex items-center gap-2 font-bold">Supabase Storage {values.SUPABASE_CONFIGURED === 'true' && <Badge tone="green">Configured</Badge>}</h3><p className="mt-1 text-xs text-muted-foreground">Used for most uploads — favicon, payment QR/proofs, team photos, MCQ images.</p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <label className="text-xs font-bold">Supabase URL<input value={values.SUPABASE_URL || ''} onChange={(e) => set('SUPABASE_URL', e.target.value)} placeholder="https://xxxxx.supabase.co" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-supabase-url" /></label>
+            <label className="text-xs font-bold">Service role key{values.SUPABASE_SERVICE_ROLE_KEY_SET === 'true' && <span className="ml-2 font-normal text-muted-foreground">Currently set · {values.SUPABASE_SERVICE_ROLE_KEY_MASKED}</span>}<input type="password" value={values.SUPABASE_SERVICE_ROLE_KEY || ''} onChange={(e) => set('SUPABASE_SERVICE_ROLE_KEY', e.target.value)} placeholder={values.SUPABASE_SERVICE_ROLE_KEY_SET === 'true' ? 'Leave blank to keep current key' : 'eyJ...'} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-supabase-key" /></label>
+            <label className="text-xs font-bold sm:col-span-2">Storage bucket <span className="font-normal text-muted-foreground">(optional — defaults to "medschool-uploads"; create this bucket in Supabase first and set it to public)</span><input value={values.SUPABASE_STORAGE_BUCKET || ''} onChange={(e) => set('SUPABASE_STORAGE_BUCKET', e.target.value)} placeholder="medschool-uploads" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-supabase-bucket" /></label>
+          </div>
+        </div>
+        <div className="rounded-2xl border border-border bg-card p-6"><h3 className="flex items-center gap-2 font-bold">Cloudinary {values.CLOUDINARY_CONFIGURED === 'true' && <Badge tone="green">Configured</Badge>}</h3><p className="mt-1 text-xs text-muted-foreground">Used for large files — book PDFs, resource files, and anything over ~5MB regardless of type.</p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <label className="text-xs font-bold">Cloud name<input value={values.CLOUDINARY_CLOUD_NAME || ''} onChange={(e) => set('CLOUDINARY_CLOUD_NAME', e.target.value)} placeholder="my-cloud-name" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-cloudinary-cloud-name" /></label>
+            <label className="text-xs font-bold">API key<input value={values.CLOUDINARY_API_KEY || ''} onChange={(e) => set('CLOUDINARY_API_KEY', e.target.value)} placeholder="123456789012345" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-cloudinary-api-key" /></label>
+            <label className="text-xs font-bold sm:col-span-2">API secret{values.CLOUDINARY_API_SECRET_SET === 'true' && <span className="ml-2 font-normal text-muted-foreground">Currently set · {values.CLOUDINARY_API_SECRET_MASKED}</span>}<input type="password" value={values.CLOUDINARY_API_SECRET || ''} onChange={(e) => set('CLOUDINARY_API_SECRET', e.target.value)} placeholder={values.CLOUDINARY_API_SECRET_SET === 'true' ? 'Leave blank to keep current key' : 'abc123...'} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-cloudinary-api-secret" /></label>
+          </div>
+        </div>
+        <p className="text-[11px] text-muted-foreground">Save settings below, then re-upload anything affected by a past storage issue — old files aren't retroactively moved.</p>
+      </>}
+
+      {tab === 'security' && <div className="rounded-2xl border border-primary/30 bg-[#eef7f1] p-6"><h3 className="font-bold">Admin sign-up invite code</h3><p className="mt-1 text-xs text-muted-foreground">Share this code with anyone who should be able to create an admin account at <code className="rounded bg-card px-1 py-0.5">/admin-signup/1</code>. Rotate it any time to revoke access for anyone who has the old code.</p><div className="mt-4 flex flex-wrap items-center gap-3"><input value={values.ADMIN_SIGNUP_CODE || ''} onChange={(e) => set('ADMIN_SIGNUP_CODE', e.target.value)} className="h-10 w-56 rounded-xl border border-border bg-card px-3 text-xs font-mono-app tracking-wider" data-testid="input-admin-signup-code" /><button type="button" onClick={() => rotate.mutate()} disabled={rotate.isPending} className="rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold" data-testid="button-rotate-admin-code">{rotate.isPending ? 'Rotating…' : 'Generate new code'}</button></div>
+        {values.ADMIN_SIGNUP_CODE && <div className="mt-3 flex flex-wrap items-center gap-2"><input readOnly value={`${window.location.origin}/admin-signup/1?code=${encodeURIComponent(values.ADMIN_SIGNUP_CODE)}`} className="h-9 min-w-0 flex-1 rounded-xl border border-border bg-card px-3 text-[11px] text-muted-foreground" data-testid="input-admin-invite-link" onFocus={(e) => e.currentTarget.select()} /><button type="button" onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/admin-signup/1?code=${encodeURIComponent(values.ADMIN_SIGNUP_CODE || '')}`); toast({ title: 'Invite link copied' }); }} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-[11px] font-bold text-primary-foreground" data-testid="button-copy-admin-invite-link"><Copy size={12} /> Copy link</button></div>}
+      </div>}
     </div>
-    <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">AI ("Ask AI to explain")</h3><p className="mt-1 text-xs text-muted-foreground">Powers the "Ask AI to explain differently" button students see on MCQs and flashcards, plus admin-side AI-generated explanations and flashcard drafts. Falls back to the server's ANTHROPIC_API_KEY/OPENAI_API_KEY/GEMINI_API_KEY env vars if left blank here.</p><div className="mt-5 grid gap-4 sm:grid-cols-2">
-      <label className="text-xs font-bold">Provider<select value={values.AI_PROVIDER || 'anthropic'} onChange={(e) => set('AI_PROVIDER', e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="select-ai-provider"><option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI</option><option value="gemini">Google Gemini</option><option value="custom">Custom (OpenAI-compatible)</option></select></label>
-      <label className="text-xs font-bold">API key{values.AI_API_KEY_SET === 'true' && <span className="ml-2 font-normal text-muted-foreground">Currently set · {values.AI_API_KEY_MASKED}</span>}<input type="password" value={values.AI_API_KEY || ''} onChange={(e) => set('AI_API_KEY', e.target.value)} placeholder={values.AI_API_KEY_SET === 'true' ? 'Leave blank to keep current key' : 'sk-...'} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-ai-api-key" /></label>
-      <label className="text-xs font-bold">Model <span className="font-normal text-muted-foreground">(optional — leave blank for the provider's default)</span><input value={values.AI_MODEL || ''} onChange={(e) => set('AI_MODEL', e.target.value)} placeholder="e.g. claude-sonnet-4-6, gpt-4o-mini, gemini-2.0-flash" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-ai-model" /></label>
-      {values.AI_PROVIDER === 'custom' && <label className="text-xs font-bold">Base URL <span className="font-normal text-muted-foreground">(required for Custom — an OpenAI-compatible /chat/completions endpoint)</span><input value={values.AI_BASE_URL || ''} onChange={(e) => set('AI_BASE_URL', e.target.value)} placeholder="https://api.example.com/v1" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-ai-base-url" /></label>}
-    </div></div>
-    <button onClick={() => save.mutate(values)} disabled={save.isPending} className="rounded-xl bg-primary px-5 py-3 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-save-settings">{save.isPending ? 'Saving…' : save.isSuccess && !form ? 'Settings saved' : 'Save settings'}</button>
-  </div></div>;
+
+    <button onClick={() => save.mutate(values)} disabled={save.isPending} className="mt-5 rounded-xl bg-primary px-5 py-3 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-save-settings">{save.isPending ? 'Saving…' : save.isSuccess && !form ? 'Settings saved' : 'Save settings'}</button>
+    <AdminAccountSection />
+  </div>;
 }
 
 function AdminAcademicStructure() {
@@ -1283,7 +1336,7 @@ function AdminFlashcards() {
       <p className="text-xs text-muted-foreground">Pick a target topic below (its MCQs will be used as source material), or paste your own text. Drafts are editable — nothing saves until you review and click "Save all".</p>
       <div className="grid gap-2 sm:grid-cols-3"><select value={moduleId} onChange={(e) => { setModuleId(e.target.value); setSubjectId(''); setTopicId(''); }} className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-ai-flashcard-module"><option value="">Select module</option>{modules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select><select value={subjectId} onChange={(e) => { setSubjectId(e.target.value); setTopicId(''); }} disabled={!moduleId} className="h-10 rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-ai-flashcard-subject"><option value="">Select subject</option>{(subjectsQ.data || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select><select value={topicId} onChange={(e) => setTopicId(e.target.value)} disabled={!subjectId} className="h-10 rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-ai-flashcard-topic"><option value="">Select topic</option>{(topicsQ.data || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
       <textarea value={aiSourceText} onChange={(e) => setAiSourceText(e.target.value)} placeholder="Optional: paste notes or a passage to generate flashcards from instead of the topic's MCQs" className="min-h-20 w-full rounded-xl border border-border bg-card p-3 text-xs" data-testid="input-ai-flashcard-source" />
-      <div className="flex flex-wrap items-center gap-3"><label className="flex items-center gap-2 text-xs font-bold">How many<input type="number" min={1} max={20} value={aiCount} onChange={(e) => setAiCount(Math.max(1, Math.min(20, Number(e.target.value) || 8)))} className="h-9 w-16 rounded-lg border border-border bg-card px-2 text-xs" data-testid="input-ai-flashcard-count" /></label><button onClick={() => generateDrafts.mutate()} disabled={generateDrafts.isPending || (!topicId && !aiSourceText.trim())} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-generate-flashcard-drafts"><Sparkles size={13} /> {generateDrafts.isPending ? 'Generating…' : 'Generate drafts'}</button>{!topicId && !aiSourceText.trim() && <span className="text-[11px] text-muted-foreground">Pick a topic or paste text first.</span>}</div>
+      <div className="flex flex-wrap items-center gap-3"><label className="flex items-center gap-2 text-xs font-bold">How many<input type="number" min={1} max={100} value={aiCount} onChange={(e) => setAiCount(Math.max(1, Math.min(100, Number(e.target.value) || 8)))} className="h-9 w-16 rounded-lg border border-border bg-card px-2 text-xs" data-testid="input-ai-flashcard-count" /></label><button onClick={() => generateDrafts.mutate()} disabled={generateDrafts.isPending || (!topicId && !aiSourceText.trim())} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-generate-flashcard-drafts"><Sparkles size={13} /> {generateDrafts.isPending ? 'Generating…' : 'Generate drafts'}</button>{!topicId && !aiSourceText.trim() && <span className="text-[11px] text-muted-foreground">Pick a topic or paste text first.</span>}</div>
       {drafts && <div className="space-y-3 border-t border-border pt-4">
         {!targetReady && <p className="text-[11px] font-semibold text-[#8a5a12]">Select a module, subject, and topic above before saving — drafts need a home.</p>}
         {drafts.map((d, i) => <div key={i} className="rounded-xl border border-border bg-card p-3" data-testid={`row-flashcard-draft-${i}`}>
@@ -1397,6 +1450,38 @@ function AdminFeedback() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const statusTone = (status: string) => status === 'open' ? 'bg-[#fdeecb] text-[#8a5a12]' : status === 'replied' ? 'bg-[#dceaf1] text-[#32647b]' : 'bg-[#d7eee4] text-[#164b4b]';
   return <div><SectionHeader eyebrow="Community" title="Feedback inbox" /><div className="space-y-3">{(feedback.data || []).map((item: FeedbackEntry) => <div key={item.id} className="rounded-2xl border border-border bg-card p-5" data-testid={`card-feedback-${item.id}`}><div className="flex items-start justify-between gap-4"><div className="flex-1"><div className="flex items-center gap-2"><span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold capitalize">{item.category}</span><span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold capitalize', statusTone(item.status))}>{item.status}</span></div><p className="mt-2 text-sm leading-6">{item.message}</p><div className="mt-2 text-[10px] text-muted-foreground">{item.user?.name || 'Unknown'} · {item.user?.email || '—'} · {new Date(item.createdAt).toLocaleString()}</div></div><div className="flex shrink-0 items-center gap-2"><button onClick={() => setExpandedId(expandedId === item.id ? null : item.id)} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold" data-testid={`button-toggle-thread-${item.id}`}>{expandedId === item.id ? 'Hide thread' : 'Reply'}</button>{item.status !== 'reviewed' && <button onClick={() => updateStatus.mutate({ id: item.id, status: 'reviewed' })} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold" data-testid={`button-resolve-feedback-${item.id}`}>Mark reviewed</button>}</div></div>{expandedId === item.id && <FeedbackThread feedbackId={item.id} />}</div>)}{!feedback.data?.length && <EmptyState icon={MessageSquare} title="No feedback yet" body="Student feedback will show up here as it comes in." />}</div></div>;
+}
+
+function AdminAiVisualizerLogs() {
+  const logs = useQuery({ queryKey: ['admin-ai-visualizer-logs'], queryFn: () => aiVisualizerAdminApi.list() });
+  const successCount = (logs.data ?? []).filter((l) => l.status === 'success').length;
+  const errorCount = (logs.data ?? []).filter((l) => l.status === 'error').length;
+  return <div>
+    <SectionHeader eyebrow="Community" title="AI Visualizer activity" />
+    <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-3">
+      <Stat label="Generations shown" value={logs.data?.length ?? 0} />
+      <Stat label="Succeeded" value={successCount} />
+      <Stat label="Failed" value={errorCount} />
+    </div>
+    <div className="space-y-3">
+      {(logs.data || []).map((log: AiVisualizerLogEntry) => (
+        <div key={log.id} className="rounded-2xl border border-border bg-card p-5" data-testid={`card-ai-visualizer-log-${log.id}`}>
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold capitalize', log.status === 'success' ? 'bg-[#d7eee4] text-[#164b4b]' : 'bg-[#f9ddd6] text-[#a34c3e]')}>{log.status}</span>
+                {log.visualizationType && <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold capitalize">{log.visualizationType}</span>}
+              </div>
+              <p className="mt-2 text-sm leading-6">{log.prompt}</p>
+              {log.errorMessage && <p className="mt-1 text-xs text-destructive">{log.errorMessage}</p>}
+              <div className="mt-2 text-[10px] text-muted-foreground">{log.student.name} · {log.student.email} · {new Date(log.createdAt).toLocaleString()}</div>
+            </div>
+          </div>
+        </div>
+      ))}
+      {!logs.data?.length && <EmptyState icon={Wand2} title="No activity yet" body="Student AI Visualizer prompts will show up here as they come in." />}
+    </div>
+  </div>;
 }
 
 function AdminSiteContent() {
@@ -1532,10 +1617,95 @@ function ExamManagePanel({ exam }: { exam: AdminExam }) {
   const [mcqIdsInput, setMcqIdsInput] = useState('');
   const setQuestions = useMutation({ mutationFn: (mcqIds: number[]) => examsAdminApi.setQuestions(exam.id, mcqIds), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-exams'] }) });
   const attemptsQ = useQuery({ queryKey: ['exam-attempts', exam.id], queryFn: () => examsAdminApi.attempts(exam.id) });
+  const existingQuestionsQ = useQuery({ queryKey: ['exam-questions', exam.id], queryFn: () => examsAdminApi.getQuestions(exam.id) });
+
+  // Bulk upload — same file parser as the MCQ bank (txt/csv/xlsx/pdf/docx,
+  // per-option explanations included), but for this exam specifically:
+  // parsed questions go into the module/subject/topic bank AND get attached
+  // to this exam's paper in one step, instead of the admin having to import
+  // to the bank first and then paste MCQ IDs here separately.
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [parsing, setParsing] = useState(false);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [candidates, setCandidates] = useState<McqCandidate[]>([]);
+  const [replaceExisting, setReplaceExisting] = useState(false);
+  const modulesQ = useListModules();
+  const [moduleId, setModuleId] = useState('');
+  const subjectsQ = useListSubjects(moduleId ? { moduleId: Number(moduleId) } : undefined);
+  const [subjectId, setSubjectId] = useState('');
+  const topicsQ = useListTopics(subjectId ? { subjectId: Number(subjectId) } : undefined);
+  const [topicId, setTopicId] = useState('');
+  const targetReady = !!moduleId && !!subjectId && !!topicId;
+
+  const parseFile = async () => {
+    if (!file) return;
+    setParsing(true); setParseError(null);
+    try {
+      const res = await mcqImportApi.parse(file);
+      setCandidates(res.candidates);
+    } catch (err) {
+      setParseError(err instanceof ApiRequestError ? err.message : 'Could not read this file.');
+    } finally {
+      setParsing(false);
+    }
+  };
+  const updateCandidate = (i: number, patch: Partial<McqCandidate>) => setCandidates((prev) => prev.map((c, ci) => (ci === i ? { ...c, ...patch } : c)));
+  const removeCandidate = (i: number) => setCandidates((prev) => prev.filter((_, ci) => ci !== i));
+
+  const commitToExam = useMutation({
+    mutationFn: async () => {
+      const { ids } = await mcqImportApi.commit({ moduleId: Number(moduleId), subjectId: Number(subjectId), topicId: Number(topicId), status: 'published', mcqs: candidates });
+      const existingIds = replaceExisting ? [] : (existingQuestionsQ.data ?? []).map((q) => q.id);
+      await examsAdminApi.setQuestions(exam.id, [...existingIds, ...ids]);
+      return ids.length;
+    },
+    onSuccess: (count) => {
+      queryClient.invalidateQueries({ queryKey: ['admin-exams'] });
+      queryClient.invalidateQueries({ queryKey: ['exam-questions', exam.id] });
+      setCandidates([]); setFile(null); setUploadOpen(false);
+      toast({ title: `Added ${count} question${count === 1 ? '' : 's'} to this exam` });
+    },
+    onError: (err: unknown) => toast({ title: 'Could not add questions to this exam', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
 
   return <div className="mt-4 space-y-4 border-t border-border pt-4">
-    <div><div className="text-xs font-bold">Attach questions</div><p className="mt-1 text-[11px] text-muted-foreground">Paste MCQ IDs from the MCQ bank (comma-separated) to build this exam's paper.</p><div className="mt-2 flex gap-2"><input value={mcqIdsInput} onChange={(e) => setMcqIdsInput(e.target.value)} placeholder="e.g. 12, 13, 14, 20" className="h-9 flex-1 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`input-exam-mcq-ids-${exam.id}`} /><button onClick={() => { const ids = mcqIdsInput.split(',').map((s) => Number(s.trim())).filter((n) => !Number.isNaN(n)); if (ids.length) setQuestions.mutate(ids); }} disabled={setQuestions.isPending} className="rounded-lg bg-primary px-4 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid={`button-set-exam-questions-${exam.id}`}>Set paper ({exam.questionCount} currently)</button></div></div>
-    <div><div className="text-xs font-bold">Attempts &amp; results</div><div className="mt-2 overflow-x-auto rounded-xl border border-border"><table className="w-full min-w-[520px] text-left text-[11px]"><thead className="bg-muted uppercase tracking-wide text-muted-foreground"><tr><th className="px-3 py-2">Student</th><th className="px-3 py-2">Score</th><th className="px-3 py-2">%</th><th className="px-3 py-2">Status</th><th className="px-3 py-2"></th></tr></thead><tbody>{(attemptsQ.data || []).map((a) => <tr key={a.id} className="border-t border-border" data-testid={`row-exam-attempt-${a.id}`}><td className="px-3 py-2 font-bold">{a.studentName}</td><td className="px-3 py-2">{a.score}</td><td className="px-3 py-2">{a.percentage}%</td><td className="px-3 py-2">{a.status}</td><td className="px-3 py-2">{a.status !== 'in_progress' && !a.resultsReleasedAt && <button onClick={() => examsAdminApi.releaseOne(a.id)} className="text-primary font-bold" data-testid={`button-release-attempt-${a.id}`}>Release</button>}</td></tr>)}{!attemptsQ.data?.length && <tr><td colSpan={5} className="px-3 py-4 text-center text-muted-foreground">No attempts yet.</td></tr>}</tbody></table></div></div>
+    <div>
+      <div className="flex items-center justify-between"><div className="text-xs font-bold">Attach questions</div><button onClick={() => setUploadOpen((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[11px] font-bold" data-testid={`button-toggle-exam-upload-${exam.id}`}><UploadCloud size={12} /> {uploadOpen ? 'Hide' : 'Upload a file'}</button></div>
+      <p className="mt-1 text-[11px] text-muted-foreground">Paste MCQ IDs from the MCQ bank (comma-separated) to build this exam's paper, or upload a question file below.</p>
+      <div className="mt-2 flex gap-2"><input value={mcqIdsInput} onChange={(e) => setMcqIdsInput(e.target.value)} placeholder="e.g. 12, 13, 14, 20" className="h-9 flex-1 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`input-exam-mcq-ids-${exam.id}`} /><button onClick={() => { const ids = mcqIdsInput.split(',').map((s) => Number(s.trim())).filter((n) => !Number.isNaN(n)); if (ids.length) setQuestions.mutate(ids); }} disabled={setQuestions.isPending} className="rounded-lg bg-primary px-4 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid={`button-set-exam-questions-${exam.id}`}>Set paper ({exam.questionCount} currently)</button></div>
+
+      {uploadOpen && <div className="mt-3 space-y-3 rounded-2xl border border-primary/30 bg-[#eef7f1] p-4">
+        <p className="text-[11px] font-bold">Upload a question file — supports .txt, .csv, .xlsx, .xls, .pdf, .docx, and picks up per-option explanations if the file has them.</p>
+        <div className="flex flex-wrap gap-2">
+          <select value={moduleId} onChange={(e) => { setModuleId(e.target.value); setSubjectId(''); setTopicId(''); }} className="h-9 rounded-lg border border-border bg-card px-2 text-xs" data-testid={`select-exam-upload-module-${exam.id}`}><option value="">Select module</option>{modulesQ.data?.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
+          <select value={subjectId} onChange={(e) => { setSubjectId(e.target.value); setTopicId(''); }} disabled={!moduleId} className="h-9 rounded-lg border border-border bg-card px-2 text-xs disabled:opacity-50" data-testid={`select-exam-upload-subject-${exam.id}`}><option value="">Select subject</option>{subjectsQ.data?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+          <select value={topicId} onChange={(e) => setTopicId(e.target.value)} disabled={!subjectId} className="h-9 rounded-lg border border-border bg-card px-2 text-xs disabled:opacity-50" data-testid={`select-exam-upload-topic-${exam.id}`}><option value="">Select topic</option>{topicsQ.data?.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
+        </div>
+        {!targetReady && <p className="text-[11px] font-semibold text-[#8a5a12]">Pick a module/subject/topic — imported questions still need a home in the bank, even though they're for this exam.</p>}
+        <div className="flex flex-wrap items-center gap-2"><input type="file" accept=".txt,.csv,.xlsx,.xls,.pdf,.docx" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="flex-1 rounded-lg border border-dashed border-border bg-card px-3 py-2 text-xs" data-testid={`input-exam-file-${exam.id}`} /><button disabled={!file || parsing} onClick={parseFile} className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid={`button-parse-exam-file-${exam.id}`}>{parsing ? 'Reading…' : 'Parse file'}</button></div>
+        {parseError && <p className="text-[11px] font-semibold text-destructive">{parseError}</p>}
+
+        {candidates.length > 0 && <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-[11px] font-bold">{candidates.length} questions found · {candidates.filter((c) => c.needsReview).length} need review</div>
+            <label className="flex items-center gap-1.5 text-[11px] font-bold"><input type="checkbox" checked={replaceExisting} onChange={(e) => setReplaceExisting(e.target.checked)} data-testid={`checkbox-exam-replace-${exam.id}`} /> Replace this exam's current paper instead of adding to it</label>
+          </div>
+          <div className="max-h-80 space-y-2 overflow-y-auto pr-1">{candidates.map((c, i) => <div key={i} className={cn('rounded-xl border bg-card p-3', c.needsReview ? 'border-[#e5a952]' : 'border-border')} data-testid={`card-exam-candidate-${i}`}>
+            <div className="flex items-center justify-between"><span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold', c.needsReview ? 'bg-[#fdeecb] text-[#8a5a12]' : 'bg-[#d7eee4] text-[#164b4b]')}>{c.needsReview ? 'Needs review' : 'Looks good'}</span><button onClick={() => removeCandidate(i)} className="text-[11px] font-bold text-destructive" data-testid={`button-remove-exam-candidate-${i}`}>Remove</button></div>
+            <textarea value={c.question} onChange={(e) => updateCandidate(i, { question: e.target.value })} className="mt-2 min-h-12 w-full rounded-lg border border-border bg-background p-2 text-xs" data-testid={`input-exam-candidate-question-${i}`} />
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">{[0, 1, 2, 3, 4].map((oi) => <input key={oi} value={c.options[oi] || ''} onChange={(e) => { const opts = [...c.options]; opts[oi] = e.target.value; updateCandidate(i, { options: opts }); }} placeholder={`Option ${String.fromCharCode(65 + oi)}${oi === 4 ? ' (optional)' : ''}`} className="h-8 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`input-exam-candidate-option-${i}-${oi}`} />)}</div>
+            <div className="mt-2 flex items-center gap-2"><span className="text-[11px] font-bold text-muted-foreground">Correct:</span><select value={c.correctAnswer ?? ''} onChange={(e) => updateCandidate(i, { correctAnswer: e.target.value || null })} className="h-8 flex-1 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`select-exam-candidate-answer-${i}`}><option value="">Not set</option>{c.options.map((opt, oi) => opt && <option key={oi} value={opt}>{String.fromCharCode(65 + oi)}. {opt.slice(0, 40)}</option>)}</select></div>
+            {c.options.some((o) => o.trim()) && <details className="mt-2" open={!!c.optionExplanations?.some((e) => e?.trim())}>
+              <summary className="cursor-pointer text-[11px] font-bold text-primary">Per-option explanations</summary>
+              <div className="mt-2 space-y-1.5">{c.options.map((opt, oi) => opt.trim() && <div key={oi} className="flex items-start gap-2"><span className={cn('mt-1.5 grid size-5 shrink-0 place-items-center rounded text-[10px] font-bold', c.correctAnswer === opt ? 'bg-[#d7eee4] text-[#287058]' : 'bg-[#fce3dc] text-[#a34c3e]')}>{String.fromCharCode(65 + oi)}</span><textarea value={c.optionExplanations?.[oi] ?? ''} onChange={(e) => { const next = [...(c.optionExplanations ?? c.options.map(() => null))]; next[oi] = e.target.value || null; updateCandidate(i, { optionExplanations: next }); }} placeholder={c.correctAnswer === opt ? 'Why this is correct...' : 'Why this is wrong...'} className="min-h-8 flex-1 rounded-lg border border-border bg-background p-2 text-xs" data-testid={`input-exam-candidate-option-explanation-${i}-${oi}`} /></div>)}</div>
+            </details>}
+          </div>)}</div>
+          <button disabled={!targetReady || commitToExam.isPending} onClick={() => commitToExam.mutate()} className="rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid={`button-commit-exam-candidates-${exam.id}`}>{commitToExam.isPending ? 'Adding…' : replaceExisting ? `Replace paper with these ${candidates.length} questions` : `Add these ${candidates.length} questions to the exam`}</button>
+        </div>}
+      </div>}
+    </div>
+    <div><div className="text-xs font-bold">Attempts &amp; results</div><div className="mt-2 overflow-x-auto rounded-xl border border-border"><table className="w-full min-w-[620px] text-left text-[11px]"><thead className="bg-muted uppercase tracking-wide text-muted-foreground"><tr><th className="px-3 py-2">Student</th><th className="px-3 py-2">Institution</th><th className="px-3 py-2">Score</th><th className="px-3 py-2">%</th><th className="px-3 py-2">Status</th><th className="px-3 py-2"></th></tr></thead><tbody>{(attemptsQ.data || []).map((a) => <tr key={a.id} className="border-t border-border" data-testid={`row-exam-attempt-${a.id}`}><td className="px-3 py-2 font-bold">{a.studentName}</td><td className="px-3 py-2 text-muted-foreground">{a.institution}</td><td className="px-3 py-2">{a.score}</td><td className="px-3 py-2">{a.percentage}%</td><td className="px-3 py-2">{a.status}</td><td className="px-3 py-2">{a.status !== 'in_progress' && !a.resultsReleasedAt && <button onClick={() => examsAdminApi.releaseOne(a.id)} className="text-primary font-bold" data-testid={`button-release-attempt-${a.id}`}>Release</button>}</td></tr>)}{!attemptsQ.data?.length && <tr><td colSpan={6} className="px-3 py-4 text-center text-muted-foreground">No attempts yet.</td></tr>}</tbody></table></div></div>
   </div>;
 }
 
@@ -1555,6 +1725,6 @@ function useFaviconSync() {
 
 function AppRoutes() {
  useFaviconSync();
- return <Switch><Route path="/login" component={Login} /><Route path="/admin/login" component={Login} /><Route path="/admin-signup/1" component={AdminSignup} /><Route path="/forgot-password" component={ForgotPassword} /><Route path="/reset-password" component={ResetPassword} /><Route path="/verify-email" component={VerifyEmail} /><Route path="/notifications"><Shell><Notifications /></Shell></Route><Route path="/profile"><Shell><Profile /></Shell></Route><Route path="/"><Shell><AdminOverview /></Shell></Route><Route path="/admin"><Shell><AdminOverview /></Shell></Route><Route path="/admin/students"><Shell><AdminStudents /></Shell></Route><Route path="/admin/payments"><Shell><AdminPaymentsHub initialTab="Proof Review" /></Shell></Route><Route path="/admin/plans"><Shell><AdminPlans /></Shell></Route><Route path="/admin/payment-details"><Shell><AdminPaymentsHub initialTab="Collection Details" /></Shell></Route><Route path="/admin/academic-structure"><Shell><AdminAcademicStructure /></Shell></Route><Route path="/admin/content"><Shell><AdminContent /></Shell></Route><Route path="/admin/mcqs"><Shell><AdminMcqs /></Shell></Route><Route path="/admin/flashcards"><Shell><AdminFlashcards /></Shell></Route><Route path="/admin/books"><Shell><AdminBooks /></Shell></Route><Route path="/admin/past-papers"><Shell><AdminPastPapers /></Shell></Route><Route path="/admin/exams"><Shell><AdminExams /></Shell></Route><Route path="/admin/feedback"><Shell><AdminFeedback /></Shell></Route><Route path="/admin/site-content"><Shell><AdminSiteContent /></Shell></Route><Route path="/admin/team"><Shell><AdminTeam /></Shell></Route><Route path="/admin/settings"><Shell><AdminSettings /></Shell></Route><Route component={NotFound} /></Switch>; }
+ return <Switch><Route path="/login" component={Login} /><Route path="/admin/login" component={Login} /><Route path="/admin-signup/1" component={AdminSignup} /><Route path="/forgot-password" component={ForgotPassword} /><Route path="/reset-password" component={ResetPassword} /><Route path="/verify-email" component={VerifyEmail} /><Route path="/notifications"><Shell><Notifications /></Shell></Route><Route path="/profile"><Shell><Profile /></Shell></Route><Route path="/"><Shell><AdminOverview /></Shell></Route><Route path="/admin"><Shell><AdminOverview /></Shell></Route><Route path="/admin/students"><Shell><AdminStudents /></Shell></Route><Route path="/admin/payments"><Shell><AdminPaymentsHub initialTab="Proof Review" /></Shell></Route><Route path="/admin/plans"><Shell><AdminPlans /></Shell></Route><Route path="/admin/payment-details"><Shell><AdminPaymentsHub initialTab="Collection Details" /></Shell></Route><Route path="/admin/academic-structure"><Shell><AdminAcademicStructure /></Shell></Route><Route path="/admin/content"><Shell><AdminContent /></Shell></Route><Route path="/admin/mcqs"><Shell><AdminMcqs /></Shell></Route><Route path="/admin/flashcards"><Shell><AdminFlashcards /></Shell></Route><Route path="/admin/books"><Shell><AdminBooks /></Shell></Route><Route path="/admin/past-papers"><Shell><AdminPastPapers /></Shell></Route><Route path="/admin/exams"><Shell><AdminExams /></Shell></Route><Route path="/admin/feedback"><Shell><AdminFeedback /></Shell></Route><Route path="/admin/ai-visualizer-logs"><Shell><AdminAiVisualizerLogs /></Shell></Route><Route path="/admin/site-content"><Shell><AdminSiteContent /></Shell></Route><Route path="/admin/team"><Shell><AdminTeam /></Shell></Route><Route path="/admin/settings"><Shell><AdminSettings /></Shell></Route><Route component={NotFound} /></Switch>; }
 function App() { return <QueryClientProvider client={queryClient}><TooltipProvider><WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}><ErrorBoundary><AppRoutes /></ErrorBoundary></WouterRouter><Toaster /></TooltipProvider></QueryClientProvider>; }
 export default App;

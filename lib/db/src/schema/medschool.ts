@@ -249,6 +249,15 @@ export const mcqsTable = pgTable("med_mcqs", {
   options: text("options").array().notNull(),
   correctAnswer: text("correct_answer"),
   explanation: text("explanation"),
+  // Per-option explanations, index-aligned with `options` — e.g.
+  // optionExplanations[2] explains why options[2] is right or wrong. Lets
+  // admins (or the bulk-upload parser) capture not just "why the correct
+  // answer is correct" but "why each wrong option is wrong", which is what
+  // most real exam-prep question banks actually provide. Nullable/optional:
+  // a null array or a null/empty entry at a given index just means that
+  // option has no specific explanation yet, and the UI falls back to the
+  // single `explanation` field above for the correct option.
+  optionExplanations: text("option_explanations").array(),
   // PENDING (no explanation yet, or needs work) | AI_GENERATED (drafted by
   // AI, awaiting review) | REVIEWED (admin edited/checked it) | APPROVED
   // (final). Existing/imported explanations default to APPROVED at
@@ -505,6 +514,16 @@ export const savedSessionsTable = pgTable("med_saved_sessions", {
   userId: integer("user_id").notNull(),
   name: text("name").notNull(),
   config: text("config").notNull(), // JSON: { moduleId?, subjectId?, topicId?, pastPaperId? }
+  ...timestamps,
+});
+
+export const aiVisualizerLogsTable = pgTable("med_ai_visualizer_logs", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  prompt: text("prompt").notNull(),
+  status: text("status").notNull(), // "success" | "error"
+  visualizationType: text("visualization_type"), // e.g. "process", "equation" — null on error
+  errorMessage: text("error_message"), // null on success
   ...timestamps,
 });
 

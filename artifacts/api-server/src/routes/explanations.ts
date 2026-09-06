@@ -118,7 +118,7 @@ router.post("/admin/mcqs/bulk-generate-explanations", requireAdmin, async (req, 
 const GenerateFlashcardsBody = z.object({
   topicId: z.number().int().positive().optional(),
   sourceText: z.string().max(20000).optional(),
-  count: z.number().int().min(1).max(20).default(8),
+  count: z.number().int().min(1).max(100).default(8),
 }).refine((data) => !!data.topicId || !!data.sourceText?.trim(), { message: "Provide either a topicId or sourceText" });
 
 router.post("/admin/flashcards/generate", requireAdmin, async (req, res): Promise<void> => {
