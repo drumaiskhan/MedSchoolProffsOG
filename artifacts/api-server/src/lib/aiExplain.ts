@@ -1,82 +1,46 @@
-/* ============================================================
-   AI PROVIDERS
-   ============================================================ */
+/**
+ * Generates an AI explanation (for MCQs or flashcards) using an AI provider.
+ * Supports Anthropic, OpenAI, Gemini, or any OpenAI-compatible custom
+ * endpoint. The key/provider/model can come from Admin -> Platform
+ * settings -> AI (preferred, so non-technical admins can set/rotate it
+ * without touching the server env), falling back to ANTHROPIC_API_KEY /
+ * OPENAI_API_KEY / GEMINI_API_KEY in the environment for deployments that
+ * prefer to keep secrets out of the database. Neither set and this throws
+ * a clear, catchable error instead of silently doing nothing, so the admin
+ * UI can tell the difference between "AI isn't configured yet" and "the
+ * request failed."
+ *
+ * Uses a raw fetch call rather than an SDK dependency, matching the rest of
+ * this codebase's approach to optional integrations (see lib/storage.ts,
+ * lib/email.ts).
+ */
 
 import { getSetting } from "./settings";
 
-export type AIProvider =
-  | "openai"
-  | "gemini"
-  | "anthropic"
-  | "groq"
-  | "custom";
-
-export const AI_PROVIDERS: readonly AIProvider[] = [
-  "openai",
-  "gemini",
-  "anthropic",
-  "groq",
-  "custom",
-];
-
-/* ============================================================
-   ERRORS
-   ============================================================ */
-
 export class AiNotConfiguredError extends Error {
-  constructor(
-    message = "AI is not configured. Configure it from Admin → Platform Settings → AI, or set the appropriate backend environment variables.",
-  ) {
-    super(message);
+  constructor() {
+    super("No AI provider is configured. Set it from Admin -> Platform settings -> AI, or set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY in the environment.");
     this.name = "AiNotConfiguredError";
   }
 }
 
-/* ============================================================
-   TYPES
-   ============================================================ */
-
 export interface ExplanationRequest {
   question: string;
-  options?: string[] | null;
-  correctAnswer: string | null | undefined;
+  options: string[];
+  correctAnswer: string | null;
   reference?: string | null;
-  topicLabel?: string | null;
 }
 
 export interface FlashcardExplanationRequest {
   front: string;
   back: string;
-  topicLabel?: string | null;
-}
-
-export interface FlashcardGenerationMcq {
-  question?: string;
-  options?: string[] | null;
-  answer?: string | null;
-  correctAnswer?: string | null;
-  explanation?: string | null;
 }
 
 export interface FlashcardGenerationRequest {
-  /**
-   * Either explicit source text or MCQ material.
-   */
+  /** Either an explicit block of text (e.g. pasted notes), or MCQ question/answer pairs to draw from. */
   sourceText?: string;
-
-  /**
-   * MCQs that the AI may use as source material.
-   */
-  mcqs?: FlashcardGenerationMcq[];
-
-  /**
-   * Optional topic to focus the generated cards on.
-   */
+  mcqs?: Array<{ question: string; correctAnswer: string | null; explanation?: string | null }>;
   topicLabel?: string;
-
-  /**
-   * Number of cards requested.
-   */
   count: number;
 }
 
@@ -86,7 +50,13 @@ export interface GeneratedFlashcard {
 }
 
 export interface McqGenerationRequest {
+  /** Full context string, e.g. "Blood (Pathology — MBBS Year 1)" — the more
+   * specific this is, the less likely the model drifts to generic/unrelated
+   * trivia instead of questions actually about the topic. */
   topicLabel: string;
+  /** A few existing questions from the same topic, if any — used only as
+   * style/scope reference so new questions match the existing set's level
+   * and don't duplicate them; never sent as content to copy verbatim. */
   existingQuestions?: string[];
   count: number;
 }
@@ -96,1601 +66,328 @@ export interface GeneratedMcq {
   options: string[];
   correctAnswer: string;
   explanation: string;
-
-  /**
-   * Index-aligned with options.
-   *
-   * Each entry explains why that specific option is correct
-   * or incorrect.
-   */
+  // Index-aligned with `options` — why each option specifically is right or
+  // wrong, not just why the correct one is right.
   optionExplanations: string[];
 }
 
-interface AIConfig {
-  provider: AIProvider;
-  apiKey?: string;
-  model: string;
-  baseUrl?: string;
+function buildPrompt({ question, options, correctAnswer, reference }: ExplanationRequest): string {
+  const optionList = options.map((opt, i) => `${String.fromCharCode(65 + i)}. ${opt}`).join("\n");
+  return [
+    "You are writing a concise study explanation for a medical school MCQ (MBBS/BDS level).",
+    "Explain why the correct answer is right and briefly note why the other options are wrong.",
+    "Keep it factual, exam-focused, and under 150 words. Do not use markdown headers.",
+    "",
+    `Question: ${question}`,
+    `Options:\n${optionList}`,
+    correctAnswer ? `Correct answer: ${correctAnswer}` : "Correct answer: not specified — infer the most medically accurate answer and note the uncertainty.",
+    reference ? `Reference material to ground the explanation in: ${reference}` : "",
+  ].filter(Boolean).join("\n");
 }
 
-/* ============================================================
-   LIMITS
-   ============================================================ */
-
-const MAX_FLASHCARDS = 100;
-const FLASHCARD_BATCH_SIZE = 20;
-
-const MAX_MCQS = 100;
-const MCQ_BATCH_SIZE = 20;
-
-const MAX_GENERATION_ATTEMPTS = 4;
-
-/* ============================================================
-   DEFAULT MODELS
-   ============================================================ */
-
-const DEFAULT_MODELS: Record<AIProvider, string> = {
-  openai: "gpt-4o-mini",
-  gemini: "gemini-2.0-flash",
-  anthropic: "claude-sonnet-4-6",
-  groq: "llama-3.3-70b-versatile",
-  custom: "gpt-4o-mini",
-};
-
-/* ============================================================
-   HELPERS
-   ============================================================ */
-
-function normalizeText(value: unknown): string {
-  if (value === null || value === undefined) {
-    return "";
-  }
-
-  return String(value)
-    .replace(/\r\n/g, "\n")
-    .replace(/[ \t]+/g, " ")
-    .trim();
+function buildFlashcardPrompt({ front, back }: FlashcardExplanationRequest): string {
+  return [
+    "You are helping a medical student (MBBS/BDS level) understand a flashcard they're stuck on.",
+    "Explain the answer below in a different way than a one-line definition — use an analogy, a mechanism walkthrough, or a clinical example, whichever helps it stick.",
+    "Keep it factual and under 130 words. Do not use markdown headers.",
+    "",
+    `Flashcard prompt: ${front}`,
+    `Flashcard answer: ${back}`,
+  ].join("\n");
 }
 
-function getEnv(name: string): string {
-  return normalizeText(process.env[name]);
+function buildFlashcardGenerationPrompt({ sourceText, mcqs, topicLabel, count }: FlashcardGenerationRequest): string {
+  const source = sourceText?.trim()
+    ? sourceText.trim()
+    : (mcqs ?? []).map((m) => `Q: ${m.question}\nA: ${m.correctAnswer ?? "(unspecified)"}${m.explanation ? `\nWhy: ${m.explanation}` : ""}`).join("\n\n");
+  return [
+    "You are creating spaced-repetition flashcards for a medical student (MBBS/BDS level)" + (topicLabel ? ` studying ${topicLabel}` : "") + ".",
+    `Produce exactly ${count} front/back flashcard pairs distilled from the source material below.`,
+    "Each front should be a short, specific question or prompt. Each back should be a concise, factual answer (1-3 sentences).",
+    "Do not repeat near-duplicate cards. Do not include markdown headers or numbering in the front/back text itself.",
+    "",
+    "Respond with ONLY a valid JSON array, no prose before or after, no code fences, in this exact shape:",
+    '[{"front": "...", "back": "..."}]',
+    "",
+    "Source material:",
+    source || "(no source material provided — use general high-yield facts for this topic)",
+  ].join("\n");
 }
 
-function isProvider(value: string): value is AIProvider {
-  return (
-    value === "openai" ||
-    value === "gemini" ||
-    value === "anthropic" ||
-    value === "groq" ||
-    value === "custom"
-  );
-}
-
-function getDefaultModel(provider: AIProvider): string {
-  return DEFAULT_MODELS[provider];
-}
-
-/* ============================================================
-   AI CONFIGURATION
-   ============================================================ */
-
-/**
- * Configuration priority:
- *
- * 1. Admin database settings
- * 2. Generic AI_* environment variables
- * 3. Provider-specific environment variables
- *
- * Admin settings therefore allow the AI provider/API key/model
- * to be changed without modifying the server environment.
- *
- * Supported generic env vars:
- *
- * AI_PROVIDER
- * AI_API_KEY
- * AI_MODEL
- * AI_BASE_URL
- *
- * Supported provider-specific fallback keys:
- *
- * OPENAI_API_KEY
- * GEMINI_API_KEY
- * ANTHROPIC_API_KEY
- * GROQ_API_KEY
- */
-async function getAIConfig(): Promise<AIConfig> {
-  const dbProvider = normalizeText(
-    await getSetting("AI_PROVIDER", null),
-  ).toLowerCase();
-
-  const dbApiKey = normalizeText(
-    await getSetting("AI_API_KEY", null),
-  );
-
-  const dbModel = normalizeText(
-    await getSetting("AI_MODEL", null),
-  );
-
-  const dbBaseUrl = normalizeText(
-    await getSetting("AI_BASE_URL", null),
-  );
-
-  const envProvider = getEnv("AI_PROVIDER").toLowerCase();
-  const envApiKey = getEnv("AI_API_KEY");
-  const envModel = getEnv("AI_MODEL");
-  const envBaseUrl = getEnv("AI_BASE_URL");
-
-  /*
-   * Provider-specific API key fallback.
-   */
-  const providerSpecificKeys: Record<AIProvider, string> = {
-    openai: getEnv("OPENAI_API_KEY"),
-    gemini: getEnv("GEMINI_API_KEY"),
-    anthropic: getEnv("ANTHROPIC_API_KEY"),
-    groq: getEnv("GROQ_API_KEY"),
-    custom: "",
-  };
-
-  /*
-   * Prefer the database provider when configured.
-   */
-  const providerValue = (
-    dbProvider ||
-    envProvider
-  ).toLowerCase();
-
-  /*
-   * If no explicit provider was configured, automatically
-   * detect a provider from provider-specific API keys.
-   */
-  let detectedProvider = providerValue;
-
-  if (!detectedProvider) {
-    if (providerSpecificKeys.anthropic) {
-      detectedProvider = "anthropic";
-    } else if (providerSpecificKeys.openai) {
-      detectedProvider = "openai";
-    } else if (providerSpecificKeys.gemini) {
-      detectedProvider = "gemini";
-    } else if (providerSpecificKeys.groq) {
-      detectedProvider = "groq";
-    }
-  }
-
-  if (!detectedProvider) {
-    throw new AiNotConfiguredError(
-      "No AI provider is configured. Configure AI from Admin → Platform Settings → AI, or set AI_PROVIDER in the backend environment.",
-    );
-  }
-
-  if (!isProvider(detectedProvider)) {
-    throw new AiNotConfiguredError(
-      `Unsupported AI provider: ${detectedProvider}`,
-    );
-  }
-
-  const provider = detectedProvider;
-
-  /*
-   * Database API key takes priority over environment variables.
-   */
-  const apiKey =
-    dbApiKey ||
-    envApiKey ||
-    providerSpecificKeys[provider] ||
-    "";
-
-  const model =
-    dbModel ||
-    envModel ||
-    getDefaultModel(provider);
-
-  const baseUrl =
-    dbBaseUrl ||
-    envBaseUrl ||
-    undefined;
-
-  if (!model) {
-    throw new AiNotConfiguredError(
-      "AI model is missing. Configure AI_MODEL or select a model from Admin → Platform Settings → AI.",
-    );
-  }
-
-  /*
-   * Official providers require API keys.
-   *
-   * Custom endpoints may operate without a key because
-   * locally/self-hosted models may not require authentication.
-   */
-  if (provider !== "custom" && !apiKey) {
-    throw new AiNotConfiguredError(
-      `AI API key is missing for ${provider}. Configure it from Admin → Platform Settings → AI or set the appropriate environment variable.`,
-    );
-  }
-
-  if (provider === "custom" && !baseUrl) {
-    throw new AiNotConfiguredError(
-      "Custom AI requires AI_BASE_URL. Configure it from Admin → Platform Settings → AI.",
-    );
-  }
-
-  return {
-    provider,
-    apiKey: apiKey || undefined,
-    model,
-    baseUrl,
-  };
-}
-
-/* ============================================================
-   RESPONSE HANDLING
-   ============================================================ */
-
-async function parseResponse(
-  response: Response,
-): Promise<any> {
-  const text = await response.text();
-
-  let data: any;
-
+function parseFlashcardJson(raw: string): GeneratedFlashcard[] {
+  // Strip code fences the model may add despite instructions not to.
+  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+  let parsed: unknown;
   try {
-    data = JSON.parse(text);
+    parsed = JSON.parse(cleaned);
   } catch {
-    if (!response.ok) {
-      throw new Error(
-        `AI provider returned HTTP ${response.status}: ${text.slice(
-          0,
-          500,
-        )}`,
-      );
-    }
-
-    throw new Error(
-      `AI provider returned an invalid response: ${text.slice(
-        0,
-        500,
-      )}`,
-    );
+    // Some models wrap the array in extra prose — try to extract the first [...] block.
+    const match = cleaned.match(/\[[\s\S]*\]/);
+    if (!match) throw new Error("AI did not return valid flashcard JSON");
+    parsed = JSON.parse(match[0]);
   }
-
-  if (!response.ok) {
-    const message =
-      data?.error?.message ||
-      data?.error?.type ||
-      data?.message ||
-      (typeof data?.error === "string"
-        ? data.error
-        : undefined) ||
-      `AI request failed with HTTP ${response.status}`;
-
-    throw new Error(String(message));
-  }
-
-  return data;
+  if (!Array.isArray(parsed)) throw new Error("AI did not return a flashcard array");
+  return parsed
+    .filter((c): c is { front: unknown; back: unknown } => !!c && typeof c === "object")
+    .map((c) => ({ front: String((c as { front: unknown }).front ?? "").trim(), back: String((c as { back: unknown }).back ?? "").trim() }))
+    .filter((c) => c.front.length > 0 && c.back.length > 0);
 }
 
-function cleanAIJson(text: string): string {
-  let cleaned = text.trim();
-
-  cleaned = cleaned.replace(
-    /^```json\s*/i,
+// This prompt is the actual fix for "AI generates questions unrelated to the
+// selected topic" (e.g. a "Blood" topic producing a question about the
+// smallest bone in the body): the topic label is repeated at both the start
+// AND end of the prompt (models weight the tail of a long prompt more
+// heavily), every question is required to explicitly reference the topic
+// subject matter, and the model is told directly to discard and regenerate
+// anything generic. existingQuestions are shown only as a "don't repeat
+// these / match this level" reference, never as content to draw the new
+// questions' subject matter from.
+function buildMcqGenerationPrompt({ topicLabel, existingQuestions, count }: McqGenerationRequest): string {
+  const existingBlock = existingQuestions?.length
+    ? `\nFor reference only (do not repeat these, do not copy their subject if it drifted off-topic — match their difficulty level instead):\n${existingQuestions.slice(0, 8).map((q) => `- ${q}`).join("\n")}\n`
+    : "";
+  return [
+    `You are a medical school question-bank author. Every single question you write MUST be specifically about: "${topicLabel}".`,
+    "Do not write generic pre-med trivia (bone names, cell organelles, vital sign ranges, etc.) unless that is literally what the topic above is about.",
+    "Before finalizing each question, check: does this question directly test knowledge of the exact topic named above? If not, discard it and write a different one that does.",
+    `Produce exactly ${count} single-best-answer multiple-choice questions (MBBS/BDS level) on "${topicLabel}".`,
+    "Each question needs exactly 4 options (A-D equivalent, but return them as a plain string array, not labeled), and one correct answer that must be an exact string match to one of the options.",
+    "For EVERY option (not just the correct one), write a short 1-2 sentence explanation of why that specific option is right or wrong — a real distractor-analysis, not just a generic restatement. The correct option's explanation should say why it's correct; each wrong option's explanation should say specifically why it's wrong (e.g. what it's confused with, or what's missing/incorrect about it) — this is what a real exam-prep answer key looks like, not just one blanket explanation for the correct choice.",
+    "Vary the sub-topics, question stems, and clinical vs. factual framing across the set so it doesn't feel repetitive.",
+    existingBlock,
+    `Remember: this entire question set is about "${topicLabel}" — nothing else.`,
     "",
-  );
-
-  cleaned = cleaned.replace(
-    /^```\s*/i,
-    "",
-  );
-
-  cleaned = cleaned.replace(
-    /\s*```$/i,
-    "",
-  );
-
-  return cleaned.trim();
+    "Respond with ONLY a valid JSON array, no prose before or after, no code fences, in this exact shape (optionExplanations must have exactly one entry per option, in the same order as options):",
+    '[{"question": "...", "options": ["...", "...", "...", "..."], "correctAnswer": "...", "explanation": "...", "optionExplanations": ["...", "...", "...", "..."]}]',
+  ].join("\n");
 }
 
-function extractJsonArray(text: string): string {
-  const cleaned = cleanAIJson(text);
-
-  const start = cleaned.indexOf("[");
-  const end = cleaned.lastIndexOf("]");
-
-  if (
-    start === -1 ||
-    end === -1 ||
-    end <= start
-  ) {
-    throw new Error(
-      "AI did not return a valid JSON array.",
-    );
+function parseMcqJson(raw: string): GeneratedMcq[] {
+  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    const match = cleaned.match(/\[[\s\S]*\]/);
+    if (!match) throw new Error("AI did not return valid MCQ JSON");
+    parsed = JSON.parse(match[0]);
   }
-
-  return cleaned.slice(start, end + 1);
+  if (!Array.isArray(parsed)) throw new Error("AI did not return an MCQ array");
+  return parsed
+    .filter((m): m is { question: unknown; options: unknown; correctAnswer: unknown; explanation: unknown; optionExplanations: unknown } => !!m && typeof m === "object")
+    .map((m) => {
+      const options = Array.isArray((m as { options: unknown }).options) ? ((m as { options: unknown[] }).options).map((o) => String(o).trim()).filter(Boolean) : [];
+      const rawOptionExplanations = (m as { optionExplanations: unknown }).optionExplanations;
+      // Only trust optionExplanations if the model actually gave one entry
+      // per option — a mismatched-length array would silently misattribute
+      // explanations to the wrong option index downstream.
+      const optionExplanations = Array.isArray(rawOptionExplanations) && rawOptionExplanations.length === options.length
+        ? rawOptionExplanations.map((e) => String(e ?? "").trim())
+        : [];
+      return {
+        question: String((m as { question: unknown }).question ?? "").trim(),
+        options,
+        correctAnswer: String((m as { correctAnswer: unknown }).correctAnswer ?? "").trim(),
+        explanation: String((m as { explanation: unknown }).explanation ?? "").trim(),
+        optionExplanations,
+      };
+    })
+    // Drop malformed entries (missing question/options) and ones where the
+    // "correct answer" doesn't actually match one of the options — better to
+    // silently skip a bad row than hand the admin a question with no valid
+    // correct answer to review.
+    .filter((m) => m.question.length > 0 && m.options.length >= 2 && m.options.includes(m.correctAnswer));
 }
 
-/* ============================================================
-   PROVIDER: ANTHROPIC
-   ============================================================ */
-
-async function callAnthropic(
-  config: AIConfig,
-  systemPrompt: string,
-  userPrompt: string,
-): Promise<string> {
-  if (!config.apiKey) {
-    throw new AiNotConfiguredError(
-      "Anthropic API key is missing.",
-    );
-  }
-
-  const response = await fetch(
-    "https://api.anthropic.com/v1/messages",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": config.apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: config.model,
-        max_tokens: 8192,
-        system: systemPrompt,
-        messages: [
-          {
-            role: "user",
-            content: userPrompt,
-          },
-        ],
-      }),
-    },
-  );
-
-  const data = await parseResponse(response);
-
-  const content = data?.content;
-
-  if (!Array.isArray(content)) {
+// A misconfigured Base URL (custom provider) or an unexpected upstream
+// failure (auth edge case, wrong region, a CDN/WAF challenge page, etc.) can
+// make `res.ok` true while the body is actually an HTML page, not JSON —
+// `res.json()` then throws a raw "Unexpected token '<'..." SyntaxError that
+// tells the admin nothing about what actually went wrong. This checks the
+// Content-Type before parsing and, if it's not JSON, throws a message that
+// names the exact URL that was hit and shows a short snippet of what came
+// back — enough to immediately spot "oh, that URL is wrong" instead of
+// staring at a wall of raw HTML.
+async function parseJsonOrThrow(res: Response, url: string, providerLabel: string): Promise<unknown> {
+  const contentType = res.headers.get("content-type") || "";
+  const raw = await res.text();
+  if (!contentType.includes("application/json")) {
+    const looksLikeHtml = /^\s*<(!doctype|html)/i.test(raw);
     throw new Error(
-      "Anthropic returned an unexpected response.",
+      `${providerLabel} returned a non-JSON response from ${url} (status ${res.status}, content-type "${contentType || "unknown"}").` +
+      (looksLikeHtml
+        ? " That URL is serving a webpage, not an API — double-check the provider's Base URL in Admin > Platform settings > AI (it should point at the API base, e.g. https://openrouter.ai/api/v1, not a website homepage)."
+        : ` Response started with: ${raw.slice(0, 200)}`),
     );
   }
-
-  const text = content
-    .filter(
-      (item: any) =>
-        item?.type === "text",
-    )
-    .map(
-      (item: any) =>
-        item?.text || "",
-    )
-    .join("\n")
-    .trim();
-
-  if (!text) {
-    throw new Error(
-      "Anthropic returned no text.",
-    );
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error(`${providerLabel} returned malformed JSON from ${url} (status ${res.status}): ${raw.slice(0, 300)}`);
   }
-
-  return text;
 }
 
-/* ============================================================
-   PROVIDER: OPENAI / GROQ / CUSTOM
-   ============================================================ */
-
-async function callOpenAICompatible(
-  config: AIConfig,
-  systemPrompt: string,
-  userPrompt: string,
-): Promise<string> {
-  let baseUrl = config.baseUrl;
-
-  if (!baseUrl) {
-    if (config.provider === "openai") {
-      baseUrl =
-        "https://api.openai.com/v1";
-    } else if (config.provider === "groq") {
-      baseUrl =
-        "https://api.groq.com/openai/v1";
-    } else {
-      throw new AiNotConfiguredError(
-        "Custom AI requires AI_BASE_URL.",
-      );
-    }
-  }
-
-  baseUrl = baseUrl.replace(/\/+$/, "");
-
-  const url = baseUrl.endsWith(
-    "/chat/completions",
-  )
-    ? baseUrl
-    : `${baseUrl}/chat/completions`;
-
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-
-  if (config.apiKey) {
-    headers.Authorization =
-      `Bearer ${config.apiKey}`;
-  }
-
-  const response = await fetch(url, {
+async function generateWithAnthropic(apiKey: string, prompt: string, maxTokens = 400): Promise<string> {
+  const url = "https://api.anthropic.com/v1/messages";
+  const res = await fetch(url, {
     method: "POST",
-    headers,
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({
-      model: config.model,
-      messages: [
-        {
-          role: "system",
-          content: systemPrompt,
-        },
-        {
-          role: "user",
-          content: userPrompt,
-        },
-      ],
-      temperature: 0.2,
+      model: "claude-sonnet-4-6",
+      max_tokens: maxTokens,
+      messages: [{ role: "user", content: prompt }],
     }),
   });
-
-  const data = await parseResponse(response);
-
-  const content =
-    data?.choices?.[0]?.message?.content;
-
-  if (!content) {
-    throw new Error(
-      "OpenAI-compatible provider returned no text.",
-    );
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Anthropic API error (${res.status}): ${body.slice(0, 300)}`);
   }
-
-  if (Array.isArray(content)) {
-    const text = content
-      .map((item: any) => {
-        if (typeof item === "string") {
-          return item;
-        }
-
-        return item?.text || "";
-      })
-      .join("")
-      .trim();
-
-    if (!text) {
-      throw new Error(
-        "OpenAI-compatible provider returned empty content.",
-      );
-    }
-
-    return text;
-  }
-
-  return String(content).trim();
+  const data = await parseJsonOrThrow(res, url, "Anthropic") as { content?: Array<{ type: string; text?: string }> };
+  const text = data.content?.find((block) => block.type === "text")?.text;
+  if (!text) throw new Error("Anthropic API returned no text content");
+  return text.trim();
 }
 
-/* ============================================================
-   PROVIDER: GEMINI
-   ============================================================ */
-
-async function callGemini(
-  config: AIConfig,
-  systemPrompt: string,
-  userPrompt: string,
-): Promise<string> {
-  if (!config.apiKey) {
-    throw new AiNotConfiguredError(
-      "Gemini API key is missing.",
-    );
+async function generateWithOpenAi(apiKey: string, prompt: string, maxTokens = 400): Promise<string> {
+  const url = "https://api.openai.com/v1/chat/completions";
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      max_tokens: maxTokens,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`OpenAI API error (${res.status}): ${body.slice(0, 300)}`);
   }
+  const data = await parseJsonOrThrow(res, url, "OpenAI") as { choices?: Array<{ message?: { content?: string } }> };
+  const text = data.choices?.[0]?.message?.content;
+  if (!text) throw new Error("OpenAI API returned no text content");
+  return text.trim();
+}
 
-  const model = config.model.replace(
-    /^models\//,
-    "",
-  );
+async function generateWithGemini(apiKey: string, model: string, prompt: string, maxTokens = 400): Promise<string> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: maxTokens } }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Gemini API error (${res.status}): ${body.slice(0, 300)}`);
+  }
+  const data = await parseJsonOrThrow(res, url, "Gemini") as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+  const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("");
+  if (!text) throw new Error("Gemini API returned no text content");
+  return text.trim();
+}
 
-  const url =
-    `https://generativelanguage.googleapis.com/v1beta/models/` +
-    `${encodeURIComponent(model)}:generateContent`;
-
-  const response = await fetch(url, {
+/**
+ * Any OpenAI-compatible chat-completions endpoint (Groq, OpenRouter, a
+ * locally hosted model, an enterprise gateway, etc.) — same request/response
+ * shape as generateWithOpenAi, just against an admin-supplied base URL. This
+ * is the provider mode most likely to get a wrong URL (it's free text), so
+ * the non-JSON-response check above matters most here.
+ *
+ * OpenRouter specifically: it's happy to accept the request without these
+ * headers, but including them is OpenRouter's documented way to identify
+ * your app on https://openrouter.ai/rankings and in their dashboard/logs —
+ * harmless to send to any other OpenAI-compatible provider too, since
+ * they'll just ignore unrecognized headers.
+ */
+async function generateWithCustomEndpoint(baseUrl: string, apiKey: string, model: string, prompt: string, maxTokens = 400): Promise<string> {
+  const url = baseUrl.replace(/\/$/, "") + "/chat/completions";
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-goog-api-key": config.apiKey,
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+      "HTTP-Referer": "https://medschoolproffss.netlify.app",
+      "X-Title": "MedSchoolProffs",
     },
-    body: JSON.stringify({
-      systemInstruction: {
-        parts: [
-          {
-            text: systemPrompt,
-          },
-        ],
-      },
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text: userPrompt,
-            },
-          ],
-        },
-      ],
-      generationConfig: {
-        temperature: 0.2,
-      },
-    }),
+    body: JSON.stringify({ model, max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] }),
   });
-
-  const data = await parseResponse(response);
-
-  const parts =
-    data?.candidates?.[0]?.content?.parts;
-
-  if (!Array.isArray(parts)) {
-    throw new Error(
-      "Gemini returned an unexpected response.",
-    );
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`AI endpoint error (${res.status}): ${body.slice(0, 300)}`);
   }
-
-  const text = parts
-    .map(
-      (part: any) =>
-        part?.text || "",
-    )
-    .join("")
-    .trim();
-
-  if (!text) {
-    throw new Error(
-      "Gemini returned no text.",
-    );
-  }
-
-  return text;
+  const data = await parseJsonOrThrow(res, url, "Custom AI endpoint") as { choices?: Array<{ message?: { content?: string } }> };
+  const text = data.choices?.[0]?.message?.content;
+  if (!text) throw new Error("AI endpoint returned no text content");
+  return text.trim();
 }
 
-/* ============================================================
-   CENTRAL AI DISPATCHER
-   ============================================================ */
+export const AI_PROVIDERS = ["anthropic", "openai", "gemini", "custom"] as const;
+export type AiProvider = typeof AI_PROVIDERS[number];
 
-async function generateText(
-  systemPrompt: string,
-  userPrompt: string,
-): Promise<string> {
-  const config = await getAIConfig();
+const DEFAULT_MODELS: Record<AiProvider, string> = {
+  anthropic: "claude-sonnet-4-6",
+  openai: "gpt-4o-mini",
+  gemini: "gemini-2.0-flash",
+  // OpenRouter (and most OpenAI-compatible aggregators) namespace model IDs
+  // as "vendor/model" — a bare "gpt-4o-mini" with no vendor prefix returns
+  // an OpenRouter error, not a completion. Only used when the admin leaves
+  // the Model field blank for the "custom" provider.
+  custom: "openai/gpt-4o-mini",
+};
 
-  switch (config.provider) {
-    case "gemini":
-      return callGemini(
-        config,
-        systemPrompt,
-        userPrompt,
-      );
+/** DB setting takes precedence over the env var of the same provider. */
+async function resolveProvider(): Promise<{ provider: AiProvider; apiKey: string; model: string; baseUrl?: string } | null> {
+  const dbProvider = await getSetting("AI_PROVIDER", null);
+  const dbKey = await getSetting("AI_API_KEY", null);
+  const dbModel = await getSetting("AI_MODEL", null);
+  const dbBaseUrl = await getSetting("AI_BASE_URL", null);
+  if ((dbKey || dbProvider === "custom") && dbProvider && (AI_PROVIDERS as readonly string[]).includes(dbProvider)) {
+    const provider = dbProvider as AiProvider;
+    if (provider === "custom" && !dbBaseUrl) return null; // custom needs a base URL to mean anything
+    return { provider, apiKey: dbKey ?? "", model: dbModel || DEFAULT_MODELS[provider], baseUrl: dbBaseUrl ?? undefined };
+  }
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  if (anthropicKey) return { provider: "anthropic", apiKey: anthropicKey, model: DEFAULT_MODELS.anthropic };
+  const openAiKey = process.env.OPENAI_API_KEY;
+  if (openAiKey) return { provider: "openai", apiKey: openAiKey, model: DEFAULT_MODELS.openai };
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (geminiKey) return { provider: "gemini", apiKey: geminiKey, model: DEFAULT_MODELS.gemini };
+  return null;
+}
 
-    case "anthropic":
-      return callAnthropic(
-        config,
-        systemPrompt,
-        userPrompt,
-      );
-
-    case "openai":
-    case "groq":
-    case "custom":
-      return callOpenAICompatible(
-        config,
-        systemPrompt,
-        userPrompt,
-      );
-
-    default:
-      throw new AiNotConfiguredError(
-        `Unsupported AI provider: ${config.provider}`,
-      );
+export async function runPrompt(prompt: string, maxTokens = 400): Promise<string> {
+  const resolved = await resolveProvider();
+  if (!resolved) throw new AiNotConfiguredError();
+  switch (resolved.provider) {
+    case "anthropic": return generateWithAnthropic(resolved.apiKey, prompt, maxTokens);
+    case "openai": return generateWithOpenAi(resolved.apiKey, prompt, maxTokens);
+    case "gemini": return generateWithGemini(resolved.apiKey, resolved.model, prompt, maxTokens);
+    case "custom": return generateWithCustomEndpoint(resolved.baseUrl!, resolved.apiKey, resolved.model, prompt, maxTokens);
   }
 }
 
-/* ============================================================
-   GENERIC PROMPT
-   ============================================================ */
-
-function buildPrompt(
-  request: ExplanationRequest,
-): string {
-  const options = request.options || [];
-
-  const optionList =
-    options.length > 0
-      ? options
-          .map(
-            (option, index) =>
-              `${String.fromCharCode(
-                65 + index,
-              )}. ${option}`,
-          )
-          .join("\n")
-      : "Not provided";
-
-  return [
-    "You are an expert medical education assistant for MedschoolProffs.",
-    "",
-    "Write a concise, medically accurate explanation for an MBBS/BDS-level MCQ.",
-    "",
-    "Explain why the correct answer is correct.",
-    "When options are provided, briefly explain why the other options are incorrect.",
-    "Do not invent unsupported medical facts.",
-    "Use the reference material when provided.",
-    "Keep the explanation focused and useful for exam revision.",
-    "Do not mention that you are an AI.",
-    "",
-    request.topicLabel
-      ? `Topic: ${request.topicLabel}`
-      : "",
-    "",
-    `Question: ${request.question}`,
-    "",
-    `Options:\n${optionList}`,
-    "",
-    `Correct answer: ${
-      request.correctAnswer || "Not provided"
-    }`,
-    "",
-    `Reference: ${
-      request.reference || "Not provided"
-    }`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+export async function generateExplanation(request: ExplanationRequest): Promise<string> {
+  return runPrompt(buildPrompt(request));
 }
 
-/* ============================================================
-   MCQ EXPLANATIONS
-   ============================================================ */
-
-export async function generateExplanation(
-  request: ExplanationRequest,
-): Promise<string> {
-  const systemPrompt = `
-You are an expert medical education assistant for MedschoolProffs.
-
-Your task is to explain medical MCQs accurately for MBBS/BDS students.
-
-Rules:
-- Explain why the correct answer is correct.
-- Explain why the other options are incorrect when available.
-- Use medically accurate reasoning.
-- Do not invent facts.
-- Use the provided reference when useful.
-- Keep the explanation structured and easy to revise.
-- Do not mention that you are an AI.
-`.trim();
-
-  const userPrompt = buildPrompt(request);
-
-  return generateText(
-    systemPrompt,
-    userPrompt,
-  );
+export async function generateFlashcardExplanation(request: FlashcardExplanationRequest): Promise<string> {
+  return runPrompt(buildFlashcardPrompt(request));
 }
 
-/* ============================================================
-   FLASHCARD EXPLANATION
-   ============================================================ */
-
-function buildFlashcardPrompt(
-  request: FlashcardExplanationRequest,
-): string {
-  return [
-    "You are helping a medical student understand a flashcard.",
-    "Explain the medical concept behind the answer.",
-    "Use a mechanism walkthrough, analogy, or clinical example where useful.",
-    "Be medically accurate.",
-    "Do not introduce unsupported claims.",
-    "Keep the explanation concise and revision-friendly.",
-    "Do not use markdown headers.",
-    "Do not mention that you are an AI.",
-    "",
-    request.topicLabel
-      ? `Topic: ${request.topicLabel}`
-      : "",
-    "",
-    `Flashcard front: ${request.front}`,
-    "",
-    `Flashcard back: ${request.back}`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+/** Generates draft front/back flashcard pairs — callers should treat these as editable drafts, not auto-publish. */
+export async function generateFlashcardSet(request: FlashcardGenerationRequest): Promise<GeneratedFlashcard[]> {
+  const raw = await runPrompt(buildFlashcardGenerationPrompt(request));
+  return parseFlashcardJson(raw);
 }
 
-export async function generateFlashcardExplanation(
-  request: FlashcardExplanationRequest,
-): Promise<string> {
-  const systemPrompt = `
-You are a medical education assistant for MedschoolProffs.
-
-Explain the medical concept behind a flashcard.
-
-Rules:
-- Be medically accurate.
-- Explain the concept clearly.
-- Do not introduce unsupported claims.
-- Keep it concise enough for revision.
-- Use appropriate medical terminology.
-- Do not mention that you are an AI.
-`.trim();
-
-  const userPrompt =
-    buildFlashcardPrompt(request);
-
-  return generateText(
-    systemPrompt,
-    userPrompt,
-  );
-}
-
-/* ============================================================
-   FLASHCARD SOURCE MATERIAL
-   ============================================================ */
-
-function buildSourceMaterial(
-  request: FlashcardGenerationRequest,
-): string {
-  const sections: string[] = [];
-
-  if (request.topicLabel?.trim()) {
-    sections.push(
-      `Topic: ${request.topicLabel.trim()}`,
-    );
-  }
-
-  if (request.sourceText?.trim()) {
-    sections.push(
-      `SOURCE MATERIAL:\n${request.sourceText.trim()}`,
-    );
-  }
-
-  if (
-    request.mcqs &&
-    request.mcqs.length > 0
-  ) {
-    const mcqText = request.mcqs
-      .map((mcq, index) => {
-        const options =
-          mcq.options &&
-          mcq.options.length > 0
-            ? `\nOptions:\n${mcq.options
-                .map(
-                  (option, optionIndex) =>
-                    `${optionIndex + 1}. ${option}`,
-                )
-                .join("\n")}`
-            : "";
-
-        const answer =
-          mcq.correctAnswer ||
-          mcq.answer ||
-          "";
-
-        return `
-MCQ ${index + 1}
-
-Question:
-${mcq.question || ""}
-
-${options}
-
-Answer:
-${answer}
-
-Explanation:
-${mcq.explanation || ""}
-`.trim();
-      })
-      .join("\n\n");
-
-    sections.push(
-      `MCQ MATERIAL:\n${mcqText}`,
-    );
-  }
-
-  return sections.join("\n\n");
-}
-
-/* ============================================================
-   FLASHCARD PARSER
-   ============================================================ */
-
-function parseFlashcards(
-  text: string,
-): GeneratedFlashcard[] {
-  const json = extractJsonArray(text);
-
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(json);
-  } catch {
-    throw new Error(
-      "AI returned invalid flashcard JSON.",
-    );
-  }
-
-  if (!Array.isArray(parsed)) {
-    throw new Error(
-      "AI flashcard response must be an array.",
-    );
-  }
-
-  const cards: GeneratedFlashcard[] = [];
-
-  for (const item of parsed) {
-    if (
-      !item ||
-      typeof item !== "object"
-    ) {
-      continue;
-    }
-
-    const record =
-      item as Record<string, unknown>;
-
-    const front = normalizeText(
-      record.front,
-    );
-
-    const back = normalizeText(
-      record.back,
-    );
-
-    if (!front || !back) {
-      continue;
-    }
-
-    cards.push({
-      front,
-      back,
-    });
-  }
-
-  return deduplicateFlashcards(cards);
-}
-
-function deduplicateFlashcards(
-  cards: GeneratedFlashcard[],
-): GeneratedFlashcard[] {
-  const seen = new Set<string>();
-  const result: GeneratedFlashcard[] = [];
-
-  for (const card of cards) {
-    const front = normalizeText(
-      card.front,
-    );
-
-    const back = normalizeText(
-      card.back,
-    );
-
-    if (!front || !back) {
-      continue;
-    }
-
-    const key =
-      `${front.toLowerCase()}|||${back.toLowerCase()}`;
-
-    if (seen.has(key)) {
-      continue;
-    }
-
-    seen.add(key);
-
-    result.push({
-      front,
-      back,
-    });
-  }
-
-  return result;
-}
-
-/* ============================================================
-   FLASHCARD GENERATION
-   ============================================================ */
-
-async function generateFlashcardBatch(
-  request: FlashcardGenerationRequest,
-  count: number,
-): Promise<GeneratedFlashcard[]> {
-  const sourceMaterial =
-    buildSourceMaterial(request);
-
-  if (!sourceMaterial.trim()) {
-    throw new Error(
-      "No source material was provided for flashcard generation.",
-    );
-  }
-
-  const systemPrompt = `
-You are an expert medical educator creating high-quality revision flashcards for MedschoolProffs.
-
-Generate exactly ${count} medical flashcards.
-
-Return ONLY valid JSON.
-
-Required format:
-
-[
-  {
-    "front": "Question or prompt",
-    "back": "Accurate answer"
-  }
-]
-
-Rules:
-- Generate exactly ${count} cards.
-- No Markdown.
-- No code fences.
-- No commentary outside JSON.
-- Use only information supported by the supplied material.
-- Focus on high-yield medical facts.
-- Avoid duplicates.
-- Make questions specific.
-- Make them useful for active recall.
-- Keep answers concise but sufficient.
-- Do not invent information not supported by the material.
-${
-  request.topicLabel
-    ? `- Keep every card specifically relevant to the topic "${request.topicLabel}".`
-    : ""
-}
-`.trim();
-
-  const userPrompt = `
-Create exactly ${count} medical flashcards from the following material.
-
-${
-  request.topicLabel
-    ? `Selected topic: ${request.topicLabel}\n`
-    : ""
-}
-
-${sourceMaterial}
-`.trim();
-
-  let lastError: unknown;
-
-  for (
-    let attempt = 1;
-    attempt <= MAX_GENERATION_ATTEMPTS;
-    attempt++
-  ) {
-    try {
-      const response =
-        await generateText(
-          systemPrompt,
-          userPrompt,
-        );
-
-      const cards =
-        parseFlashcards(response);
-
-      if (cards.length >= 1) {
-        return cards.slice(0, count);
-      }
-
-      lastError = new Error(
-        "AI returned no valid flashcards.",
-      );
-    } catch (error) {
-      lastError = error;
-
-      if (
-        attempt ===
-        MAX_GENERATION_ATTEMPTS
-      ) {
-        throw error;
-      }
-    }
-  }
-
-  throw (
-    lastError instanceof Error
-      ? lastError
-      : new Error(
-          "AI failed to generate valid flashcards.",
-        )
-  );
-}
-
-export async function generateFlashcardSet(
-  request: FlashcardGenerationRequest,
-): Promise<GeneratedFlashcard[]> {
-  const requestedCount = Math.max(
-    1,
-    Math.min(
-      MAX_FLASHCARDS,
-      Math.floor(request.count),
-    ),
-  );
-
-  const allCards: GeneratedFlashcard[] = [];
-
-  let remaining = requestedCount;
-
-  while (remaining > 0) {
-    const batchSize = Math.min(
-      FLASHCARD_BATCH_SIZE,
-      remaining,
-    );
-
-    const cards =
-      await generateFlashcardBatch(
-        request,
-        batchSize,
-      );
-
-    allCards.push(...cards);
-
-    remaining -= batchSize;
-
-    if (cards.length === 0) {
-      break;
-    }
-  }
-
-  return deduplicateFlashcards(
-    allCards,
-  ).slice(0, requestedCount);
-}
-
-/* ============================================================
-   MCQ PARSER
-   ============================================================ */
-
-function parseMcqs(
-  text: string,
-): GeneratedMcq[] {
-  const json = extractJsonArray(text);
-
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(json);
-  } catch {
-    throw new Error(
-      "AI returned invalid MCQ JSON.",
-    );
-  }
-
-  if (!Array.isArray(parsed)) {
-    throw new Error(
-      "AI MCQ response must be an array.",
-    );
-  }
-
-  const mcqs: GeneratedMcq[] = [];
-
-  for (const item of parsed) {
-    if (
-      !item ||
-      typeof item !== "object"
-    ) {
-      continue;
-    }
-
-    const record =
-      item as Record<string, unknown>;
-
-    const question = normalizeText(
-      record.question,
-    );
-
-    const explanation = normalizeText(
-      record.explanation,
-    );
-
-    const options =
-      Array.isArray(record.options)
-        ? record.options
-            .map(normalizeText)
-            .filter(Boolean)
-        : [];
-
-    const answer = normalizeText(
-      record.correctAnswer ||
-        record.answer,
-    );
-
-    const rawOptionExplanations =
-      record.optionExplanations;
-
-    const optionExplanations =
-      Array.isArray(
-        rawOptionExplanations,
-      )
-        ? rawOptionExplanations
-            .map(normalizeText)
-        : [];
-
-    /*
-     * Every generated MCQ must have exactly
-     * four options.
-     */
-    if (
-      !question ||
-      options.length !== 4 ||
-      !answer
-    ) {
-      continue;
-    }
-
-    /*
-     * Correct answer must exactly match one
-     * of the four options, ignoring case.
-     */
-    const matchingOption =
-      options.find(
-        (option) =>
-          option.toLowerCase() ===
-          answer.toLowerCase(),
-      );
-
-    if (!matchingOption) {
-      continue;
-    }
-
-    /*
-     * Require one explanation per option.
-     * If the AI failed to provide them, create
-     * safe empty entries rather than misaligning
-     * the explanations.
-     */
-    const normalizedOptionExplanations =
-      optionExplanations.length === 4
-        ? optionExplanations
-        : ["", "", "", ""];
-
-    mcqs.push({
-      question,
-      options,
-      correctAnswer: matchingOption,
-      explanation,
-      optionExplanations:
-        normalizedOptionExplanations,
-    });
-  }
-
-  return deduplicateMcqs(mcqs);
-}
-
-/* ============================================================
-   MCQ DEDUPLICATION
-   ============================================================ */
-
-function deduplicateMcqs(
-  mcqs: GeneratedMcq[],
-): GeneratedMcq[] {
-  const seen = new Set<string>();
-  const result: GeneratedMcq[] = [];
-
-  for (const mcq of mcqs) {
-    const key = mcq.question
-      .toLowerCase()
-      .replace(/\s+/g, " ")
-      .trim();
-
-    if (seen.has(key)) {
-      continue;
-    }
-
-    seen.add(key);
-    result.push(mcq);
-  }
-
-  return result;
-}
-
-/* ============================================================
-   MCQ GENERATION PROMPT
-   ============================================================ */
-
-/**
- * This prompt intentionally locks the AI to the selected topic.
- *
- * This prevents situations such as:
- *
- * Selected topic:
- * "Blood"
- *
- * AI:
- * "What is the smallest bone in the body?"
- *
- * Existing questions are used only to avoid duplicates
- * and match difficulty. They are NOT treated as source
- * material for the subject matter.
- */
-function buildMcqGenerationPrompt(
-  request: McqGenerationRequest,
-  count: number,
-): {
-  systemPrompt: string;
-  userPrompt: string;
-} {
-  const topicLabel =
-    normalizeText(
-      request.topicLabel,
-    );
-
-  const existingQuestions =
-    request.existingQuestions
-      ?.map(normalizeText)
-      .filter(Boolean)
-      .slice(0, 100) || [];
-
-  const existingText =
-    existingQuestions.length > 0
-      ? `
-Existing questions already present in this topic.
-
-These are provided ONLY to prevent duplicates.
-
-DO NOT:
-- Repeat them.
-- Closely paraphrase them.
-- Copy their wording.
-- Use an unrelated subject from them.
-
-Use them only to understand difficulty level.
-
-${existingQuestions
-  .map(
-    (question, index) =>
-      `${index + 1}. ${question}`,
-  )
-  .join("\n")}
-`
-      : `
-There are no existing questions to avoid.
-`;
-
-  const systemPrompt = `
-You are an expert medical MCQ writer for MedschoolProffs.
-
-THE SELECTED TOPIC IS:
-
-"${topicLabel}"
-
-Every single question MUST specifically test knowledge of this exact topic.
-
-Do NOT generate generic medical trivia.
-
-For example, if the selected topic is "Blood", do not generate questions about:
-- smallest bone
-- cranial nerves
-- unrelated anatomy
-- unrelated physiology
-- unrelated pharmacology
-- unrelated pathology
-
-unless that subject is directly part of the selected topic.
-
-Before finalizing EVERY question, perform this test:
-
-"Does this question directly test knowledge of ${topicLabel}?"
-
-If the answer is NO:
-DISCARD THE QUESTION AND GENERATE A DIFFERENT ONE.
-
-Generate exactly ${count} high-quality single-best-answer MCQs.
-
-Each question must:
-- Be appropriate for MBBS/BDS medical education.
-- Be medically accurate.
-- Stay strictly within "${topicLabel}".
-- Have exactly 4 options.
-- Have only one correct answer.
-- Have a correctAnswer that exactly matches one option.
-- Have a concise explanation.
-- Have one explanation for EACH option.
-- Avoid duplicates.
-- Avoid vague wording.
-- Be clinically useful and/or high-yield.
-- Vary question stems.
-- Vary clinical and factual framing where appropriate.
-
-For optionExplanations:
-- There must be exactly 4 entries.
-- Entry 1 explains option 1.
-- Entry 2 explains option 2.
-- Entry 3 explains option 3.
-- Entry 4 explains option 4.
-- Explain specifically why each option is correct or incorrect.
-- Do not simply repeat the general explanation.
-
-Return ONLY valid JSON.
-
-Do not use Markdown.
-Do not use code fences.
-Do not write commentary before or after the JSON.
-
-Required JSON shape:
-
-[
-  {
-    "question": "Question text",
-    "options": [
-      "Option A",
-      "Option B",
-      "Option C",
-      "Option D"
-    ],
-    "correctAnswer": "Exact correct option text",
-    "explanation": "Concise medical explanation",
-    "optionExplanations": [
-      "Why option A is correct or incorrect",
-      "Why option B is correct or incorrect",
-      "Why option C is correct or incorrect",
-      "Why option D is correct or incorrect"
-    ]
-  }
-]
-
-IMPORTANT:
-
-The entire generated set must remain about:
-
-"${topicLabel}"
-
-Nothing else.
-`.trim();
-
-  const userPrompt = `
-Selected topic:
-
-"${topicLabel}"
-
-${existingText}
-
-Generate exactly ${count} NEW MCQs specifically about:
-
-"${topicLabel}"
-
-Make every question meaningfully different from the existing questions.
-
-Final check before returning:
-Every question MUST directly test "${topicLabel}".
-`.trim();
-
-  return {
-    systemPrompt,
-    userPrompt,
-  };
-}
-
-/* ============================================================
-   MCQ GENERATION BATCH
-   ============================================================ */
-
-async function generateMcqBatch(
-  request: McqGenerationRequest,
-  count: number,
-): Promise<GeneratedMcq[]> {
-  const topicLabel =
-    normalizeText(
-      request.topicLabel,
-    );
-
-  if (!topicLabel) {
-    throw new Error(
-      "Topic is required for MCQ generation.",
-    );
-  }
-
-  const prompts =
-    buildMcqGenerationPrompt(
-      request,
-      count,
-    );
-
-  let lastError: unknown;
-
-  for (
-    let attempt = 1;
-    attempt <= MAX_GENERATION_ATTEMPTS;
-    attempt++
-  ) {
-    try {
-      const response =
-        await generateText(
-          prompts.systemPrompt,
-          prompts.userPrompt,
-        );
-
-      const mcqs =
-        parseMcqs(response);
-
-      if (mcqs.length > 0) {
-        return mcqs.slice(0, count);
-      }
-
-      lastError = new Error(
-        "AI returned no valid MCQs.",
-      );
-    } catch (error) {
-      lastError = error;
-
-      if (
-        attempt ===
-        MAX_GENERATION_ATTEMPTS
-      ) {
-        throw error;
-      }
-    }
-  }
-
-  throw (
-    lastError instanceof Error
-      ? lastError
-      : new Error(
-          "AI failed to generate valid MCQs.",
-        )
-  );
-}
-
-/* ============================================================
-   PUBLIC MCQ GENERATION
-   ============================================================ */
-
-export async function generateMcqSet(
-  request: McqGenerationRequest,
-): Promise<GeneratedMcq[]> {
-  const topicLabel =
-    normalizeText(
-      request.topicLabel,
-    );
-
-  if (!topicLabel) {
-    throw new Error(
-      "Topic is required for MCQ generation.",
-    );
-  }
-
-  const requestedCount = Math.max(
-    1,
-    Math.min(
-      MAX_MCQS,
-      Math.floor(request.count),
-    ),
-  );
-
-  const allMcqs: GeneratedMcq[] = [];
-
-  let remaining = requestedCount;
-
-  while (remaining > 0) {
-    const batchSize = Math.min(
-      MCQ_BATCH_SIZE,
-      remaining,
-    );
-
-    /*
-     * Include questions generated in previous
-     * batches so later batches don't duplicate them.
-     */
-    const existingQuestions = [
-      ...(request.existingQuestions || []),
-      ...allMcqs.map(
-        (mcq) => mcq.question,
-      ),
-    ];
-
-    const batchRequest: McqGenerationRequest = {
-      ...request,
-      topicLabel,
-      existingQuestions,
-    };
-
-    const mcqs =
-      await generateMcqBatch(
-        batchRequest,
-        batchSize,
-      );
-
-    allMcqs.push(...mcqs);
-
-    /*
-     * If the model returned fewer questions than
-     * requested, calculate the actual remaining
-     * amount rather than blindly subtracting batchSize.
-     */
-    remaining =
-      requestedCount - allMcqs.length;
-
-    /*
-     * Prevent an infinite loop if the provider
-     * repeatedly returns no valid questions.
-     */
-    if (mcqs.length === 0) {
-      break;
-    }
-  }
-
-  return deduplicateMcqs(
-    allMcqs,
-  ).slice(0, requestedCount);
-}
-
-/* ============================================================
-   SIMPLE GENERIC PROMPT API
-   ============================================================ */
-
-/**
- * Public helper for other backend features that simply
- * need to send a prompt through the configured provider.
- */
-export async function runPrompt(
-  prompt: string,
-  maxTokens = 400,
-): Promise<string> {
-  const config =
-    await getAIConfig();
-
-  /*
-   * Use a neutral system prompt for generic calls.
-   */
-  const systemPrompt = `
-You are the AI assistant for MedschoolProffs.
-
-Provide accurate, concise, useful responses.
-
-When generating structured data, follow the requested
-format exactly.
-
-Do not mention that you are an AI unless explicitly asked.
-`.trim();
-
-  /*
-   * For the generic helper we use the same central
-   * dispatcher. maxTokens is retained for API compatibility.
-   *
-   * Provider-specific generation functions above use
-   * their normal model configuration.
-   */
-  void maxTokens;
-
-  switch (config.provider) {
-    case "gemini":
-      return callGemini(
-        config,
-        systemPrompt,
-        prompt,
-      );
-
-    case "anthropic":
-      return callAnthropic(
-        config,
-        systemPrompt,
-        prompt,
-      );
-
-    case "openai":
-    case "groq":
-    case "custom":
-      return callOpenAICompatible(
-        config,
-        systemPrompt,
-        prompt,
-      );
-
-    default:
-      throw new AiNotConfiguredError(
-        `Unsupported AI provider: ${config.provider}`,
-      );
-  }
+/** Generates draft MCQs strictly scoped to the given topic — see
+ * buildMcqGenerationPrompt for the anti-drift prompt design. Callers should
+ * treat these as editable drafts for admin review, not auto-publish. */
+export async function generateMcqSet(request: McqGenerationRequest): Promise<GeneratedMcq[]> {
+  const raw = await runPrompt(buildMcqGenerationPrompt(request));
+  const parsed = parseMcqJson(raw);
+  // Cheap post-hoc relevance guard: if the model still ignored the topic
+  // instruction, at least surface fewer, better results rather than a full
+  // batch of noise — cap to what actually parsed cleanly.
+  return parsed.slice(0, request.count);
 }
