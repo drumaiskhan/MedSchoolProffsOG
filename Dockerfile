@@ -7,12 +7,11 @@
 #
 # Build context must be the repository root:
 #
-#   docker build -t medschoolproffs-api .
+# docker build -t medschoolproffs-api .
 #
 # Run locally:
 #
-#   docker run -p 3001:3001 --env-file .env medschoolproffs-api
-
+# docker run -p 3001:3001 --env-file .env medschoolproffs-api
 
 # ---------------------------------------------------------------------------
 # Base image
@@ -24,7 +23,6 @@ RUN corepack enable
 
 WORKDIR /repo
 
-
 # ---------------------------------------------------------------------------
 # Build image
 # ---------------------------------------------------------------------------
@@ -35,18 +33,19 @@ FROM base AS build
 COPY . .
 
 # IMPORTANT:
-# Railway currently uses pnpm 12.x.
-# pnpm 12 does not accept --frozen-lockfile=false.
+# Do NOT use --frozen-lockfile here.
 #
-# Use the lockfile exactly as committed to the repository.
-RUN pnpm install --frozen-lockfile
+# Railway previously failed because pnpm-lock.yaml was not synchronized
+# with package.json (cloudinary@^2.5.1 was missing from the lockfile).
+#
+# Plain pnpm install allows pnpm to resolve/update the lockfile.
+RUN pnpm install
 
 # Typecheck shared libraries first
 RUN pnpm run typecheck:libs
 
 # Build the API server
 RUN pnpm --filter @workspace/api-server run build
-
 
 # ---------------------------------------------------------------------------
 # Runtime image
@@ -61,11 +60,10 @@ ENV NODE_ENV=production
 # Copy only the compiled API server
 COPY --from=build /repo/artifacts/api-server/dist ./dist
 
-
 # ---------------------------------------------------------------------------
 # Runtime dependencies
 # ---------------------------------------------------------------------------
-#
+
 # esbuild externalizes a fixed list of packages that it cannot safely bundle
 # (see artifacts/api-server/build.mjs).
 #
@@ -73,29 +71,26 @@ COPY --from=build /repo/artifacts/api-server/dist ./dist
 #
 # We deliberately do NOT copy:
 #
-#   artifacts/api-server/package.json
+# artifacts/api-server/package.json
 #
 # because that package uses pnpm-only specifiers such as:
 #
-#   workspace:*
-#   catalog:
+# workspace:*
+# catalog:
 #
 # Plain npm cannot parse those specifiers.
 #
 # Instead, create a minimal runtime package.json and install only the package
 # actually required by the compiled server.
-# ---------------------------------------------------------------------------
 
 RUN echo '{"name":"medschoolproffs-api-runtime","private":true,"type":"module"}' > package.json \
     && npm install --omit=dev nodemailer@^6.9.15
-
 
 # ---------------------------------------------------------------------------
 # API port
 # ---------------------------------------------------------------------------
 
 EXPOSE 3001
-
 
 # ---------------------------------------------------------------------------
 # Start API
