@@ -479,6 +479,7 @@ CREATE TABLE IF NOT EXISTS med_ai_visualizer_logs (
   status TEXT NOT NULL,
   visualization_type TEXT,
   error_message TEXT,
+  raw_response TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -565,8 +566,22 @@ ALTER TABLE med_mcqs ALTER COLUMN subject_id DROP NOT NULL;
 ALTER TABLE med_mcqs ALTER COLUMN topic_id DROP NOT NULL;
 
 -- med_mcqs: per-option explanations (why each specific option is right or
--- wrong), index-aligned with the "options" array.
+-- wrong), index-aligned with the "options" array. explanation_status
+-- tracks whether those per-option explanations have been generated yet
+-- (PENDING/GENERATED/etc) — both columns were added to the Drizzle schema
+-- and the CREATE TABLE above at the same time, but only
+-- option_explanations ever got its ADD COLUMN statement here, so
+-- explanation_status was still missing on any database whose med_mcqs
+-- table predated this change — hence the "column \"explanation_status\" of
+-- relation \"med_mcqs\" does not exist" import failures alongside the
+-- option_explanations ones.
 ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS option_explanations TEXT[];
+ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS explanation_status TEXT NOT NULL DEFAULT 'PENDING';
+
+-- med_ai_visualizer_logs: raw (truncated/invalid) AI response text, kept
+-- for admin diagnosis of generation failures. Added after the table's
+-- initial CREATE TABLE ran in production.
+ALTER TABLE med_ai_visualizer_logs ADD COLUMN IF NOT EXISTS raw_response TEXT;
 
 -- med_membership_plans: optional promotional pricing/eligibility text and
 -- auto-renew flag, all added after the table's initial CREATE TABLE ran
@@ -579,6 +594,25 @@ ALTER TABLE med_membership_plans ADD COLUMN IF NOT EXISTS discount_label TEXT;
 COMMIT;
 `;
 
+// Tracks whether the most recent ensureSchema() call succeeded. api-server's
+// /healthz reads this (see routes/health.ts) so a broken DB connection at
+// boot — e.g. the Supabase `28P01` auth failure this was written for —
+// can't silently report itself as "healthy" while every schema-dependent
+// request fails behind it. Starts `false` (not yet run) rather than `true`,
+// so a host that checks health before main()'s ensureSchema() call
+// resolves doesn't get a false "ok" either.
+let lastEnsureSchemaSucceeded = false;
+
+export function isSchemaHealthy(): boolean {
+  return lastEnsureSchemaSucceeded;
+}
+
 export async function ensureSchema(): Promise<void> {
-  await pool.query(ENSURE_SCHEMA_SQL);
+  try {
+    await pool.query(ENSURE_SCHEMA_SQL);
+    lastEnsureSchemaSucceeded = true;
+  } catch (err) {
+    lastEnsureSchemaSucceeded = false;
+    throw err;
+  }
 }

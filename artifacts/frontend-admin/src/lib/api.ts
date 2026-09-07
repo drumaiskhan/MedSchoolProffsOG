@@ -190,6 +190,7 @@ export const examsAdminApi = {
   create: (body: Partial<Exam>) => request<Exam>('/admin/exams', { method: 'POST', body: JSON.stringify(body) }),
   update: (id: number, body: Partial<Exam>) => request<Exam>(`/admin/exams/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   archive: (id: number) => request<{ ok: true }>(`/admin/exams/${id}`, { method: 'DELETE' }),
+  removePermanent: (id: number) => request<{ ok: true }>(`/admin/exams/${id}/permanent`, { method: 'DELETE' }),
   setQuestions: (id: number, mcqIds: number[]) => request<{ ok: true; count: number }>(`/admin/exams/${id}/questions`, { method: 'POST', body: JSON.stringify({ mcqIds }) }),
   getQuestions: (id: number) => request<Array<{ id: number; question: string; options: string[]; correctAnswer: string | null; module: string; subject: string; topic: string }>>(`/admin/exams/${id}/questions`),
   attempts: (id: number) => request<ExamAttemptRow[]>(`/admin/exams/${id}/attempts`),
@@ -221,6 +222,7 @@ export const paymentsAdminApi = {
 
 export const membershipPlansAdminApi = {
   remove: (id: number) => request<{ ok: true }>(`/membership-plans/${id}`, { method: 'DELETE' }),
+  removePermanent: (id: number) => request<{ ok: true }>(`/membership-plans/${id}/permanent`, { method: 'DELETE' }),
 };
 
 export interface AdminMcqRow {
@@ -304,6 +306,7 @@ export const academicApi = {
   createInstitution: (body: Partial<Institution>) => request<Institution>('/institutions', { method: 'POST', body: JSON.stringify(body) }),
   updateInstitution: (id: number, body: Partial<Institution>) => request<Institution>(`/institutions/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   archiveInstitution: (id: number) => request<Institution>(`/institutions/${id}`, { method: 'DELETE' }),
+  removeInstitutionPermanent: (id: number) => request<{ ok: true }>(`/institutions/${id}/permanent`, { method: 'DELETE' }),
 
   programs: (institutionId?: number, active?: boolean) => request<Program[]>(`/programs?${institutionId ? `institutionId=${institutionId}&` : ''}${active === undefined ? '' : `active=${active}`}`),
   createProgram: (body: Partial<Program>) => request<Program>('/programs', { method: 'POST', body: JSON.stringify(body) }),
@@ -355,6 +358,7 @@ export const flashcardsAdminApi = {
   create: (body: { front: string; back: string; module: string; topic: string; moduleId?: number; subjectId?: number; topicId?: number }) =>
     request<AdminFlashcard>('/flashcards', { method: 'POST', body: JSON.stringify(body) }),
   remove: (id: number) => request<{ ok: true }>(`/flashcards/${id}`, { method: 'DELETE' }),
+  bulkRemove: (ids: number[]) => request<{ ok: true; deleted: number }>('/admin/flashcards/bulk', { method: 'DELETE', body: JSON.stringify({ ids }) }),
 };
 
 // ---------------------------------------------------------------------------
@@ -450,6 +454,7 @@ export interface AiVisualizerLogEntry {
   status: 'success' | 'error';
   visualizationType: string | null;
   errorMessage: string | null;
+  rawResponse: string | null;
   createdAt: string;
   student: { name: string; email: string };
 }

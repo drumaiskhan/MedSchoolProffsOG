@@ -524,6 +524,12 @@ export const aiVisualizerLogsTable = pgTable("med_ai_visualizer_logs", {
   status: text("status").notNull(), // "success" | "error"
   visualizationType: text("visualization_type"), // e.g. "process", "equation" — null on error
   errorMessage: text("error_message"), // null on success
+  // Raw (truncated/invalid) text the AI provider returned when generation
+  // failed, so an admin can diagnose a bad prompt/response from the admin
+  // UI directly instead of needing DevTools access to a student's session.
+  // Null on success. Capped in application code before insert (see
+  // aiVisualizer.ts) — this column has no length limit itself.
+  rawResponse: text("raw_response"),
   ...timestamps,
 });
 

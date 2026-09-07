@@ -312,9 +312,11 @@ function AdminPlans() {
   const [editing, setEditing] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [deletingPermanentId, setDeletingPermanentId] = useState<number | null>(null);
   const removePlan = useMutation({ mutationFn: membershipPlansAdminApi.remove, onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListMembershipPlansQueryKey() }); setDeletingId(null); }, onError: (err: unknown) => toast({ title: 'Could not delete plan', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
+  const removePlanPermanent = useMutation({ mutationFn: membershipPlansAdminApi.removePermanent, onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListMembershipPlansQueryKey() }); setDeletingPermanentId(null); }, onError: (err: unknown) => toast({ title: 'Could not permanently delete plan', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
   const save = (e: React.FormEvent<HTMLFormElement>) => { e.preventDefault(); const f = new FormData(e.currentTarget); const originalPriceRaw = String(f.get('originalPrice') || '').trim(); const discountLabel = String(f.get('discountLabel') || '').trim(); const data = { name: String(f.get('name')), description: String(f.get('description')), price: Number(f.get('price')), originalPrice: originalPriceRaw ? Number(originalPriceRaw) : null, discountLabel: discountLabel || null, currency: 'PKR', duration: Number(f.get('duration')), durationUnit: 'months', active: true, displayOrder: 1 }; if (editing) update.mutate({ id: editing, data }, { onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListMembershipPlansQueryKey() }); setEditing(null); setShowForm(false); }, onError: (err: unknown) => toast({ title: 'Could not save plan', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) }); else create.mutate({ data }, { onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListMembershipPlansQueryKey() }); setShowForm(false); }, onError: (err: unknown) => toast({ title: 'Could not create plan', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) }); };
-  return <div><SectionHeader eyebrow="Revenue & access" title="Membership plans" action={<button onClick={() => { setEditing(null); setShowForm(true); }} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-create-plan"><Plus size={15} /> New plan</button>} />{showForm && <form onSubmit={save} className="mb-5 grid gap-4 rounded-2xl border border-primary/30 bg-[#eef7f1] p-5 md:grid-cols-4"><input name="name" defaultValue={editing ? plans.find((p) => p.id === editing)?.name : ''} required placeholder="Plan name" className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-plan-name" /><input name="description" defaultValue={editing ? plans.find((p) => p.id === editing)?.description : ''} required placeholder="Short description" className="h-10 rounded-xl border border-border bg-card px-3 text-xs md:col-span-2" data-testid="input-plan-description" /><input name="duration" defaultValue={editing ? plans.find((p) => p.id === editing)?.duration : 6} required type="number" placeholder="Months" className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-plan-duration" /><input name="price" defaultValue={editing ? plans.find((p) => p.id === editing)?.price : ''} required type="number" placeholder="Price (PKR)" className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-plan-price" /><input name="originalPrice" defaultValue={editing ? (plans.find((p) => p.id === editing)?.originalPrice ?? '') : ''} type="number" placeholder="Original price (optional, for a strikethrough)" className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-plan-original-price" /><input name="discountLabel" defaultValue={editing ? (plans.find((p) => p.id === editing)?.discountLabel ?? '') : ''} placeholder="Discount label (optional), e.g. 25% OFF" className="h-10 rounded-xl border border-border bg-card px-3 text-xs md:col-span-2" data-testid="input-plan-discount-label" /><div className="flex gap-2 md:col-span-4"><button type="submit" className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground" data-testid="button-save-plan">Save plan</button><button type="button" onClick={() => setShowForm(false)} className="rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold" data-testid="button-cancel-plan">Cancel</button></div></form>}{q.isLoading ? <SkeletonPage /> : plans.length ? <div className="grid gap-4 md:grid-cols-2">{plans.map((p) => <div key={p.id} className="rounded-2xl border border-border bg-card p-6" data-testid={`card-plan-${p.id}`}><div className="flex items-start justify-between"><div><div className="flex items-center gap-2"><Badge tone={p.active ? 'green' : 'neutral'}>{p.active ? 'Active' : 'Paused'}</Badge>{p.discountLabel && <Badge tone="amber">{p.discountLabel}</Badge>}</div><h3 className="mt-4 font-display text-3xl">{p.name}</h3></div><div className="flex gap-1"><button onClick={() => { setEditing(p.id); setShowForm(true); }} className="rounded-lg p-2 text-muted-foreground hover:bg-muted" data-testid={`button-edit-plan-${p.id}`}><Pencil size={15} /></button><button onClick={() => setDeletingId(p.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-plan-${p.id}`}><Trash2 size={15} /></button></div></div><p className="mt-2 text-xs leading-5 text-muted-foreground">{p.description}</p><div className="mt-6 flex items-end gap-2">{p.originalPrice != null && p.originalPrice > p.price && <span className="mb-1 text-sm text-muted-foreground line-through">{money(p.originalPrice, p.currency)}</span>}<span className="font-display text-4xl">{money(p.price, p.currency)}</span><span className="mb-1 text-xs text-muted-foreground">/ {p.duration} {p.durationUnit}</span></div><div className="mt-5 border-t border-border pt-4 text-[11px] text-muted-foreground">Displayed to students · Order {p.displayOrder}</div></div>)}</div> : <EmptyState icon={CreditCard} title="No plans yet" body="Create your first membership plan above." />}{deletingId !== null && <ConfirmDialog title="Delete this plan?" body="Existing subscribers keep their access; the plan is just hidden from new signups." onCancel={() => setDeletingId(null)} onConfirm={() => removePlan.mutate(deletingId)} pending={removePlan.isPending} />}</div>;
+  return <div><SectionHeader eyebrow="Revenue & access" title="Membership plans" action={<button onClick={() => { setEditing(null); setShowForm(true); }} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-create-plan"><Plus size={15} /> New plan</button>} />{showForm && <form onSubmit={save} className="mb-5 grid gap-4 rounded-2xl border border-primary/30 bg-[#eef7f1] p-5 md:grid-cols-4"><input name="name" defaultValue={editing ? plans.find((p) => p.id === editing)?.name : ''} required placeholder="Plan name" className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-plan-name" /><input name="description" defaultValue={editing ? plans.find((p) => p.id === editing)?.description : ''} required placeholder="Short description" className="h-10 rounded-xl border border-border bg-card px-3 text-xs md:col-span-2" data-testid="input-plan-description" /><input name="duration" defaultValue={editing ? plans.find((p) => p.id === editing)?.duration : 6} required type="number" placeholder="Months" className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-plan-duration" /><input name="price" defaultValue={editing ? plans.find((p) => p.id === editing)?.price : ''} required type="number" placeholder="Price (PKR)" className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-plan-price" /><input name="originalPrice" defaultValue={editing ? (plans.find((p) => p.id === editing)?.originalPrice ?? '') : ''} type="number" placeholder="Original price (optional, for a strikethrough)" className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-plan-original-price" /><input name="discountLabel" defaultValue={editing ? (plans.find((p) => p.id === editing)?.discountLabel ?? '') : ''} placeholder="Discount label (optional), e.g. 25% OFF" className="h-10 rounded-xl border border-border bg-card px-3 text-xs md:col-span-2" data-testid="input-plan-discount-label" /><div className="flex gap-2 md:col-span-4"><button type="submit" className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground" data-testid="button-save-plan">Save plan</button><button type="button" onClick={() => setShowForm(false)} className="rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold" data-testid="button-cancel-plan">Cancel</button></div></form>}{q.isLoading ? <SkeletonPage /> : plans.length ? <div className="grid gap-4 md:grid-cols-2">{plans.map((p) => <div key={p.id} className="rounded-2xl border border-border bg-card p-6" data-testid={`card-plan-${p.id}`}><div className="flex items-start justify-between"><div><div className="flex items-center gap-2"><Badge tone={p.active ? 'green' : 'neutral'}>{p.active ? 'Active' : 'Paused'}</Badge>{p.discountLabel && <Badge tone="amber">{p.discountLabel}</Badge>}</div><h3 className="mt-4 font-display text-3xl">{p.name}</h3></div><div className="flex items-center gap-1"><button onClick={() => { setEditing(p.id); setShowForm(true); }} className="rounded-lg p-2 text-muted-foreground hover:bg-muted" data-testid={`button-edit-plan-${p.id}`}><Pencil size={15} /></button>{p.active ? <button onClick={() => setDeletingId(p.id)} title="Archive (existing subscribers keep access)" className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-plan-${p.id}`}><Trash2 size={15} /></button> : <><button onClick={() => update.mutate({ id: p.id, data: { active: true } }, { onSuccess: () => queryClient.invalidateQueries({ queryKey: getListMembershipPlansQueryKey() }) })} className="rounded-lg px-2 py-1 text-[11px] font-bold text-primary" data-testid={`button-restore-plan-${p.id}`}>Restore</button><button onClick={() => setDeletingPermanentId(p.id)} className="rounded-lg px-2 py-1 text-[11px] font-bold text-destructive" data-testid={`button-delete-permanent-plan-${p.id}`}>Delete permanently</button></>}</div></div><p className="mt-2 text-xs leading-5 text-muted-foreground">{p.description}</p><div className="mt-6 flex items-end gap-2">{p.originalPrice != null && p.originalPrice > p.price && <span className="mb-1 text-sm text-muted-foreground line-through">{money(p.originalPrice, p.currency)}</span>}<span className="font-display text-4xl">{money(p.price, p.currency)}</span><span className="mb-1 text-xs text-muted-foreground">/ {p.duration} {p.durationUnit}</span></div><div className="mt-5 border-t border-border pt-4 text-[11px] text-muted-foreground">Displayed to students · Order {p.displayOrder}</div></div>)}</div> : <EmptyState icon={CreditCard} title="No plans yet" body="Create your first membership plan above." />}{deletingId !== null && <ConfirmDialog title="Archive this plan?" body="Existing subscribers keep their access; the plan is just hidden from new signups. You can permanently delete it afterward from here." onCancel={() => setDeletingId(null)} onConfirm={() => removePlan.mutate(deletingId)} pending={removePlan.isPending} />}{deletingPermanentId !== null && <ConfirmDialog title="Delete this plan permanently?" body="This erases the plan for good — there is no undo. Blocked automatically if any subscriber is still actively on it." confirmLabel="Delete forever" onCancel={() => setDeletingPermanentId(null)} onConfirm={() => removePlanPermanent.mutate(deletingPermanentId)} pending={removePlanPermanent.isPending} />}</div>;
 }
 
 const YEAR_OPTIONS = [1, 2, 3, 4, 5];
@@ -868,6 +870,47 @@ function AdminSettings() {
   </div>;
 }
 
+function AdminInstitutionsList({ selectedId, onSelect }: { selectedId: number | null; onSelect: (id: number) => void }) {
+  const institutions = useQuery({ queryKey: ['admin-institutions'], queryFn: () => academicApi.institutions() });
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['admin-institutions'] });
+  const [name, setName] = useState('');
+  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [deletingPermanentId, setDeletingPermanentId] = useState<number | null>(null);
+
+  const createInstitution = useMutation({ mutationFn: academicApi.createInstitution, onSuccess: invalidate, onError: (err: unknown) => toast({ title: 'Could not create institution', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
+  const renameInstitution = useMutation({ mutationFn: ({ id, name }: { id: number; name: string }) => academicApi.updateInstitution(id, { name }), onSuccess: () => { invalidate(); setRenamingId(null); }, onError: (err: unknown) => toast({ title: 'Could not rename institution', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
+  const toggleInstitution = useMutation({ mutationFn: ({ id, active }: { id: number; active: boolean }) => academicApi.updateInstitution(id, { active }), onSuccess: invalidate });
+  const removePermanent = useMutation({ mutationFn: academicApi.removeInstitutionPermanent, onSuccess: () => { invalidate(); setDeletingPermanentId(null); }, onError: (err: unknown) => toast({ title: 'Could not permanently delete institution', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
+
+  return <div className="rounded-2xl border border-border bg-card p-5">
+    <h4 className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Institutions</h4>
+    <p className="mt-1 text-[11px] text-muted-foreground">Just the list of colleges students can register under. Manage their programmes, years, and batches below.</p>
+    <div className="mt-3 space-y-1.5">
+      {(institutions.data || []).map((i: Institution) => <div key={i.id} onClick={() => onSelect(i.id)} className={cn('flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs cursor-pointer hover:bg-muted', selectedId === i.id && 'bg-[#eef7f1] font-bold')} data-testid={`row-institution-${i.id}`}>
+        {renamingId === i.id
+          ? <form onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); if (renameValue.trim()) renameInstitution.mutate({ id: i.id, name: renameValue.trim() }); }} className="flex flex-1 items-center gap-1.5">
+              <input autoFocus value={renameValue} onChange={(e) => setRenameValue(e.target.value)} className="h-7 min-w-0 flex-1 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`input-rename-institution-${i.id}`} />
+              <button type="submit" className="rounded-lg bg-primary px-2 py-1 text-[10px] font-bold text-primary-foreground" data-testid={`button-save-rename-institution-${i.id}`}>Save</button>
+              <button type="button" onClick={() => setRenamingId(null)} className="rounded-lg border border-border px-2 py-1 text-[10px] font-bold" data-testid={`button-cancel-rename-institution-${i.id}`}>Cancel</button>
+            </form>
+          : <span className={cn('flex-1', !i.active && 'text-muted-foreground line-through')}>{i.name}</span>}
+        {renamingId !== i.id && <div className="flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
+          <button type="button" onClick={() => { setRenamingId(i.id); setRenameValue(i.name); }} className="text-[10px] font-bold text-primary" data-testid={`button-rename-institution-${i.id}`}>Rename</button>
+          <button type="button" onClick={() => toggleInstitution.mutate({ id: i.id, active: !i.active })} className="text-[10px] font-bold text-primary" data-testid={`button-toggle-institution-${i.id}`}>{i.active ? 'Archive' : 'Activate'}</button>
+          {!i.active && <button type="button" onClick={() => setDeletingPermanentId(i.id)} className="text-[10px] font-bold text-destructive" data-testid={`button-delete-permanent-institution-${i.id}`}>Delete permanently</button>}
+        </div>}
+      </div>)}
+      {!institutions.data?.length && <p className="text-xs text-muted-foreground">No institutions yet — add one below.</p>}
+    </div>
+    <form onSubmit={(e) => { e.preventDefault(); if (name.trim()) { createInstitution.mutate({ name: name.trim(), active: true }); setName(''); } }} className="mt-3 flex gap-1.5">
+      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Add institution, e.g. King Edward Medical University" className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-background px-3 text-xs" data-testid="input-add-institution" />
+      <button className="rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground" data-testid="button-add-institution"><Plus size={13} /></button>
+    </form>
+    {deletingPermanentId !== null && <ConfirmDialog title="Delete this institution permanently?" body="This erases it for good — there is no undo. Blocked automatically if it still has programmes or students assigned to it." confirmLabel="Delete forever" onCancel={() => setDeletingPermanentId(null)} onConfirm={() => removePermanent.mutate(deletingPermanentId)} pending={removePermanent.isPending} />}
+  </div>;
+}
+
 function AdminAcademicStructure() {
   const [institutionId, setInstitutionId] = useState<number | null>(null);
   const [programId, setProgramId] = useState<number | null>(null);
@@ -879,8 +922,6 @@ function AdminAcademicStructure() {
   const batches = useQuery({ queryKey: ['admin-batches', academicYearId], queryFn: () => academicApi.batches(academicYearId!), enabled: !!academicYearId });
 
   const invalidate = (key: string) => queryClient.invalidateQueries({ queryKey: [key] });
-  const createInstitution = useMutation({ mutationFn: academicApi.createInstitution, onSuccess: () => invalidate('admin-institutions'), onError: (err: unknown) => toast({ title: 'Could not create institution', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
-  const toggleInstitution = useMutation({ mutationFn: ({ id, active }: { id: number; active: boolean }) => academicApi.updateInstitution(id, { active }), onSuccess: () => invalidate('admin-institutions') });
   const createProgram = useMutation({ mutationFn: academicApi.createProgram, onSuccess: () => invalidate('admin-programs'), onError: (err: unknown) => toast({ title: 'Could not create program', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
   const toggleProgram = useMutation({ mutationFn: ({ id, active }: { id: number; active: boolean }) => academicApi.updateProgram(id, { active }), onSuccess: () => invalidate('admin-programs') });
   const createYear = useMutation({ mutationFn: academicApi.createAcademicYear, onSuccess: () => invalidate('admin-academic-years'), onError: (err: unknown) => toast({ title: 'Could not create academic year', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
@@ -924,12 +965,19 @@ function AdminAcademicStructure() {
     </div>;
   }
 
-  return <div><SectionHeader eyebrow="Registration structure" title="Institutions, programmes, years & batches" action={<span className="text-[10px] text-muted-foreground">These options power the student registration form</span>} />
-    <div className="flex flex-col gap-4 md:flex-row">
-      <Column title="Institutions" items={institutions.data || []} label={(i: Institution) => i.name} selectedId={institutionId} onSelect={(id) => { setInstitutionId(id); setProgramId(null); setAcademicYearId(null); }} onCreate={(name) => createInstitution.mutate({ name, active: true })} onToggle={(i: Institution) => toggleInstitution.mutate({ id: i.id, active: !i.active })} />
-      <ProgramsColumn />
-      <AcademicYearsColumn />
-      <Column title="Batches" items={batches.data || []} label={(b: Batch) => b.label} selectedId={null} onCreate={(label) => academicYearId && createBatch.mutate({ academicYearId, label, active: true })} onToggle={(b: Batch) => toggleBatch.mutate({ id: b.id, active: !b.active })} disabled={!academicYearId} />
+  return <div>
+    <SectionHeader eyebrow="Registration structure" title="Institutions, programmes, years & batches" action={<span className="text-[10px] text-muted-foreground">These options power the student registration form</span>} />
+    <AdminInstitutionsList selectedId={institutionId} onSelect={(id) => { setInstitutionId(id); setProgramId(null); setAcademicYearId(null); }} />
+    <div className="mt-6">
+      <h4 className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Programmes, years & batches</h4>
+      {!institutionId ? <p className="mt-3 text-xs text-muted-foreground">Select an institution above to manage its programmes.</p> : <>
+        <div className="mt-1 mb-3 text-xs text-muted-foreground">For <span className="font-bold text-foreground">{institutions.data?.find((i) => i.id === institutionId)?.name}</span></div>
+        <div className="flex flex-col gap-4 md:flex-row">
+          <ProgramsColumn />
+          <AcademicYearsColumn />
+          <Column title="Batches" items={batches.data || []} label={(b: Batch) => b.label} selectedId={null} onCreate={(label) => academicYearId && createBatch.mutate({ academicYearId, label, active: true })} onToggle={(b: Batch) => toggleBatch.mutate({ id: b.id, active: !b.active })} disabled={!academicYearId} />
+        </div>
+      </>}
     </div>
   </div>;
 }
@@ -1314,6 +1362,17 @@ function AdminFlashcards() {
     onSuccess: () => { invalidate(); setDeletingId(null); },
     onError: (err: unknown) => toast({ title: 'Could not delete flashcard', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
+
+  // Multi-select for bulk delete, same pattern as the MCQ bank's flat list.
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const toggleSelected = (id: number) => setSelectedIds((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
+  const toggleSelectAll = () => setSelectedIds((prev) => prev.size === cards.length ? new Set() : new Set(cards.map((c) => c.id)));
+  const bulkDelete = useMutation({
+    mutationFn: (ids: number[]) => flashcardsAdminApi.bulkRemove(ids),
+    onSuccess: (res) => { invalidate(); setSelectedIds(new Set()); setBulkDeleteOpen(false); toast({ title: `Deleted ${res.deleted} flashcard${res.deleted === 1 ? '' : 's'}` }); },
+    onError: (err: unknown) => toast({ title: 'Bulk delete failed', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
   const targetReady = !!moduleId && !!subjectId && !!topicId;
   const moduleName = modules.find((m) => String(m.id) === moduleId)?.name ?? '';
   const topicName = (topicsQ.data || []).find((t) => String(t.id) === topicId)?.name ?? '';
@@ -1371,12 +1430,17 @@ function AdminFlashcards() {
       <textarea name="back" required placeholder="Back of card — the answer" className="min-h-16 w-full rounded-xl border border-border bg-card p-3 text-xs" data-testid="input-flashcard-back" />
       <button disabled={!targetReady || create.isPending} className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-save-flashcard">{create.isPending ? 'Saving…' : 'Save flashcard'}</button>
     </form>}
-    {cardsQ.isLoading ? <SkeletonPage /> : cards.length ? <div className="rounded-2xl border border-border bg-card">{cards.map((c) => <div key={c.id} className="flex items-start gap-4 border-b border-border p-5 last:border-0" data-testid={`row-flashcard-${c.id}`}>
-      <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#f3e8d7] text-[#8a5a12]"><Zap size={17} /></div>
-      <div className="flex-1"><div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{c.module}{c.topic ? ` · ${c.topic}` : ''}</div><div className="mt-1 text-sm font-bold">{c.front}</div><div className="mt-1 text-xs leading-5 text-muted-foreground">{c.back}</div></div>
-      <button onClick={() => setDeletingId(c.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-flashcard-${c.id}`}><Trash2 size={15} /></button>
-    </div>)}</div> : <EmptyState icon={Zap} title="No flashcards yet" body="Add your first flashcard above — students can study them from their Flashcards tab." />}
+    {cardsQ.isLoading ? <SkeletonPage /> : cards.length ? <div className="space-y-3">
+      <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-2.5"><label className="flex items-center gap-2 text-xs font-bold"><input type="checkbox" checked={selectedIds.size > 0 && selectedIds.size === cards.length} onChange={toggleSelectAll} data-testid="checkbox-select-all-flashcards" />{selectedIds.size > 0 ? `${selectedIds.size} selected` : 'Select all'}</label>{selectedIds.size > 0 && <button onClick={() => setBulkDeleteOpen(true)} className="inline-flex items-center gap-1 rounded-lg border border-destructive/30 px-2.5 py-1.5 text-[11px] font-bold text-destructive" data-testid="button-bulk-delete-flashcards"><Trash2 size={12} /> Delete selected</button>}</div>
+      <div className="rounded-2xl border border-border bg-card">{cards.map((c) => <div key={c.id} className="flex items-start gap-4 border-b border-border p-5 last:border-0" data-testid={`row-flashcard-${c.id}`}>
+        <input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelected(c.id)} className="mt-1" data-testid={`checkbox-select-flashcard-${c.id}`} />
+        <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#f3e8d7] text-[#8a5a12]"><Zap size={17} /></div>
+        <div className="flex-1"><div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{c.module}{c.topic ? ` · ${c.topic}` : ''}</div><div className="mt-1 text-sm font-bold">{c.front}</div><div className="mt-1 text-xs leading-5 text-muted-foreground">{c.back}</div></div>
+        <button onClick={() => setDeletingId(c.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-flashcard-${c.id}`}><Trash2 size={15} /></button>
+      </div>)}</div>
+    </div> : <EmptyState icon={Zap} title="No flashcards yet" body="Add your first flashcard above — students can study them from their Flashcards tab." />}
     {deletingId !== null && <ConfirmDialog title="Delete this flashcard?" body="This cannot be undone." onCancel={() => setDeletingId(null)} onConfirm={() => remove.mutate(deletingId)} pending={remove.isPending} />}
+    {bulkDeleteOpen && <ConfirmDialog title={`Delete ${selectedIds.size} selected flashcard${selectedIds.size === 1 ? '' : 's'}?`} body="This cannot be undone." confirmLabel="Delete selected" onCancel={() => setBulkDeleteOpen(false)} onConfirm={() => bulkDelete.mutate(Array.from(selectedIds))} pending={bulkDelete.isPending} />}
   </div>;
 }
 
@@ -1485,6 +1549,7 @@ function AdminAiVisualizerLogs() {
               </div>
               <p className="mt-2 text-sm leading-6">{log.prompt}</p>
               {log.errorMessage && <p className="mt-1 text-xs text-destructive">{log.errorMessage}</p>}
+              {log.rawResponse && <details className="mt-1"><summary className="cursor-pointer text-[11px] font-bold text-muted-foreground">Raw AI response</summary><pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-muted p-2 text-[10px]">{log.rawResponse}</pre></details>}
               <div className="mt-2 text-[10px] text-muted-foreground">{log.student.name} · {log.student.email} · {new Date(log.createdAt).toLocaleString()}</div>
             </div>
           </div>
@@ -1594,8 +1659,11 @@ function AdminExams() {
   const create = useMutation({ mutationFn: examsAdminApi.create, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-exams'] }) });
   const update = useMutation({ mutationFn: ({ id, body }: { id: number; body: Partial<AdminExam> }) => examsAdminApi.update(id, body), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-exams'] }) });
   const archive = useMutation({ mutationFn: examsAdminApi.archive, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-exams'] }) });
+  const removePermanent = useMutation({ mutationFn: examsAdminApi.removePermanent, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['admin-exams'] }); setDeletingId(null); }, onError: (err: unknown) => toast({ title: 'Could not delete exam', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
   const [open, setOpen] = useState(false);
   const [managingId, setManagingId] = useState<number | null>(null);
+  const [freshlyCreatedId, setFreshlyCreatedId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   return <div><SectionHeader eyebrow="Assessment" title="Pre-Proffs Exams" action={<button onClick={() => setOpen((v) => !v)} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-create-exam"><Plus size={15} /> New exam</button>} />
     {open && <form onSubmit={(e) => {
@@ -1607,7 +1675,17 @@ function AdminExams() {
         maxAttempts: Number(f.get('maxAttempts') || 1), negativeMarkingEnabled: f.get('negativeMarkingEnabled') === 'on', negativeMarkPerWrong: Number(f.get('negativeMarkPerWrong') || 0),
         passingPercent: f.get('passingPercent') ? Number(f.get('passingPercent')) : null, resultReleaseMode: f.get('resultReleaseMode') as Exam['resultReleaseMode'],
         showMarks: f.get('showMarks') === 'on', showPercentage: f.get('showPercentage') === 'on', showCorrectAnswers: f.get('showCorrectAnswers') === 'on', status: 'draft',
-      }, { onSuccess: () => setOpen(false) });
+      }, {
+        onSuccess: (exam) => {
+          setOpen(false);
+          // Jump straight into "Manage questions & results" with the
+          // uploader already expanded, instead of leaving the admin to
+          // find and click through two separate toggles to attach
+          // questions right after creating the exam.
+          setManagingId(exam.id);
+          setFreshlyCreatedId(exam.id);
+        },
+      });
     }} className="mb-5 space-y-3 rounded-2xl border border-primary/30 bg-[#eef7f1] p-5">
       <div className="grid gap-3 sm:grid-cols-2"><input required name="title" placeholder="Exam title" className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-exam-title" /><input name="description" placeholder="Short description" className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-exam-description" /></div>
       <div className="grid gap-3 sm:grid-cols-4"><select name="programTargetKind" className="h-10 rounded-xl border border-border bg-card px-2 text-xs" data-testid="select-exam-program"><option value="">All Programs</option><option value="MBBS">MBBS</option><option value="BDS">BDS</option></select><select name="yearTargetNumber" className="h-10 rounded-xl border border-border bg-card px-2 text-xs" data-testid="select-exam-year"><option value="">All Years</option>{[1, 2, 3, 4, 5].map((y) => <option key={y} value={y}>Year {y}</option>)}</select><input required type="number" name="durationMinutes" defaultValue={60} placeholder="Duration (min)" className="h-10 rounded-xl border border-border bg-card px-2 text-xs" data-testid="input-exam-duration" /><input required type="number" name="maxAttempts" defaultValue={1} min={1} placeholder="Max attempts" className="h-10 rounded-xl border border-border bg-card px-2 text-xs" data-testid="input-exam-attempts" /></div>
@@ -1615,16 +1693,18 @@ function AdminExams() {
       <div className="grid gap-3 sm:grid-cols-3"><label className="text-[11px] font-bold">Passing %<input type="number" name="passingPercent" min={0} max={100} placeholder="e.g. 50" className="mt-1 h-10 w-full rounded-xl border border-border bg-card px-2 text-xs" data-testid="input-exam-passing" /></label><label className="text-[11px] font-bold">Result release<select name="resultReleaseMode" defaultValue="immediate" className="mt-1 h-10 w-full rounded-xl border border-border bg-card px-2 text-xs" data-testid="select-exam-release"><option value="immediate">Immediately after submit</option><option value="after_end">When exam window closes</option><option value="manual">Manually by admin</option></select></label><label className="text-[11px] font-bold">Negative mark / wrong<input type="number" step="0.25" name="negativeMarkPerWrong" defaultValue={0} className="mt-1 h-10 w-full rounded-xl border border-border bg-card px-2 text-xs" data-testid="input-exam-negative" /></label></div>
       <div className="flex flex-wrap gap-4 text-xs font-bold"><label className="flex items-center gap-1.5"><input type="checkbox" name="negativeMarkingEnabled" className="size-4 accent-[#287058]" data-testid="checkbox-negative-marking" /> Enable negative marking</label><label className="flex items-center gap-1.5"><input type="checkbox" name="showMarks" defaultChecked className="size-4 accent-[#287058]" data-testid="checkbox-show-marks" /> Show marks</label><label className="flex items-center gap-1.5"><input type="checkbox" name="showPercentage" defaultChecked className="size-4 accent-[#287058]" data-testid="checkbox-show-percentage" /> Show percentage</label><label className="flex items-center gap-1.5"><input type="checkbox" name="showCorrectAnswers" defaultChecked className="size-4 accent-[#287058]" data-testid="checkbox-show-answers" /> Show correct answers after release</label></div>
       <button disabled={create.isPending} className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-save-exam">Create as draft</button>
+      <p className="text-[11px] text-muted-foreground">After you create the exam, you'll go straight into attaching its questions.</p>
     </form>}
     <div className="space-y-3">{(q.data || []).map((exam) => <div key={exam.id} className="rounded-2xl border border-border bg-card p-5" data-testid={`card-admin-exam-${exam.id}`}>
       <div className="flex flex-wrap items-center justify-between gap-3"><div><div className="flex items-center gap-2"><h3 className="text-sm font-bold">{exam.title}</h3><Badge tone={exam.status === 'published' ? 'green' : exam.status === 'archived' ? 'red' : 'amber'}>{exam.status}</Badge></div><div className="mt-1 text-[11px] text-muted-foreground">{exam.programTargetKind || 'All Programs'} · {exam.yearTargetNumber ? `Year ${exam.yearTargetNumber}` : 'All Years'} · {exam.durationMinutes} min · {exam.questionCount} questions · {exam.attemptCount} attempts</div></div>
-      <div className="flex flex-wrap gap-2">{exam.status === 'draft' && <button onClick={() => update.mutate({ id: exam.id, body: { status: 'published' } })} className="rounded-lg bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground" data-testid={`button-publish-exam-${exam.id}`}>Publish</button>}{exam.resultReleaseMode === 'manual' && <button onClick={() => examsAdminApi.releaseAll(exam.id)} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold" data-testid={`button-release-exam-${exam.id}`}>Release results</button>}<button onClick={() => setManagingId(managingId === exam.id ? null : exam.id)} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold" data-testid={`button-manage-exam-${exam.id}`}>{managingId === exam.id ? 'Close' : 'Manage questions & results'}</button><button onClick={() => archive.mutate(exam.id)} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold text-destructive" data-testid={`button-archive-exam-${exam.id}`}>Archive</button></div></div>
-      {managingId === exam.id && <ExamManagePanel exam={exam} />}
+      <div className="flex flex-wrap gap-2">{exam.status === 'draft' && <button onClick={() => update.mutate({ id: exam.id, body: { status: 'published' } })} className="rounded-lg bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground" data-testid={`button-publish-exam-${exam.id}`}>Publish</button>}{exam.resultReleaseMode === 'manual' && <button onClick={() => examsAdminApi.releaseAll(exam.id)} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold" data-testid={`button-release-exam-${exam.id}`}>Release results</button>}<button onClick={() => setManagingId(managingId === exam.id ? null : exam.id)} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold" data-testid={`button-manage-exam-${exam.id}`}>{managingId === exam.id ? 'Close' : 'Manage questions & results'}</button>{exam.status !== 'archived' ? <button onClick={() => archive.mutate(exam.id)} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold text-destructive" data-testid={`button-archive-exam-${exam.id}`}>Archive</button> : <button onClick={() => setDeletingId(exam.id)} className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-1.5 text-[11px] font-bold text-destructive" data-testid={`button-delete-exam-${exam.id}`}>Delete</button>}</div></div>
+      {managingId === exam.id && <ExamManagePanel exam={exam} autoOpenUpload={freshlyCreatedId === exam.id} />}
     </div>)}{!q.data?.length && <EmptyState icon={ClipboardCheck} title="No exams yet" body="Create your first Pre-Proffs exam above." />}</div>
+    {deletingId !== null && <ConfirmDialog title="Delete this exam permanently?" body="This erases the exam and its question list for good — blocked automatically if it already has recorded attempts. There is no undo." confirmLabel="Delete forever" onCancel={() => setDeletingId(null)} onConfirm={() => removePermanent.mutate(deletingId)} pending={removePermanent.isPending} />}
   </div>;
 }
 
-function ExamManagePanel({ exam }: { exam: AdminExam }) {
+function ExamManagePanel({ exam, autoOpenUpload }: { exam: AdminExam; autoOpenUpload?: boolean }) {
   const [mcqIdsInput, setMcqIdsInput] = useState('');
   const setQuestions = useMutation({ mutationFn: (mcqIds: number[]) => examsAdminApi.setQuestions(exam.id, mcqIds), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-exams'] }) });
   const attemptsQ = useQuery({ queryKey: ['exam-attempts', exam.id], queryFn: () => examsAdminApi.attempts(exam.id) });
@@ -1635,7 +1715,7 @@ function ExamManagePanel({ exam }: { exam: AdminExam }) {
   // parsed questions go into the module/subject/topic bank AND get attached
   // to this exam's paper in one step, instead of the admin having to import
   // to the bank first and then paste MCQ IDs here separately.
-  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(!!autoOpenUpload);
   const [file, setFile] = useState<File | null>(null);
   const [parsing, setParsing] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);

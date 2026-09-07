@@ -384,6 +384,31 @@ function Practice() {
   </div>;
 }
 
+// Deterministic per-topic accent color, cycling through the app's existing
+// --chart-1..5 CSS variables (same palette already used for analytics
+// charts elsewhere) rather than inventing new colors. Same topic name
+// always gets the same color, so a student builds a visual association
+// with a subject over repeated study sessions instead of colors reshuffling
+// on every render.
+function topicColorVar(key: string): string {
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  return `--chart-${(hash % 5) + 1}`;
+}
+function topicAccentStyles(key: string) {
+  const v = topicColorVar(key || 'default');
+  return {
+    badge: { background: `hsl(var(${v}) / 0.16)`, color: `hsl(var(${v}))` },
+    border: { borderColor: `hsl(var(${v}) / 0.4)` },
+    wash: { background: `hsl(var(${v}) / 0.07)` },
+    solidBg: { background: `hsl(var(${v}))` },
+    ring: { boxShadow: `0 0 0 3px hsl(var(${v}) / 0.18)` },
+  };
+}
+function TopicBadge({ label }: { label: string }) {
+  return <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold capitalize" style={topicAccentStyles(label).badge}>{label}</span>;
+}
+
 function Flashcards() {
   const search = useSearch();
   const [, navigate] = useLocation();
@@ -464,23 +489,53 @@ function Flashcards() {
 
   if (view === 'grid') {
     return <div className="mx-auto max-w-3xl">{header}{toolbar}{statCards}{filterBar}
-      {!visibleCards.length ? <EmptyState icon={Search} title="No matches" body="No flashcards match your search — try a different term." /> : <div className="space-y-4">{visibleCards.map((c, i) => { const isFlipped = flippedIds.has(c.id); return (
-        <button key={c.id} onClick={() => toggleGridFlip(c.id)} className="card-lift block w-full rounded-2xl border border-border bg-card p-6 text-left transition-colors hover:border-primary/30" data-testid={`card-flashcard-grid-${c.id}`}>
-          <div className="flex flex-wrap items-center gap-2"><span className="rounded-full border border-border px-2.5 py-1 text-[10px] font-bold">Question {i + 1}</span><Badge tone="blue">{c.topic}</Badge></div>
-          <p className="mt-6 text-center text-base font-bold leading-7">{isFlipped ? c.back : c.front}</p>
-          <div className="mt-6 flex flex-wrap items-center justify-center gap-2"><Badge tone="neutral">{c.module}</Badge>{isFlipped && <Badge tone="green">Answer</Badge>}</div>
-          <div className="mt-4 text-center text-[11px] text-muted-foreground">{isFlipped ? 'Click to flip back' : 'Click to flip'}</div>
-        </button>
-      ); })}</div>}
+      {!visibleCards.length ? <EmptyState icon={Search} title="No matches" body="No flashcards match your search — try a different term." /> : <div className="space-y-5">{visibleCards.map((c, i) => {
+        const isFlipped = flippedIds.has(c.id);
+        const accent = topicAccentStyles(c.topic || c.module);
+        return <div key={c.id} className="[perspective:1600px]" data-testid={`card-flashcard-grid-${c.id}`}>
+          <button
+            onClick={() => toggleGridFlip(c.id)}
+            className="group relative block min-h-[220px] w-full [transform-style:preserve-3d] rounded-2xl text-left transition-transform duration-500 ease-out active:scale-[.99]"
+            style={{ transform: isFlipped ? 'rotateY(180deg)' : 'none' }}
+            data-testid={`button-flip-flashcard-${c.id}`}
+          >
+            {/* Front — the question */}
+            <div className="card-lift absolute inset-0 flex flex-col rounded-2xl border bg-card p-6 [backface-visibility:hidden]" style={{ ...accent.border, ...accent.wash }}>
+              <div className="flex flex-wrap items-center gap-2"><span className="rounded-full border border-border bg-card px-2.5 py-1 text-[10px] font-bold">Question {i + 1}</span><TopicBadge label={c.topic} /></div>
+              <div className="flex flex-1 items-center justify-center"><p className="text-center text-base font-bold leading-7">{c.front}</p></div>
+              <div className="flex flex-wrap items-center justify-center gap-2"><Badge tone="neutral">{c.module}</Badge></div>
+              <div className="mt-3 text-center text-[11px] font-semibold text-muted-foreground transition-colors group-hover:text-foreground">Click to reveal the answer</div>
+            </div>
+            {/* Back — the answer, distinct tint so flip state is unmistakable */}
+            <div className="absolute inset-0 flex flex-col rounded-2xl border p-6 shadow-sm [backface-visibility:hidden]" style={{ transform: 'rotateY(180deg)', ...accent.border, background: 'hsl(var(--card))' }}>
+              <div className="flex flex-wrap items-center gap-2"><span className="rounded-full px-2.5 py-1 text-[10px] font-bold" style={accent.badge}>Answer</span><TopicBadge label={c.topic} /></div>
+              <div className="flex flex-1 items-center justify-center"><p className="text-center text-base font-bold leading-7">{c.back}</p></div>
+              <div className="flex flex-wrap items-center justify-center gap-2"><Badge tone="neutral">{c.module}</Badge></div>
+              <div className="mt-3 text-center text-[11px] font-semibold text-muted-foreground">Click to flip back</div>
+            </div>
+          </button>
+        </div>;
+      })}</div>}
     </div>;
   }
 
+  const cardAccent = topicAccentStyles(card.topic || card.module);
+  const stillLearningCount = Object.values(known).filter((v) => v === false).length;
+  const reviewedCount = Object.keys(known).length;
+
   return <div className="mx-auto max-w-3xl">{header}{toolbar}{statCards}{filterBar}
-    <div className="mb-3 flex justify-end"><span className="font-mono-app text-[11px] text-muted-foreground">Card {(index % cards.length) + 1} / {cards.length} · {knownCount} known</span></div>
+    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+      <span className="font-mono-app text-[11px] text-muted-foreground">Card {(index % cards.length) + 1} of {cards.length}</span>
+      <div className="flex items-center gap-2 text-[11px] font-bold">
+        {knownCount > 0 && <span className="inline-flex items-center gap-1 rounded-full bg-[#d7eee4] px-2.5 py-1 text-[#287058]"><ThumbsUp size={11} /> {knownCount} known</span>}
+        {stillLearningCount > 0 && <span className="inline-flex items-center gap-1 rounded-full bg-[#fff0cb] px-2.5 py-1 text-[#8d6420]"><ThumbsDown size={11} /> {stillLearningCount} learning</span>}
+      </div>
+    </div>
+    <div className="mb-4"><Progress value={(reviewedCount / cards.length) * 100} color="bg-primary" /></div>
     <div className="mb-4 flex justify-center gap-1.5">{cards.map((c, i) => <div key={c.id} className={cn('h-1.5 w-6 rounded-full transition-colors', i === index % cards.length ? 'bg-primary' : known[c.id] === true ? 'bg-[#8bcbb8]' : known[c.id] === false ? 'bg-[#e5a952]' : 'bg-muted')} />)}</div>
-    <div className="[perspective:1600px]"><button onClick={() => setFlipped(!flipped)} className="relative min-h-[350px] w-full [transform-style:preserve-3d] transition-transform duration-500 md:min-h-[420px]" style={{ transform: flipped ? 'rotateY(180deg)' : 'none' }} data-testid="button-flashcard">
-      <div className="absolute inset-0 flex flex-col rounded-3xl border border-border bg-[#164b4b] p-9 text-left text-[#eaf2e9] shadow-lg [backface-visibility:hidden] md:p-14"><div className="flex items-center justify-between text-[10px] uppercase tracking-[.18em] text-[#8bcbb8]"><span>{card.module}</span><span>Prompt</span></div><div className="flex flex-1 items-center justify-center text-center"><h2 className="mx-auto max-w-xl font-display text-3xl leading-tight md:text-5xl">{card.front}</h2></div><div className="flex justify-center text-xs text-[#8bcbb8]">Click to reveal the answer <ArrowRight size={14} className="ml-2" /></div></div>
-      <div className="absolute inset-0 flex flex-col rounded-3xl border border-primary/30 bg-[#eef7f1] p-9 text-left shadow-lg [backface-visibility:hidden] md:p-14" style={{ transform: 'rotateY(180deg)' }}><div className="flex items-center justify-between text-[10px] uppercase tracking-[.18em] text-primary"><span>{card.topic}</span><span>Answer</span></div><div className="flex flex-1 items-center justify-center text-center"><h2 className="mx-auto max-w-xl font-display text-2xl leading-tight text-[#164b4b] md:text-4xl">{card.back}</h2></div><div className="flex justify-center text-xs text-primary">Rate yourself below</div></div>
+    <div className="[perspective:1600px]"><button onClick={() => setFlipped(!flipped)} className="relative min-h-[350px] w-full [transform-style:preserve-3d] transition-transform duration-500 ease-out hover:-translate-y-0.5 active:scale-[.99] md:min-h-[420px]" style={{ transform: flipped ? 'rotateY(180deg)' : 'none' }} data-testid="button-flashcard">
+      <div className="absolute inset-0 flex flex-col rounded-3xl border p-9 text-left text-[#eaf2e9] shadow-lg [backface-visibility:hidden] md:p-14" style={{ background: `linear-gradient(155deg, hsl(var(${topicColorVar(card.topic || card.module)}) / 0.92), hsl(208 40% 14%))` }}><div className="flex items-center justify-between text-[10px] uppercase tracking-[.18em] text-[#eaf2e9]/70"><span>{card.module}</span><span>Prompt</span></div><div className="flex flex-1 items-center justify-center text-center"><h2 className="mx-auto max-w-xl font-display text-3xl leading-tight md:text-5xl">{card.front}</h2></div><div className="flex justify-center text-xs text-[#eaf2e9]/70">Click to reveal the answer <ArrowRight size={14} className="ml-2" /></div></div>
+      <div className="absolute inset-0 flex flex-col rounded-3xl border p-9 text-left shadow-lg [backface-visibility:hidden] md:p-14" style={{ transform: 'rotateY(180deg)', background: `hsl(var(${topicColorVar(card.topic || card.module)}) / 0.1)`, ...cardAccent.border }}><div className="flex items-center justify-between text-[10px] uppercase tracking-[.18em]" style={{ color: `hsl(var(${topicColorVar(card.topic || card.module)}))` }}><span>{card.topic}</span><span>Answer</span></div><div className="flex flex-1 items-center justify-center text-center"><h2 className="mx-auto max-w-xl font-display text-2xl leading-tight text-[#164b4b] md:text-4xl">{card.back}</h2></div><div className="flex justify-center text-xs" style={{ color: `hsl(var(${topicColorVar(card.topic || card.module)}))` }}>Rate yourself below</div></div>
     </button></div>
     {flipped && <div className="mt-4 flex justify-center">{!askAi.data ? <button onClick={() => askAi.mutate()} disabled={askAi.isPending} className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-[#eef7f1] px-3 py-1.5 text-[11px] font-bold text-primary disabled:opacity-50" data-testid="button-ask-ai-flashcard">{askAi.isPending ? 'Thinking…' : <><Sparkles size={11} /> Ask AI to explain differently</>}</button> : <div className="max-w-xl rounded-xl bg-[#eef7f1] p-3 text-xs leading-5"><div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-primary"><Sparkles size={10} /> AI explanation</div>{askAi.data.explanation}</div>}{askAi.isError && <p className="mt-2 text-[11px] font-semibold text-destructive">{askAi.error instanceof ApiRequestError ? askAi.error.message : 'Could not reach AI right now.'}</p>}</div>}
     <div className="mt-6 flex justify-center gap-3">{flipped ? <><button onClick={() => advance(false)} className="inline-flex items-center gap-2 rounded-xl border border-[#e5a952] bg-[#fff0cb] px-5 py-3 text-xs font-bold text-[#8a5a12] transition-transform hover:-translate-y-0.5" data-testid="button-still-learning"><ThumbsDown size={14} /> Still learning</button><button onClick={() => advance(true)} className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-xs font-bold text-primary-foreground transition-transform hover:-translate-y-0.5" data-testid="button-know-it"><ThumbsUp size={14} /> I know this</button></> : <button onClick={() => setFlipped(true)} className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-6 py-3 text-xs font-bold hover:bg-muted" data-testid="button-reveal-card">Reveal answer <ChevronRight size={14} /></button>}</div>

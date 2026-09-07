@@ -75,7 +75,22 @@ CREATE TABLE IF NOT EXISTS med_feedback_replies (
 -- ---------------------------------------------------------------------
 -- K: Per-option MCQ explanations — why each wrong option is wrong, not
 -- just why the correct one is right. Index-aligned with med_mcqs.options.
+-- explanation_status tracks whether those explanations have been
+-- generated yet; it shipped in the same schema change as
+-- option_explanations but was missing its own ALTER statement here and in
+-- ensureSchema.ts/ensure-schema.sql, which is why "column
+-- \"explanation_status\" does not exist" kept appearing in production
+-- even after option_explanations was added.
 -- ---------------------------------------------------------------------
 ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS option_explanations TEXT[];
+ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS explanation_status TEXT NOT NULL DEFAULT 'PENDING';
+
+-- ---------------------------------------------------------------------
+-- L: AI Visualizer failure diagnostics — raw (truncated/invalid) response
+-- text kept alongside the existing error_message so admins can diagnose
+-- generation failures from the admin UI without needing DevTools access
+-- to a student's session.
+-- ---------------------------------------------------------------------
+ALTER TABLE med_ai_visualizer_logs ADD COLUMN IF NOT EXISTS raw_response TEXT;
 
 COMMIT;

@@ -26,8 +26,11 @@ router.post("/ai/visualizer", requireAuth, requireActiveMembership, async (req, 
     await db.insert(aiVisualizerLogsTable).values({ userId: req.user!.id, prompt: parsed.data.prompt, status: "success", visualizationType: visualization.type });
     res.json({ visualization });
   } catch (err) {
-    const errorMessage = err instanceof AiNotConfiguredError ? err.message : err instanceof InvalidVisualizationError ? "Invalid AI output" : (err instanceof Error ? err.message.slice(0, 300) : "Unknown error");
-    await db.insert(aiVisualizerLogsTable).values({ userId: req.user!.id, prompt: parsed.data.prompt, status: "error", errorMessage });
+    const errorMessage = err instanceof AiNotConfiguredError ? err.message : err instanceof InvalidVisualizationError ? `Invalid AI output: ${err.issues}` : (err instanceof Error ? err.message.slice(0, 300) : "Unknown error");
+    // Capped well under the DB's practical limits — this is for admin
+    // diagnosis (Admin -> AI Visualizer activity), not a full transcript.
+    const rawResponse = err instanceof InvalidVisualizationError && err.raw ? err.raw.slice(0, 8000) : null;
+    await db.insert(aiVisualizerLogsTable).values({ userId: req.user!.id, prompt: parsed.data.prompt, status: "error", errorMessage, rawResponse });
     if (err instanceof AiNotConfiguredError) { res.status(503).json({ error: err.message }); return; }
     if (err instanceof InvalidVisualizationError) { res.status(502).json({ error: "The AI produced an unusable visualization. Try rephrasing your prompt or regenerating." }); return; }
     res.status(502).json({ error: "Couldn't generate a visualization right now. Try again shortly." });

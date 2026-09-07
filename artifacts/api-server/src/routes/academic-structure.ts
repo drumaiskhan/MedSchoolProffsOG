@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { db, institutionsTable, programsTable, academicYearsTable, batchesTable, auditLogsTable } from "@workspace/db";
+import { db, institutionsTable, programsTable, academicYearsTable, batchesTable, auditLogsTable, usersTable } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
 
 const router: IRouter = Router();
@@ -48,6 +48,30 @@ router.delete("/institutions/:id", requireAdmin, async (req, res): Promise<void>
   if (!row) { res.status(404).json({ error: "Institution not found" }); return; }
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "INSTITUTION_ARCHIVED", entity: "institution", entityId: row.id });
   res.json(row);
+});
+
+// Hard delete — only reachable once the institution is already archived
+// (the soft delete above), and blocked if any program still exists under
+// it or any user account is directly assigned to it, so this can never
+// silently orphan a program/year/batch hierarchy or a student record.
+// Admins need to move/delete those first, same spirit as the module
+// hard-delete guard.
+router.delete("/institutions/:id/permanent", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) { res.status(400).json({ error: "Invalid institution id" }); return; }
+  const [row] = await db.select().from(institutionsTable).where(eq(institutionsTable.id, id));
+  if (!row) { res.status(404).json({ error: "Institution not found" }); return; }
+  if (row.active) { res.status(409).json({ error: "Archive this institution first before deleting it permanently." }); return; }
+
+  const [program] = await db.select({ id: programsTable.id }).from(programsTable).where(eq(programsTable.institutionId, id)).limit(1);
+  if (program) { res.status(409).json({ error: "This institution still has programs under it — remove or reassign those first." }); return; }
+
+  const [user] = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.institutionId, id)).limit(1);
+  if (user) { res.status(409).json({ error: "Students are still assigned to this institution — reassign or remove them first." }); return; }
+
+  await db.delete(institutionsTable).where(eq(institutionsTable.id, id));
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "INSTITUTION_PERMANENTLY_DELETED", entity: "institution", entityId: id });
+  res.json({ ok: true });
 });
 
 // ---------------------------------------------------------------------------

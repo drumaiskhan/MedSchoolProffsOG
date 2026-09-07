@@ -158,38 +158,87 @@ function stripFences(raw: string): string {
 }
 
 export class InvalidVisualizationError extends Error {
-  constructor(public issues: string) { super(`AI returned an invalid visualization: ${issues}`); this.name = "InvalidVisualizationError"; }
+  // `raw` carries the offending text (truncated/invalid JSON) so callers
+  // can log it for admin diagnosis — see routes/ai-visualizer.ts, which
+  // writes this into aiVisualizerLogsTable.rawResponse. Optional because
+  // some call sites (e.g. "prompt was empty") have no AI response to attach.
+  constructor(public issues: string, public raw?: string) { super(`AI returned an invalid visualization: ${issues}`); this.name = "InvalidVisualizationError"; }
 }
 
 const MAX_PROMPT_LENGTH = 500;
 // Visualization JSON for a multi-step process (e.g. skeletal muscle
-// contraction's ~16 steps) is much bigger than the 400-token default used
-// by explanations/flashcards/MCQs — this is a starting point; raise it if
-// real provider responses truncate on complex prompts, but keep a hard
-// ceiling since it's billed per request.
-const VISUALIZATION_MAX_TOKENS = 4000;
+// contraction's ~16 steps, each with several elements/particles) is much
+// bigger than the 400-token default used by explanations/flashcards/MCQs.
+// 4000 was too low in practice — a genuinely multi-step "cycle" prompt
+// like muscle contraction routinely got cut off mid-array, which broke
+// JSON parsing and surfaced as a 502 ("The AI produced an unusable
+// visualization"). Sized generously enough for a full 20-step
+// process/cycle (the schema's own max) plus per-step elements/highlightIds.
+const VISUALIZATION_MAX_TOKENS = 8000;
+// If a first attempt still truncates (rare once the cap above is
+// generous, but not impossible for an unusually dense prompt), retry once
+// with an even higher budget and an explicit instruction to economize on
+// steps — rather than immediately failing the student's request.
+const VISUALIZATION_RETRY_MAX_TOKENS = 12000;
+
+/** A cut-off response never closes its outermost brace — a real "not JSON
+ * at all" response (extra prose, wrong shape) usually still closes it.
+ * This is a heuristic, not a guarantee, but it's enough to tell "raise the
+ * budget and retry" apart from "the model produced garbage, retrying
+ * won't help." */
+function looksTruncated(cleaned: string): boolean {
+  const trimmedEnd = cleaned.trimEnd();
+  return trimmedEnd.length > 0 && !trimmedEnd.endsWith("}");
+}
+
+function tryParse(cleaned: string): unknown | undefined {
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (!match) return undefined;
+    try { return JSON.parse(match[0]); } catch { return undefined; }
+  }
+}
+
+async function attemptGeneration(prompt: string, maxTokens: number): Promise<{ raw: string; spec?: VisualizationSpecT; truncated: boolean; issues?: string }> {
+  const raw = await runPrompt(prompt, maxTokens, "object");
+  const cleaned = stripFences(raw);
+  const parsedJson = tryParse(cleaned);
+
+  if (parsedJson === undefined) {
+    return { raw, truncated: looksTruncated(cleaned), issues: "Response was not valid JSON" };
+  }
+  const result = VisualizationSpec.safeParse(parsedJson);
+  if (!result.success) {
+    // A validation failure on an array field that's suspiciously at (or
+    // past) its max length, combined with a response that never closed
+    // its brace, is also consistent with truncation — e.g. a "steps"
+    // array whose last element is missing required fields because it got
+    // cut mid-object.
+    return { raw, truncated: looksTruncated(cleaned), issues: result.error.issues.slice(0, 3).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") };
+  }
+  return { raw, spec: result.data, truncated: false };
+}
 
 export async function generateVisualization(userPrompt: string): Promise<VisualizationSpecT> {
   const trimmed = userPrompt.trim().slice(0, MAX_PROMPT_LENGTH);
   if (!trimmed) throw new InvalidVisualizationError("Prompt was empty");
 
-  const raw = await runPrompt(buildPrompt(trimmed), VISUALIZATION_MAX_TOKENS, "object");
-  const cleaned = stripFences(raw);
+  const first = await attemptGeneration(buildPrompt(trimmed), VISUALIZATION_MAX_TOKENS);
+  if (first.spec) return first.spec;
 
-  let parsedJson: unknown;
-  try {
-    parsedJson = JSON.parse(cleaned);
-  } catch {
-    const match = cleaned.match(/\{[\s\S]*\}/);
-    if (!match) throw new InvalidVisualizationError("Response was not JSON");
-    try { parsedJson = JSON.parse(match[0]); } catch { throw new InvalidVisualizationError("Response was not valid JSON"); }
+  // Only retry when truncation is the likely cause — a non-truncated
+  // invalid response (e.g. the model ignored the schema entirely) won't
+  // be fixed by a bigger token budget, so don't spend a second AI call on it.
+  if (!first.truncated) {
+    throw new InvalidVisualizationError(first.issues ?? "Response was not valid JSON", first.raw);
   }
 
-  const result = VisualizationSpec.safeParse(parsedJson);
-  if (!result.success) {
-    throw new InvalidVisualizationError(result.error.issues.slice(0, 3).map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
-  }
-  return result.data;
+  const retryPrompt = `${buildPrompt(trimmed)}\n\nIMPORTANT: Your previous response was too long and got cut off before it was valid JSON. This time, keep it to at most 10 steps (or fewer elements per step) and be more concise in every "description" field, while still producing complete, valid JSON that fully closes every object and array.`;
+  const second = await attemptGeneration(retryPrompt, VISUALIZATION_RETRY_MAX_TOKENS);
+  if (second.spec) return second.spec;
+  throw new InvalidVisualizationError(second.issues ?? "Response was not valid JSON", second.raw);
 }
 
 // Used by the optional "Explain this step" button — a short, ungated,

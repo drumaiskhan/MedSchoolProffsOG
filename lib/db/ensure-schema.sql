@@ -490,6 +490,7 @@ CREATE TABLE IF NOT EXISTS med_ai_visualizer_logs (
   status TEXT NOT NULL,
   visualization_type TEXT,
   error_message TEXT,
+  raw_response TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -567,6 +568,9 @@ ALTER TABLE med_mcqs ALTER COLUMN module_id DROP NOT NULL;
 ALTER TABLE med_mcqs ALTER COLUMN subject_id DROP NOT NULL;
 ALTER TABLE med_mcqs ALTER COLUMN topic_id DROP NOT NULL;
 ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS option_explanations TEXT[];
+ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS explanation_status TEXT NOT NULL DEFAULT 'PENDING';
+
+ALTER TABLE med_ai_visualizer_logs ADD COLUMN IF NOT EXISTS raw_response TEXT;
 
 ALTER TABLE med_membership_plans ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE med_membership_plans ADD COLUMN IF NOT EXISTS eligibility TEXT;

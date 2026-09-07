@@ -102,6 +102,28 @@ router.delete("/admin/exams/:id", requireAdmin, async (req, res): Promise<void> 
   res.json({ ok: true });
 });
 
+// Hard delete — only reachable once an exam is already archived (the
+// route above), and blocked if it has any recorded attempts, so a
+// student's completed/in-progress attempt (and its score/history) can
+// never be erased out from under them by deleting the exam it belongs to.
+// If it truly needs to go despite having attempts, an admin can leave it
+// archived — that already removes it from the student-facing list.
+router.delete("/admin/exams/:id/permanent", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) { res.status(400).json({ error: "Invalid exam id" }); return; }
+  const [exam] = await db.select().from(examsTable).where(eq(examsTable.id, id));
+  if (!exam) { res.status(404).json({ error: "Exam not found" }); return; }
+  if (exam.status !== "archived") { res.status(409).json({ error: "Archive this exam first before deleting it permanently." }); return; }
+
+  const [{ value: attemptCount }] = await db.select({ value: count() }).from(examAttemptsTable).where(eq(examAttemptsTable.examId, id));
+  if (attemptCount > 0) { res.status(409).json({ error: "This exam already has recorded attempts — it can't be permanently deleted. Leave it archived instead." }); return; }
+
+  await db.delete(examQuestionsTable).where(eq(examQuestionsTable.examId, id));
+  await db.delete(examsTable).where(eq(examsTable.id, id));
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "EXAM_PERMANENTLY_DELETED", entity: "exam", entityId: id });
+  res.json({ ok: true });
+});
+
 router.post("/admin/exams/:id/questions", requireAdmin, async (req, res): Promise<void> => {
   const examId = Number(req.params.id);
   const parsed = z.object({ mcqIds: z.array(z.number().int().positive()).min(1).max(500) }).safeParse(req.body);

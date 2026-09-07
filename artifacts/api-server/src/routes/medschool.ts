@@ -298,6 +298,27 @@ router.delete("/membership-plans/:id", requireAdmin, async (req, res): Promise<v
   res.json(planView(plan));
 });
 
+// Hard delete — only reachable once a plan is already archived (the soft
+// delete above), and blocked outright if any ACTIVE membership still
+// references it, so a subscriber's plan can never disappear out from under
+// them. Payments referencing the plan are left as historical records
+// (planName/amount/etc are already denormalized onto the payment row, so
+// deleting the plan doesn't lose anything from the payment's own display).
+router.delete("/membership-plans/:id/permanent", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) { res.status(400).json({ error: "Invalid plan id" }); return; }
+  const [plan] = await db.select().from(membershipPlansTable).where(eq(membershipPlansTable.id, id));
+  if (!plan) { res.status(404).json({ error: "Membership plan not found" }); return; }
+  if (plan.active || !plan.archived) { res.status(409).json({ error: "Archive this plan first before deleting it permanently." }); return; }
+
+  const [activeSub] = await db.select({ id: membershipsTable.id }).from(membershipsTable).where(and(eq(membershipsTable.planId, id), eq(membershipsTable.status, "ACTIVE"))).limit(1);
+  if (activeSub) { res.status(409).json({ error: "This plan still has active subscribers — it can't be permanently deleted." }); return; }
+
+  await db.delete(membershipPlansTable).where(eq(membershipPlansTable.id, id));
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "PLAN_PERMANENTLY_DELETED", entity: "membership_plan", entityId: id });
+  res.json({ ok: true });
+});
+
 router.get("/payments", requireAuth, async (req, res): Promise<void> => {
   const params = ListPaymentsQueryParams.safeParse(req.query);
   if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
@@ -835,6 +856,20 @@ router.delete("/flashcards/:id", requireAdmin, async (req, res): Promise<void> =
   const [row] = await db.update(flashcardsTable).set({ active: false, archived: true }).where(eq(flashcardsTable.id, id)).returning();
   if (!row) { res.status(404).json({ error: "Flashcard not found" }); return; }
   res.json({ ok: true });
+});
+
+// Bulk delete for the Flashcards admin screen's multi-select — mirrors
+// /admin/mcqs/bulk. One request instead of N individual DELETE calls from
+// the frontend. Soft-delete (active:false, archived:true), same as the
+// single-flashcard route above.
+const BulkDeleteFlashcardsBody = z.object({ ids: z.array(z.number().int().positive()).min(1).max(500) });
+
+router.delete("/admin/flashcards/bulk", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = BulkDeleteFlashcardsBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const rows = await db.update(flashcardsTable).set({ active: false, archived: true }).where(inArray(flashcardsTable.id, parsed.data.ids)).returning({ id: flashcardsTable.id });
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "FLASHCARD_BULK_DELETED", entity: "flashcard", entityId: 0, metadata: JSON.stringify({ count: rows.length }) });
+  res.json({ ok: true, deleted: rows.length });
 });
 
 router.get("/resources", requireAuth, requireActiveMembership, async (req, res): Promise<void> => {
