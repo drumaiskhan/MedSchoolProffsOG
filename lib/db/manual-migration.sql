@@ -85,6 +85,11 @@ CREATE TABLE IF NOT EXISTS med_feedback_replies (
 ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS option_explanations TEXT[];
 ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS explanation_status TEXT NOT NULL DEFAULT 'PENDING';
 
+-- MCQs can now attach directly to an exam (exam_id), the same way they
+-- already attach to a past paper (past_paper_id) — imported exam
+-- questions no longer need a module/subject/topic home either.
+ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS exam_id INTEGER;
+
 -- ---------------------------------------------------------------------
 -- L: AI Visualizer failure diagnostics — raw (truncated/invalid) response
 -- text kept alongside the existing error_message so admins can diagnose

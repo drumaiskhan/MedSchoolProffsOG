@@ -434,6 +434,7 @@ function McqEditForm({ mcq, onDone }: { mcq: AdminMcqRow; onDone: () => void }) 
   const [correctAnswer, setCorrectAnswer] = useState(mcq.correctAnswer ?? '');
   const [explanation, setExplanation] = useState(mcq.explanation ?? '');
   const [status, setStatus] = useState(mcq.status);
+  const [difficulty, setDifficulty] = useState(mcq.difficulty || 'medium');
   const save = useMutation({
     mutationFn: () => mcqAdminApi.update(mcq.id, {
       question: question.trim(),
@@ -441,6 +442,7 @@ function McqEditForm({ mcq, onDone }: { mcq: AdminMcqRow; onDone: () => void }) 
       correctAnswer: correctAnswer.trim() || null,
       explanation: explanation.trim() || null,
       status,
+      difficulty,
     }),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['admin-mcqs-tree'] }); queryClient.invalidateQueries({ queryKey: getListMcqsQueryKey() }); onDone(); toast({ title: 'Question updated' }); },
     onError: (err: unknown) => toast({ title: 'Could not save question', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
@@ -453,6 +455,7 @@ function McqEditForm({ mcq, onDone }: { mcq: AdminMcqRow; onDone: () => void }) 
       <span className="text-[11px] font-bold text-muted-foreground">Correct:</span>
       <select value={correctAnswer} onChange={(e) => setCorrectAnswer(e.target.value)} className="h-8 flex-1 rounded-lg border border-border bg-card px-2 text-xs" data-testid={`select-edit-mcq-answer-${mcq.id}`}><option value="">Not set</option>{cleanedOptions.map((opt, oi) => <option key={oi} value={opt}>{String.fromCharCode(65 + oi)}. {opt.slice(0, 40)}</option>)}</select>
       <select value={status} onChange={(e) => setStatus(e.target.value)} className="h-8 rounded-lg border border-border bg-card px-2 text-xs" data-testid={`select-edit-mcq-status-${mcq.id}`}><option value="draft">Draft</option><option value="published">Published</option></select>
+      <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} className="h-8 rounded-lg border border-border bg-card px-2 text-xs capitalize" data-testid={`select-edit-mcq-difficulty-${mcq.id}`}>{['easy', 'medium', 'hard'].map((x) => <option key={x} value={x}>{x}</option>)}</select>
     </div>
     <textarea value={explanation} onChange={(e) => setExplanation(e.target.value)} placeholder="Explanation (optional)" className="min-h-12 w-full rounded-lg border border-border bg-card p-2 text-xs" data-testid={`input-edit-mcq-explanation-${mcq.id}`} />
     <div className="flex gap-2"><button onClick={() => save.mutate()} disabled={save.isPending || !question.trim() || cleanedOptions.length < 2} className="rounded-lg bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground disabled:opacity-50" data-testid={`button-save-edit-mcq-${mcq.id}`}>{save.isPending ? 'Saving…' : 'Save changes'}</button><button onClick={onDone} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold" data-testid={`button-cancel-edit-mcq-${mcq.id}`}>Cancel</button></div>
@@ -512,21 +515,50 @@ function McqTreeModule({ moduleId, name, mcqCount, mcqsByTopic }: { moduleId: nu
 
 function McqBankTree({ modules }: { modules: AdminModule[] }) {
   const treeQ = useQuery({ queryKey: ['admin-mcqs-tree'], queryFn: mcqAdminApi.list });
+  const examsQ = useQuery({ queryKey: ['admin-exams'], queryFn: examsAdminApi.list });
+  const papersQ = useQuery({ queryKey: ['admin-past-papers'], queryFn: () => pastPapersApi.list() });
   const rows = treeQ.data ?? [];
   const mcqsByTopic = new Map<number, AdminMcqRow[]>();
-  const unassigned: AdminMcqRow[] = [];
+  const byExam = new Map<number, AdminMcqRow[]>();
+  const byPaper = new Map<number, AdminMcqRow[]>();
+  const trulyUnassigned: AdminMcqRow[] = [];
   for (const row of rows) {
-    if (row.topicId === null) { unassigned.push(row); continue; }
+    if (row.topicId === null) {
+      if (row.examId !== null) { const l = byExam.get(row.examId); if (l) l.push(row); else byExam.set(row.examId, [row]); continue; }
+      if (row.pastPaperId !== null) { const l = byPaper.get(row.pastPaperId); if (l) l.push(row); else byPaper.set(row.pastPaperId, [row]); continue; }
+      trulyUnassigned.push(row);
+      continue;
+    }
     const list = mcqsByTopic.get(row.topicId);
     if (list) list.push(row); else mcqsByTopic.set(row.topicId, [row]);
   }
   const countByModule = new Map<number, number>();
   for (const row of rows) if (row.moduleId !== null) countByModule.set(row.moduleId, (countByModule.get(row.moduleId) ?? 0) + 1);
+  const examTitle = (id: number) => examsQ.data?.find((e) => e.id === id)?.title ?? `Exam #${id}`;
+  const paperTitle = (id: number) => papersQ.data?.find((p) => p.id === id)?.title ?? `Past paper #${id}`;
   if (treeQ.isLoading) return <SkeletonPage />;
-  if (!modules.length && !unassigned.length) return <EmptyState icon={CircleHelp} title="No modules yet" body="Create a module first under Academic content, then come back to browse its questions here." />;
+  if (!modules.length && !byExam.size && !byPaper.size && !trulyUnassigned.length) return <EmptyState icon={CircleHelp} title="No modules yet" body="Create a module first under Academic content, then come back to browse its questions here." />;
   return <div className="space-y-3">
     {modules.map((m) => <McqTreeModule key={m.id} moduleId={m.id} name={m.name} mcqCount={countByModule.get(m.id) ?? 0} mcqsByTopic={mcqsByTopic} />)}
-    {!!unassigned.length && <div className="rounded-2xl border border-dashed border-border bg-card p-4"><p className="mb-3 text-xs font-bold text-muted-foreground">{unassigned.length} question{unassigned.length === 1 ? '' : 's'} with no module/subject/topic (e.g. imported straight into a past paper)</p><div className="space-y-2">{unassigned.map((m) => <McqTreeRow key={m.id} mcq={m} />)}</div></div>}
+    {(!!byExam.size || !!byPaper.size) && <div className="rounded-2xl border border-border bg-card p-4">
+      <p className="mb-3 text-xs font-extrabold">Exam &amp; past-paper question bank</p>
+      <p className="mb-3 text-[11px] text-muted-foreground">Questions imported for a specific exam or past paper — kept in their own bank instead of the module tree above.</p>
+      <div className="space-y-2">
+        {[...byExam.entries()].map(([examId, list]) => <McqSourceGroup key={`exam-${examId}`} label={`Exam: ${examTitle(examId)}`} icon={ClipboardCheck} rows={list} />)}
+        {[...byPaper.entries()].map(([paperId, list]) => <McqSourceGroup key={`paper-${paperId}`} label={`Past paper: ${paperTitle(paperId)}`} icon={FileStack} rows={list} />)}
+      </div>
+    </div>}
+    {!!trulyUnassigned.length && <div className="rounded-2xl border border-dashed border-border bg-card p-4"><p className="mb-3 text-xs font-bold text-muted-foreground">{trulyUnassigned.length} question{trulyUnassigned.length === 1 ? '' : 's'} with no module/subject/topic, exam, or past paper</p><div className="space-y-2">{trulyUnassigned.map((m) => <McqTreeRow key={m.id} mcq={m} />)}</div></div>}
+  </div>;
+}
+
+// Collapsible group of MCQs that belong to one exam or past paper (no
+// module/subject/topic) — same row component as the module tree uses.
+function McqSourceGroup({ label, icon: Icon, rows }: { label: string; icon: typeof FolderOpen; rows: AdminMcqRow[] }) {
+  const [open, setOpen] = useState(false);
+  return <div className="rounded-xl border border-border bg-background">
+    <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-bold" data-testid={`button-mcq-source-group-${label}`}><span className="flex items-center gap-2"><ChevronRight size={13} className={cn('transition-transform', open && 'rotate-90')} /><Icon size={13} className="text-primary" />{label}</span><span className="text-[10px] font-normal text-muted-foreground">{rows.length} question{rows.length === 1 ? '' : 's'}</span></button>
+    {open && <div className="space-y-2 border-t border-border p-3">{rows.map((m) => <McqTreeRow key={m.id} mcq={m} />)}</div>}
   </div>;
 }
 
@@ -551,7 +583,7 @@ function AdminMcqs() {
     onSuccess: (res) => { queryClient.invalidateQueries({ queryKey: getListMcqsQueryKey() }); setSelectedIds(new Set()); setBulkDeleteMode(null); toast({ title: `Deleted ${res.deleted} question${res.deleted === 1 ? '' : 's'}` }); },
     onError: (err: unknown) => toast({ title: 'Bulk delete failed', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
-  const bulkAddRowsInit = () => [{ question: '', a: '', b: '', c: '', d: '', e: '', correct: 'a', explanation: '', ea: '', eb: '', ec: '', ed: '', ee: '', showOptionExplanations: false }];
+  const bulkAddRowsInit = () => [{ question: '', a: '', b: '', c: '', d: '', e: '', correct: 'a', explanation: '', ea: '', eb: '', ec: '', ed: '', ee: '', difficulty: 'medium', showOptionExplanations: false }];
   const [bulkRows, setBulkRows] = useState(bulkAddRowsInit);
   const [aiCount, setAiCount] = useState(5);
   const generateAiMcqs = useMutation({
@@ -563,6 +595,7 @@ function AdminMcqs() {
         correct: (['a', 'b', 'c', 'd', 'e'][d.options.findIndex((o) => o === d.correctAnswer)] ?? 'a'),
         explanation: d.explanation,
         ea: d.optionExplanations?.[0] ?? '', eb: d.optionExplanations?.[1] ?? '', ec: d.optionExplanations?.[2] ?? '', ed: d.optionExplanations?.[3] ?? '', ee: d.optionExplanations?.[4] ?? '',
+        difficulty: (d as unknown as { difficulty?: string }).difficulty ?? 'medium',
         showOptionExplanations: !!(d.optionExplanations && d.optionExplanations.some((e) => e?.trim())),
       })));
       toast({ title: `Generated ${res.drafts.length} draft questions`, description: 'Review each before saving — nothing is added to the bank yet.' });
@@ -576,7 +609,7 @@ function AdminMcqs() {
       const rawOptionExplanations = [r.ea, r.eb, r.ec, r.ed, r.ee].slice(0, options.length).map((e) => e.trim() || null);
       const optionExplanations = rawOptionExplanations.some((e) => e) ? rawOptionExplanations : null;
       const explanation = r.explanation.trim() || rawOptionExplanations[correctIndex] || null;
-      return { question: r.question.trim(), options, correctAnswer: options[correctIndex] ?? null, explanation, optionExplanations, difficulty: 'medium', moduleId: Number(moduleId), subjectId: Number(subjectId), topicId: Number(topicId) } as unknown as Partial<AdminMcqRow> & { question: string; options: string[] };
+      return { question: r.question.trim(), options, correctAnswer: options[correctIndex] ?? null, explanation, optionExplanations, difficulty: r.difficulty || 'medium', moduleId: Number(moduleId), subjectId: Number(subjectId), topicId: Number(topicId) } as unknown as Partial<AdminMcqRow> & { question: string; options: string[] };
     })),
     onSuccess: (res) => { queryClient.invalidateQueries({ queryKey: getListMcqsQueryKey() }); setBulkRows(bulkAddRowsInit()); setBulkAddOpen(false); toast({ title: `Added ${res.created} questions` }); },
     onError: (err: unknown) => toast({ title: 'Could not add questions', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
@@ -662,7 +695,7 @@ function AdminMcqs() {
           <input value={c.explanation ?? ''} onChange={(e) => updateCandidate(i, { explanation: e.target.value })} placeholder="Explanation (optional)" className="mt-2 h-9 w-full rounded-lg border border-border bg-background px-2 text-xs" data-testid={`input-candidate-explanation-${i}`} />
           {c.options.some((o) => o.trim()) && <details className="mt-2" open={!!c.optionExplanations?.some((e) => e?.trim())}>
             <summary className="cursor-pointer text-[11px] font-bold text-primary">Per-option explanations (why each option is right/wrong)</summary>
-            <div className="mt-2 space-y-1.5">{c.options.map((opt, oi) => opt.trim() && <div key={oi} className="flex items-start gap-2"><span className={cn('mt-1.5 grid size-5 shrink-0 place-items-center rounded text-[10px] font-bold', c.correctAnswer === opt ? 'bg-[#d7eee4] text-[#287058]' : 'bg-[#fce3dc] text-[#a34c3e]')}>{String.fromCharCode(65 + oi)}</span><textarea value={c.optionExplanations?.[oi] ?? ''} onChange={(e) => { const next = [...(c.optionExplanations ?? c.options.map(() => null))]; next[oi] = e.target.value || null; updateCandidate(i, { optionExplanations: next }); }} placeholder={c.correctAnswer === opt ? 'Why this is correct...' : 'Why this is wrong...'} className="min-h-9 flex-1 rounded-lg border border-border bg-background p-2 text-xs" data-testid={`input-candidate-option-explanation-${i}-${oi}`} /></div>)}</div>
+            <div className="mt-2 space-y-1.5">{c.options.map((opt, oi) => opt.trim() && <div key={oi} className="flex items-start gap-2"><span className={cn('mt-1.5 grid size-5 shrink-0 place-items-center rounded text-[10px] font-bold', c.correctAnswer === opt ? 'bg-[#d7eee4] text-[#287058]' : 'bg-[#fff1ed] text-[#a34c3e]')}>{String.fromCharCode(65 + oi)}</span><textarea value={c.optionExplanations?.[oi] ?? ''} onChange={(e) => { const next = [...(c.optionExplanations ?? c.options.map(() => null))]; next[oi] = e.target.value || null; updateCandidate(i, { optionExplanations: next }); }} placeholder={c.correctAnswer === opt ? 'Why this is correct...' : 'Why this is wrong...'} className="min-h-9 flex-1 rounded-lg border border-border bg-background p-2 text-xs" data-testid={`input-candidate-option-explanation-${i}-${oi}`} /></div>)}</div>
           </details>}
         </div>)}</div>
       </div>}
@@ -676,8 +709,8 @@ function AdminMcqs() {
       const correctLetter = String(f.get('correct') || '');
       const correctIndex = correctLetter ? correctLetter.charCodeAt(0) - 97 : -1;
       const correctAnswer = correctIndex >= 0 ? options[correctIndex] ?? null : null;
-      create.mutate({ data: { question: String(f.get('question')), options, correctAnswer: correctAnswer ?? '', explanation: String(f.get('explanation')), reference: '', difficulty: 'medium', moduleId: Number(moduleId), subjectId: Number(subjectId), topicId: Number(topicId) } }, { onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListMcqsQueryKey() }); e.currentTarget.reset(); } });
-    }} className="mt-6 space-y-3 rounded-2xl border border-border bg-card p-5">{!targetReady && <p className="text-[11px] font-semibold text-[#8a5a12]">Select module/subject/topic above first.</p>}<textarea name="question" required placeholder="Write the question..." className="min-h-20 w-full rounded-xl border border-border bg-background p-3 text-xs" data-testid="input-mcq-question" /><div className="grid gap-3 sm:grid-cols-2">{['a', 'b', 'c', 'd', 'e'].map((x) => <input key={x} name={x} required={x !== 'e'} placeholder={`Option ${x.toUpperCase()}${x === 'e' ? ' (optional)' : ''}`} className="h-10 rounded-xl border border-border bg-background px-3 text-xs" data-testid={`input-mcq-option-${x}`} />)}</div><label className="flex items-center gap-2 text-xs font-bold">Correct answer<select name="correct" required className="h-9 flex-1 rounded-lg border border-border bg-background px-2 text-xs font-normal" data-testid="select-mcq-correct"><option value="">Select the correct option</option>{['a', 'b', 'c', 'd', 'e'].map((x) => <option key={x} value={x}>{x.toUpperCase()}</option>)}</select></label><input name="explanation" placeholder="Explanation shown after answer" className="h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-mcq-explanation" /><button disabled={!targetReady} className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-save-mcq">Save as draft</button></form>}
+      create.mutate({ data: { question: String(f.get('question')), options, correctAnswer: correctAnswer ?? '', explanation: String(f.get('explanation')), reference: '', difficulty: String(f.get('difficulty') || 'medium'), moduleId: Number(moduleId), subjectId: Number(subjectId), topicId: Number(topicId) } }, { onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListMcqsQueryKey() }); e.currentTarget.reset(); } });
+    }} className="mt-6 space-y-3 rounded-2xl border border-border bg-card p-5">{!targetReady && <p className="text-[11px] font-semibold text-[#8a5a12]">Select module/subject/topic above first.</p>}<textarea name="question" required placeholder="Write the question..." className="min-h-20 w-full rounded-xl border border-border bg-background p-3 text-xs" data-testid="input-mcq-question" /><div className="grid gap-3 sm:grid-cols-2">{['a', 'b', 'c', 'd', 'e'].map((x) => <input key={x} name={x} required={x !== 'e'} placeholder={`Option ${x.toUpperCase()}${x === 'e' ? ' (optional)' : ''}`} className="h-10 rounded-xl border border-border bg-background px-3 text-xs" data-testid={`input-mcq-option-${x}`} />)}</div><div className="grid gap-3 sm:grid-cols-2"><label className="flex items-center gap-2 text-xs font-bold">Correct answer<select name="correct" required className="h-9 flex-1 rounded-lg border border-border bg-background px-2 text-xs font-normal" data-testid="select-mcq-correct"><option value="">Select the correct option</option>{['a', 'b', 'c', 'd', 'e'].map((x) => <option key={x} value={x}>{x.toUpperCase()}</option>)}</select></label><label className="flex items-center gap-2 text-xs font-bold">Difficulty<select name="difficulty" defaultValue="medium" className="h-9 flex-1 rounded-lg border border-border bg-background px-2 text-xs font-normal capitalize" data-testid="select-mcq-difficulty">{['easy', 'medium', 'hard'].map((x) => <option key={x} value={x}>{x}</option>)}</select></label></div><input name="explanation" placeholder="Explanation shown after answer" className="h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-mcq-explanation" /><button disabled={!targetReady} className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-save-mcq">Save as draft</button></form>}
 
     <div className="mt-8"><SectionHeader eyebrow="Question bank" title={`${mcqs.length} questions`} action={<div className="flex flex-wrap items-center gap-2"><button onClick={() => setBulkAddOpen((v) => !v)} className="rounded-xl border border-border bg-card px-3 py-2 text-xs font-bold" data-testid="button-toggle-bulk-add">Add multiple</button><div className="flex overflow-hidden rounded-xl border border-border text-xs font-bold"><button onClick={() => setBankView('tree')} className={cn('px-3 py-2', bankView === 'tree' ? 'bg-primary text-primary-foreground' : 'bg-card')} data-testid="button-bank-view-tree">Module tree</button><button onClick={() => setBankView('flat')} className={cn('px-3 py-2', bankView === 'flat' ? 'bg-primary text-primary-foreground' : 'bg-card')} data-testid="button-bank-view-flat">Flat list</button></div></div>} /><ExplanationCoverage />
 
@@ -689,12 +722,13 @@ function AdminMcqs() {
           <div className="flex items-center justify-between"><span className="text-[11px] font-bold text-muted-foreground">Question {i + 1}</span>{bulkRows.length > 1 && <button onClick={() => setBulkRows((rows) => rows.filter((_, ri) => ri !== i))} className="text-[11px] font-bold text-destructive" data-testid={`button-remove-bulk-row-${i}`}>Remove</button>}</div>
           <textarea value={row.question} onChange={(e) => setBulkRows((rows) => rows.map((r, ri) => ri === i ? { ...r, question: e.target.value } : r))} placeholder="Write the question..." className="mt-2 min-h-14 w-full rounded-lg border border-border bg-background p-2 text-xs" data-testid={`input-bulk-question-${i}`} />
           <div className="mt-2 grid gap-2 sm:grid-cols-2">{(['a', 'b', 'c', 'd', 'e'] as const).map((x) => <input key={x} value={row[x]} onChange={(e) => setBulkRows((rows) => rows.map((r, ri) => ri === i ? { ...r, [x]: e.target.value } : r))} placeholder={`Option ${x.toUpperCase()}${x === 'e' ? ' (optional)' : ''}`} className="h-9 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`input-bulk-option-${i}-${x}`} />)}</div>
-          <div className="mt-2 flex items-center gap-2"><span className="text-[11px] font-bold text-muted-foreground">Correct:</span><select value={row.correct} onChange={(e) => setBulkRows((rows) => rows.map((r, ri) => ri === i ? { ...r, correct: e.target.value } : r))} className="h-8 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`select-bulk-correct-${i}`}>{['a', 'b', 'c', 'd', 'e'].map((x) => <option key={x} value={x}>{x.toUpperCase()}</option>)}</select>
+          <div className="mt-2 flex flex-wrap items-center gap-2"><span className="text-[11px] font-bold text-muted-foreground">Correct:</span><select value={row.correct} onChange={(e) => setBulkRows((rows) => rows.map((r, ri) => ri === i ? { ...r, correct: e.target.value } : r))} className="h-8 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`select-bulk-correct-${i}`}>{['a', 'b', 'c', 'd', 'e'].map((x) => <option key={x} value={x}>{x.toUpperCase()}</option>)}</select>
+            <span className="text-[11px] font-bold text-muted-foreground">Difficulty:</span><select value={row.difficulty} onChange={(e) => setBulkRows((rows) => rows.map((r, ri) => ri === i ? { ...r, difficulty: e.target.value } : r))} className="h-8 rounded-lg border border-border bg-background px-2 text-xs capitalize" data-testid={`select-bulk-difficulty-${i}`}>{['easy', 'medium', 'hard'].map((x) => <option key={x} value={x}>{x}</option>)}</select>
             <button type="button" onClick={() => setBulkRows((rows) => rows.map((r, ri) => ri === i ? { ...r, showOptionExplanations: !r.showOptionExplanations } : r))} className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-primary" data-testid={`button-toggle-option-explanations-${i}`}><CircleHelp size={12} /> {row.showOptionExplanations ? 'Hide' : 'Add'} explanations</button>
           </div>
           {row.showOptionExplanations && <div className="mt-2 space-y-1.5 rounded-lg bg-muted/50 p-2.5">
             <p className="text-[10px] text-muted-foreground">Explain why each option is right or wrong — this is what students see when they review the question.</p>
-            {(['a', 'b', 'c', 'd', 'e'] as const).map((x, oi) => row[x].trim() && <div key={x} className="flex items-start gap-2"><span className={cn('mt-1.5 grid size-5 shrink-0 place-items-center rounded text-[10px] font-bold', row.correct === x ? 'bg-[#d7eee4] text-[#287058]' : 'bg-[#fce3dc] text-[#a34c3e]')}>{x.toUpperCase()}</span><textarea value={row[(`e${x}`) as 'ea' | 'eb' | 'ec' | 'ed' | 'ee']} onChange={(e) => setBulkRows((rows) => rows.map((r, ri) => ri === i ? { ...r, [`e${x}`]: e.target.value } : r))} placeholder={row.correct === x ? 'Why this is the correct answer...' : 'Why this option is wrong...'} className="min-h-9 flex-1 rounded-lg border border-border bg-background p-2 text-xs" data-testid={`input-bulk-option-explanation-${i}-${oi}`} /></div>)}
+            {(['a', 'b', 'c', 'd', 'e'] as const).map((x, oi) => row[x].trim() && <div key={x} className="flex items-start gap-2"><span className={cn('mt-1.5 grid size-5 shrink-0 place-items-center rounded text-[10px] font-bold', row.correct === x ? 'bg-[#d7eee4] text-[#287058]' : 'bg-[#fff1ed] text-[#a34c3e]')}>{x.toUpperCase()}</span><textarea value={row[(`e${x}`) as 'ea' | 'eb' | 'ec' | 'ed' | 'ee']} onChange={(e) => setBulkRows((rows) => rows.map((r, ri) => ri === i ? { ...r, [`e${x}`]: e.target.value } : r))} placeholder={row.correct === x ? 'Why this is the correct answer...' : 'Why this option is wrong...'} className="min-h-9 flex-1 rounded-lg border border-border bg-background p-2 text-xs" data-testid={`input-bulk-option-explanation-${i}-${oi}`} /></div>)}
           </div>}
         </div>)}</div>
         <div className="flex gap-2"><button disabled={!targetReady || bulkCreateMutation.isPending} onClick={() => bulkCreateMutation.mutate()} className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-save-bulk-mcqs">{bulkCreateMutation.isPending ? 'Adding…' : `Add ${bulkRows.filter((r) => r.question.trim()).length} questions`}</button><button onClick={() => { setBulkAddOpen(false); setBulkRows(bulkAddRowsInit()); }} className="rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold" data-testid="button-cancel-bulk-mcqs">Cancel</button></div>
@@ -1654,6 +1688,31 @@ function TeamPhoto({ member }: { member: TeamMember }) {
   return <img src={url} alt={member.name} className="size-11 shrink-0 rounded-full object-cover" onError={() => setBroken(true)} />;
 }
 
+// Full edit — every field the create form sets, pre-filled, so admins
+// aren't stuck only being able to publish/archive after creation. Uses
+// the same `update` mutation the parent already wires to a PATCH.
+function ExamEditForm({ exam, onSave, onCancel, saving }: { exam: AdminExam; onSave: (body: Partial<AdminExam>) => void; onCancel: () => void; saving: boolean }) {
+  const toLocalInput = (iso: string) => { const d = new Date(iso); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
+  return <form onSubmit={(e) => {
+    e.preventDefault(); const f = new FormData(e.currentTarget);
+    onSave({
+      title: String(f.get('title')), description: String(f.get('description') || ''),
+      programTargetKind: String(f.get('programTargetKind') || '') || null, yearTargetNumber: f.get('yearTargetNumber') ? Number(f.get('yearTargetNumber')) : null,
+      durationMinutes: Number(f.get('durationMinutes') || 60), startAt: new Date(String(f.get('startAt'))).toISOString(), endAt: new Date(String(f.get('endAt'))).toISOString(),
+      maxAttempts: Number(f.get('maxAttempts') || 1), negativeMarkingEnabled: f.get('negativeMarkingEnabled') === 'on', negativeMarkPerWrong: Number(f.get('negativeMarkPerWrong') || 0),
+      passingPercent: f.get('passingPercent') ? Number(f.get('passingPercent')) : null, resultReleaseMode: f.get('resultReleaseMode') as Exam['resultReleaseMode'],
+      showMarks: f.get('showMarks') === 'on', showPercentage: f.get('showPercentage') === 'on', showCorrectAnswers: f.get('showCorrectAnswers') === 'on',
+    });
+  }} className="mt-4 space-y-3 rounded-2xl border border-primary/30 bg-[#eef7f1] p-5">
+    <div className="grid gap-3 sm:grid-cols-2"><input required name="title" defaultValue={exam.title} placeholder="Exam title" className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid={`input-edit-exam-title-${exam.id}`} /><input name="description" defaultValue={exam.description} placeholder="Short description" className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid={`input-edit-exam-description-${exam.id}`} /></div>
+    <div className="grid gap-3 sm:grid-cols-4"><select name="programTargetKind" defaultValue={exam.programTargetKind ?? ''} className="h-10 rounded-xl border border-border bg-card px-2 text-xs" data-testid={`select-edit-exam-program-${exam.id}`}><option value="">All Programs</option><option value="MBBS">MBBS</option><option value="BDS">BDS</option></select><select name="yearTargetNumber" defaultValue={exam.yearTargetNumber ?? ''} className="h-10 rounded-xl border border-border bg-card px-2 text-xs" data-testid={`select-edit-exam-year-${exam.id}`}><option value="">All Years</option>{[1, 2, 3, 4, 5].map((y) => <option key={y} value={y}>Year {y}</option>)}</select><input required type="number" name="durationMinutes" defaultValue={exam.durationMinutes} placeholder="Duration (min)" className="h-10 rounded-xl border border-border bg-card px-2 text-xs" data-testid={`input-edit-exam-duration-${exam.id}`} /><input required type="number" name="maxAttempts" defaultValue={exam.maxAttempts} min={1} placeholder="Max attempts" className="h-10 rounded-xl border border-border bg-card px-2 text-xs" data-testid={`input-edit-exam-attempts-${exam.id}`} /></div>
+    <div className="grid gap-3 sm:grid-cols-2"><label className="text-[11px] font-bold">Opens<input required type="datetime-local" name="startAt" defaultValue={toLocalInput(exam.startAt)} className="mt-1 h-10 w-full rounded-xl border border-border bg-card px-2 text-xs" data-testid={`input-edit-exam-start-${exam.id}`} /></label><label className="text-[11px] font-bold">Closes<input required type="datetime-local" name="endAt" defaultValue={toLocalInput(exam.endAt)} className="mt-1 h-10 w-full rounded-xl border border-border bg-card px-2 text-xs" data-testid={`input-edit-exam-end-${exam.id}`} /></label></div>
+    <div className="grid gap-3 sm:grid-cols-3"><label className="text-[11px] font-bold">Passing %<input type="number" name="passingPercent" defaultValue={exam.passingPercent ?? ''} min={0} max={100} placeholder="e.g. 50" className="mt-1 h-10 w-full rounded-xl border border-border bg-card px-2 text-xs" data-testid={`input-edit-exam-passing-${exam.id}`} /></label><label className="text-[11px] font-bold">Result release<select name="resultReleaseMode" defaultValue={exam.resultReleaseMode} className="mt-1 h-10 w-full rounded-xl border border-border bg-card px-2 text-xs" data-testid={`select-edit-exam-release-${exam.id}`}><option value="immediate">Immediately after submit</option><option value="after_end">When exam window closes</option><option value="manual">Manually by admin</option></select></label><label className="text-[11px] font-bold">Negative mark / wrong<input type="number" step="0.25" name="negativeMarkPerWrong" defaultValue={exam.negativeMarkPerWrong} className="mt-1 h-10 w-full rounded-xl border border-border bg-card px-2 text-xs" data-testid={`input-edit-exam-negative-${exam.id}`} /></label></div>
+    <div className="flex flex-wrap gap-4 text-xs font-bold"><label className="flex items-center gap-1.5"><input type="checkbox" name="negativeMarkingEnabled" defaultChecked={exam.negativeMarkingEnabled} className="size-4 accent-[#287058]" data-testid={`checkbox-edit-negative-marking-${exam.id}`} /> Enable negative marking</label><label className="flex items-center gap-1.5"><input type="checkbox" name="showMarks" defaultChecked={exam.showMarks} className="size-4 accent-[#287058]" data-testid={`checkbox-edit-show-marks-${exam.id}`} /> Show marks</label><label className="flex items-center gap-1.5"><input type="checkbox" name="showPercentage" defaultChecked={exam.showPercentage} className="size-4 accent-[#287058]" data-testid={`checkbox-edit-show-percentage-${exam.id}`} /> Show percentage</label><label className="flex items-center gap-1.5"><input type="checkbox" name="showCorrectAnswers" defaultChecked={exam.showCorrectAnswers} className="size-4 accent-[#287058]" data-testid={`checkbox-edit-show-answers-${exam.id}`} /> Show correct answers after release</label></div>
+    <div className="flex gap-2"><button disabled={saving} className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid={`button-save-edit-exam-${exam.id}`}>{saving ? 'Saving…' : 'Save changes'}</button><button type="button" onClick={onCancel} className="rounded-xl border border-border px-4 py-2 text-xs font-bold" data-testid={`button-cancel-edit-exam-${exam.id}`}>Cancel</button></div>
+  </form>;
+}
+
 function AdminExams() {
   const q = useQuery({ queryKey: ['admin-exams'], queryFn: examsAdminApi.list });
   const create = useMutation({ mutationFn: examsAdminApi.create, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-exams'] }) });
@@ -1662,6 +1721,7 @@ function AdminExams() {
   const removePermanent = useMutation({ mutationFn: examsAdminApi.removePermanent, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['admin-exams'] }); setDeletingId(null); }, onError: (err: unknown) => toast({ title: 'Could not delete exam', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
   const [open, setOpen] = useState(false);
   const [managingId, setManagingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [freshlyCreatedId, setFreshlyCreatedId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
@@ -1697,7 +1757,8 @@ function AdminExams() {
     </form>}
     <div className="space-y-3">{(q.data || []).map((exam) => <div key={exam.id} className="rounded-2xl border border-border bg-card p-5" data-testid={`card-admin-exam-${exam.id}`}>
       <div className="flex flex-wrap items-center justify-between gap-3"><div><div className="flex items-center gap-2"><h3 className="text-sm font-bold">{exam.title}</h3><Badge tone={exam.status === 'published' ? 'green' : exam.status === 'archived' ? 'red' : 'amber'}>{exam.status}</Badge></div><div className="mt-1 text-[11px] text-muted-foreground">{exam.programTargetKind || 'All Programs'} · {exam.yearTargetNumber ? `Year ${exam.yearTargetNumber}` : 'All Years'} · {exam.durationMinutes} min · {exam.questionCount} questions · {exam.attemptCount} attempts</div></div>
-      <div className="flex flex-wrap gap-2">{exam.status === 'draft' && <button onClick={() => update.mutate({ id: exam.id, body: { status: 'published' } })} className="rounded-lg bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground" data-testid={`button-publish-exam-${exam.id}`}>Publish</button>}{exam.resultReleaseMode === 'manual' && <button onClick={() => examsAdminApi.releaseAll(exam.id)} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold" data-testid={`button-release-exam-${exam.id}`}>Release results</button>}<button onClick={() => setManagingId(managingId === exam.id ? null : exam.id)} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold" data-testid={`button-manage-exam-${exam.id}`}>{managingId === exam.id ? 'Close' : 'Manage questions & results'}</button>{exam.status !== 'archived' ? <button onClick={() => archive.mutate(exam.id)} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold text-destructive" data-testid={`button-archive-exam-${exam.id}`}>Archive</button> : <button onClick={() => setDeletingId(exam.id)} className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-1.5 text-[11px] font-bold text-destructive" data-testid={`button-delete-exam-${exam.id}`}>Delete</button>}</div></div>
+      <div className="flex flex-wrap gap-2">{exam.status === 'draft' && <button onClick={() => update.mutate({ id: exam.id, body: { status: 'published' } })} className="rounded-lg bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground" data-testid={`button-publish-exam-${exam.id}`}>Publish</button>}{exam.resultReleaseMode === 'manual' && <button onClick={() => examsAdminApi.releaseAll(exam.id)} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold" data-testid={`button-release-exam-${exam.id}`}>Release results</button>}<button onClick={() => setEditingId(editingId === exam.id ? null : exam.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold" data-testid={`button-edit-exam-${exam.id}`}><Pencil size={12} /> {editingId === exam.id ? 'Close edit' : 'Edit'}</button><button onClick={() => setManagingId(managingId === exam.id ? null : exam.id)} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold" data-testid={`button-manage-exam-${exam.id}`}>{managingId === exam.id ? 'Close' : 'Manage questions & results'}</button>{exam.status !== 'archived' && <button onClick={() => archive.mutate(exam.id)} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold text-destructive" data-testid={`button-archive-exam-${exam.id}`}>Archive</button>}<button onClick={() => exam.status === 'archived' && setDeletingId(exam.id)} disabled={exam.status !== 'archived'} title={exam.status !== 'archived' ? 'Archive this exam first, then Delete permanently erases it' : 'Permanently delete this exam'} className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-1.5 text-[11px] font-bold text-destructive disabled:cursor-not-allowed disabled:opacity-40" data-testid={`button-delete-exam-${exam.id}`}>Delete permanently</button></div></div>
+      {editingId === exam.id && <ExamEditForm exam={exam} saving={update.isPending} onCancel={() => setEditingId(null)} onSave={(body) => update.mutate({ id: exam.id, body }, { onSuccess: () => setEditingId(null) })} />}
       {managingId === exam.id && <ExamManagePanel exam={exam} autoOpenUpload={freshlyCreatedId === exam.id} />}
     </div>)}{!q.data?.length && <EmptyState icon={ClipboardCheck} title="No exams yet" body="Create your first Pre-Proffs exam above." />}</div>
     {deletingId !== null && <ConfirmDialog title="Delete this exam permanently?" body="This erases the exam and its question list for good — blocked automatically if it already has recorded attempts. There is no undo." confirmLabel="Delete forever" onCancel={() => setDeletingId(null)} onConfirm={() => removePermanent.mutate(deletingId)} pending={removePermanent.isPending} />}
@@ -1711,23 +1772,15 @@ function ExamManagePanel({ exam, autoOpenUpload }: { exam: AdminExam; autoOpenUp
   const existingQuestionsQ = useQuery({ queryKey: ['exam-questions', exam.id], queryFn: () => examsAdminApi.getQuestions(exam.id) });
 
   // Bulk upload — same file parser as the MCQ bank (txt/csv/xlsx/pdf/docx,
-  // per-option explanations included), but for this exam specifically:
-  // parsed questions go into the module/subject/topic bank AND get attached
-  // to this exam's paper in one step, instead of the admin having to import
-  // to the bank first and then paste MCQ IDs here separately.
+  // per-option explanations included). Parsed questions attach directly to
+  // this exam (examId) and land in their own exam-questions bank — no
+  // module/subject/topic needed, same as past-paper imports.
   const [uploadOpen, setUploadOpen] = useState(!!autoOpenUpload);
   const [file, setFile] = useState<File | null>(null);
   const [parsing, setParsing] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<McqCandidate[]>([]);
   const [replaceExisting, setReplaceExisting] = useState(false);
-  const modulesQ = useListModules();
-  const [moduleId, setModuleId] = useState('');
-  const subjectsQ = useListSubjects(moduleId ? { moduleId: Number(moduleId) } : undefined);
-  const [subjectId, setSubjectId] = useState('');
-  const topicsQ = useListTopics(subjectId ? { subjectId: Number(subjectId) } : undefined);
-  const [topicId, setTopicId] = useState('');
-  const targetReady = !!moduleId && !!subjectId && !!topicId;
 
   const parseFile = async () => {
     if (!file) return;
@@ -1746,14 +1799,22 @@ function ExamManagePanel({ exam, autoOpenUpload }: { exam: AdminExam; autoOpenUp
 
   const commitToExam = useMutation({
     mutationFn: async () => {
-      const { ids } = await mcqImportApi.commit({ moduleId: Number(moduleId), subjectId: Number(subjectId), topicId: Number(topicId), status: 'published', mcqs: candidates });
-      const existingIds = replaceExisting ? [] : (existingQuestionsQ.data ?? []).map((q) => q.id);
-      await examsAdminApi.setQuestions(exam.id, [...existingIds, ...ids]);
+      // examId places these directly in the exam-questions bank and
+      // auto-attaches them to this exam's paper server-side.
+      const { ids } = await mcqImportApi.commit({ examId: exam.id, status: 'published', mcqs: candidates });
+      if (replaceExisting) {
+        const existingIds = (existingQuestionsQ.data ?? []).map((q) => q.id).filter((id) => !ids.includes(id));
+        // Explicit "replace" still means only these new questions remain
+        // attached — drop anything that isn't one of the freshly imported ids.
+        await examsAdminApi.setQuestions(exam.id, ids);
+        void existingIds; // old attachment already superseded by the commit route's auto-link + this setQuestions call
+      }
       return ids.length;
     },
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ['admin-exams'] });
       queryClient.invalidateQueries({ queryKey: ['exam-questions', exam.id] });
+      queryClient.invalidateQueries({ queryKey: ['admin-mcqs-tree'] });
       setCandidates([]); setFile(null); setUploadOpen(false);
       toast({ title: `Added ${count} question${count === 1 ? '' : 's'} to this exam` });
     },
@@ -1768,12 +1829,7 @@ function ExamManagePanel({ exam, autoOpenUpload }: { exam: AdminExam; autoOpenUp
 
       {uploadOpen && <div className="mt-3 space-y-3 rounded-2xl border border-primary/30 bg-[#eef7f1] p-4">
         <p className="text-[11px] font-bold">Upload a question file — supports .txt, .csv, .xlsx, .xls, .pdf, .docx, and picks up per-option explanations if the file has them.</p>
-        <div className="flex flex-wrap gap-2">
-          <select value={moduleId} onChange={(e) => { setModuleId(e.target.value); setSubjectId(''); setTopicId(''); }} className="h-9 rounded-lg border border-border bg-card px-2 text-xs" data-testid={`select-exam-upload-module-${exam.id}`}><option value="">Select module</option>{modulesQ.data?.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
-          <select value={subjectId} onChange={(e) => { setSubjectId(e.target.value); setTopicId(''); }} disabled={!moduleId} className="h-9 rounded-lg border border-border bg-card px-2 text-xs disabled:opacity-50" data-testid={`select-exam-upload-subject-${exam.id}`}><option value="">Select subject</option>{subjectsQ.data?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
-          <select value={topicId} onChange={(e) => setTopicId(e.target.value)} disabled={!subjectId} className="h-9 rounded-lg border border-border bg-card px-2 text-xs disabled:opacity-50" data-testid={`select-exam-upload-topic-${exam.id}`}><option value="">Select topic</option>{topicsQ.data?.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
-        </div>
-        {!targetReady && <p className="text-[11px] font-semibold text-[#8a5a12]">Pick a module/subject/topic — imported questions still need a home in the bank, even though they're for this exam.</p>}
+        <p className="text-[11px] font-semibold text-muted-foreground">Imported questions attach straight to this exam and live in their own exam-questions bank — no module/subject/topic needed.</p>
         <div className="flex flex-wrap items-center gap-2"><input type="file" accept=".txt,.csv,.xlsx,.xls,.pdf,.docx" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="flex-1 rounded-lg border border-dashed border-border bg-card px-3 py-2 text-xs" data-testid={`input-exam-file-${exam.id}`} /><button disabled={!file || parsing} onClick={parseFile} className="rounded-lg bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid={`button-parse-exam-file-${exam.id}`}>{parsing ? 'Reading…' : 'Parse file'}</button></div>
         {parseError && <p className="text-[11px] font-semibold text-destructive">{parseError}</p>}
 
@@ -1789,10 +1845,10 @@ function ExamManagePanel({ exam, autoOpenUpload }: { exam: AdminExam; autoOpenUp
             <div className="mt-2 flex items-center gap-2"><span className="text-[11px] font-bold text-muted-foreground">Correct:</span><select value={c.correctAnswer ?? ''} onChange={(e) => updateCandidate(i, { correctAnswer: e.target.value || null })} className="h-8 flex-1 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`select-exam-candidate-answer-${i}`}><option value="">Not set</option>{c.options.map((opt, oi) => opt && <option key={oi} value={opt}>{String.fromCharCode(65 + oi)}. {opt.slice(0, 40)}</option>)}</select></div>
             {c.options.some((o) => o.trim()) && <details className="mt-2" open={!!c.optionExplanations?.some((e) => e?.trim())}>
               <summary className="cursor-pointer text-[11px] font-bold text-primary">Per-option explanations</summary>
-              <div className="mt-2 space-y-1.5">{c.options.map((opt, oi) => opt.trim() && <div key={oi} className="flex items-start gap-2"><span className={cn('mt-1.5 grid size-5 shrink-0 place-items-center rounded text-[10px] font-bold', c.correctAnswer === opt ? 'bg-[#d7eee4] text-[#287058]' : 'bg-[#fce3dc] text-[#a34c3e]')}>{String.fromCharCode(65 + oi)}</span><textarea value={c.optionExplanations?.[oi] ?? ''} onChange={(e) => { const next = [...(c.optionExplanations ?? c.options.map(() => null))]; next[oi] = e.target.value || null; updateCandidate(i, { optionExplanations: next }); }} placeholder={c.correctAnswer === opt ? 'Why this is correct...' : 'Why this is wrong...'} className="min-h-8 flex-1 rounded-lg border border-border bg-background p-2 text-xs" data-testid={`input-exam-candidate-option-explanation-${i}-${oi}`} /></div>)}</div>
+              <div className="mt-2 space-y-1.5">{c.options.map((opt, oi) => opt.trim() && <div key={oi} className="flex items-start gap-2"><span className={cn('mt-1.5 grid size-5 shrink-0 place-items-center rounded text-[10px] font-bold', c.correctAnswer === opt ? 'bg-[#d7eee4] text-[#287058]' : 'bg-[#fff1ed] text-[#a34c3e]')}>{String.fromCharCode(65 + oi)}</span><textarea value={c.optionExplanations?.[oi] ?? ''} onChange={(e) => { const next = [...(c.optionExplanations ?? c.options.map(() => null))]; next[oi] = e.target.value || null; updateCandidate(i, { optionExplanations: next }); }} placeholder={c.correctAnswer === opt ? 'Why this is correct...' : 'Why this is wrong...'} className="min-h-8 flex-1 rounded-lg border border-border bg-background p-2 text-xs" data-testid={`input-exam-candidate-option-explanation-${i}-${oi}`} /></div>)}</div>
             </details>}
           </div>)}</div>
-          <button disabled={!targetReady || commitToExam.isPending} onClick={() => commitToExam.mutate()} className="rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid={`button-commit-exam-candidates-${exam.id}`}>{commitToExam.isPending ? 'Adding…' : replaceExisting ? `Replace paper with these ${candidates.length} questions` : `Add these ${candidates.length} questions to the exam`}</button>
+          <button disabled={commitToExam.isPending} onClick={() => commitToExam.mutate()} className="rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid={`button-commit-exam-candidates-${exam.id}`}>{commitToExam.isPending ? 'Adding…' : replaceExisting ? `Replace paper with these ${candidates.length} questions` : `Add these ${candidates.length} questions to the exam`}</button>
         </div>}
       </div>}
     </div>

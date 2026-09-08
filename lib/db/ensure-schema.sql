@@ -262,6 +262,7 @@ CREATE TABLE IF NOT EXISTS med_mcqs (
   subject_id INTEGER,
   topic_id INTEGER,
   past_paper_id INTEGER,
+  exam_id INTEGER,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -569,6 +570,7 @@ ALTER TABLE med_mcqs ALTER COLUMN subject_id DROP NOT NULL;
 ALTER TABLE med_mcqs ALTER COLUMN topic_id DROP NOT NULL;
 ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS option_explanations TEXT[];
 ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS explanation_status TEXT NOT NULL DEFAULT 'PENDING';
+ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS exam_id INTEGER;
 
 ALTER TABLE med_ai_visualizer_logs ADD COLUMN IF NOT EXISTS raw_response TEXT;
 

@@ -251,6 +251,7 @@ CREATE TABLE IF NOT EXISTS med_mcqs (
   subject_id INTEGER,
   topic_id INTEGER,
   past_paper_id INTEGER,
+  exam_id INTEGER,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -577,6 +578,10 @@ ALTER TABLE med_mcqs ALTER COLUMN topic_id DROP NOT NULL;
 -- option_explanations ones.
 ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS option_explanations TEXT[];
 ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS explanation_status TEXT NOT NULL DEFAULT 'PENDING';
+-- med_mcqs: MCQs can now attach directly to an exam (exam_id) the same
+-- way they already attach to a past paper (past_paper_id) — imported
+-- exam questions no longer need a module/subject/topic home either.
+ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS exam_id INTEGER;
 
 -- med_ai_visualizer_logs: raw (truncated/invalid) AI response text, kept
 -- for admin diagnosis of generation failures. Added after the table's

@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import multer from "multer";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { db, mcqImportProfilesTable, mcqsTable, auditLogsTable } from "@workspace/db";
+import { db, mcqImportProfilesTable, mcqsTable, examQuestionsTable, auditLogsTable } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
 import { extractFileContent } from "../lib/fileExtraction";
 import { extractMcqsFromText, extractMcqsFromRows, DEFAULT_IMPORT_PATTERNS, type ImportPatternSet } from "../lib/mcqParser";
@@ -113,6 +113,7 @@ const CommitBody = z.object({
   subjectId: z.number().int().positive().optional(),
   topicId: z.number().int().positive().optional(),
   pastPaperId: z.number().int().positive().optional(),
+  examId: z.number().int().positive().optional(),
   status: z.enum(["draft", "published"]).default("draft"),
   mcqs: z.array(z.object({
     question: z.string().min(1),
@@ -123,8 +124,8 @@ const CommitBody = z.object({
     reference: z.string().nullable().optional(),
   })).min(1).max(2000),
 }).refine(
-  (data) => !!data.pastPaperId || (!!data.moduleId && !!data.subjectId && !!data.topicId),
-  { message: "Provide a pastPaperId, or a full moduleId/subjectId/topicId, to place these questions somewhere" },
+  (data) => !!data.pastPaperId || !!data.examId || (!!data.moduleId && !!data.subjectId && !!data.topicId),
+  { message: "Provide a pastPaperId, an examId, or a full moduleId/subjectId/topicId, to place these questions somewhere" },
 );
 
 router.post("/admin/mcq-import/commit", requireAdmin, async (req, res): Promise<void> => {
@@ -148,10 +149,20 @@ router.post("/admin/mcq-import/commit", requireAdmin, async (req, res): Promise<
         subjectId: data.subjectId ?? null,
         topicId: data.topicId ?? null,
         pastPaperId: data.pastPaperId ?? null,
+        examId: data.examId ?? null,
       })),
     ).returning({ id: mcqsTable.id });
 
-    await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MCQS_BULK_IMPORTED", entity: "mcq", metadata: JSON.stringify({ count: rows.length, moduleId: data.moduleId ?? null, pastPaperId: data.pastPaperId ?? null }) });
+    // Questions attached directly to an exam are automatically added to
+    // that exam's paper too — no need for the admin to separately paste
+    // MCQ IDs into "Set paper" after importing.
+    if (data.examId && rows.length) {
+      await db.insert(examQuestionsTable).values(
+        rows.map((r, i) => ({ examId: data.examId!, mcqId: r.id, displayOrder: i })),
+      ).onConflictDoNothing();
+    }
+
+    await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MCQS_BULK_IMPORTED", entity: "mcq", metadata: JSON.stringify({ count: rows.length, moduleId: data.moduleId ?? null, pastPaperId: data.pastPaperId ?? null, examId: data.examId ?? null }) });
 
     res.status(201).json({ imported: rows.length, ids: rows.map((r) => r.id) });
   } catch (err) {

@@ -270,16 +270,18 @@ export const mcqsTable = pgTable("med_mcqs", {
   imagePath: text("image_path"),
   status: text("status").notNull().default("draft"),
   source: text("source").notNull().default("manual"),
-  // Nullable: MCQs imported under a past paper (pastPaperId set) are
-  // organized by the paper itself, not by curriculum placement — the
-  // admin can optionally also tag one under a module/subject/topic, but
-  // it isn't required. MCQs in the main question bank (no pastPaperId)
-  // are still expected to carry all three — enforced by the API layer
-  // (CommitBody's .refine() in mcq-import.ts), not by the DB anymore.
+  // Nullable: MCQs imported under a past paper (pastPaperId set) or
+  // directly attached to an exam (examId set) are organized by that
+  // source, not by curriculum placement — the admin can optionally also
+  // tag one under a module/subject/topic, but it isn't required. MCQs in
+  // the main question bank (no pastPaperId and no examId) are still
+  // expected to carry all three — enforced by the API layer (CommitBody's
+  // .refine() in mcq-import.ts), not by the DB anymore.
   moduleId: integer("module_id"),
   subjectId: integer("subject_id"),
   topicId: integer("topic_id"),
   pastPaperId: integer("past_paper_id"),
+  examId: integer("exam_id"),
   ...timestamps,
 });
 

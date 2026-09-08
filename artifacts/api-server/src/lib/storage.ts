@@ -57,7 +57,15 @@ async function uploadToCloudinary(buffer: Buffer, safeName: string): Promise<{ p
   try {
     const { v2: cloudinary } = await import("cloudinary");
     cloudinary.config({ cloud_name: config.cloudName, api_key: config.apiKey, api_secret: config.apiSecret });
-    const publicId = safeName.replace(/\.[^./]+$/, ""); // Cloudinary tracks the extension itself via format
+    // The extension is kept as part of the public_id (not stripped) —
+    // Cloudinary only auto-appends a format for resource_type "image"/
+    // "video" when you use its own URL-building helpers. Raw uploads
+    // (docx/txt/csv/zip, and PDFs on some accounts) are delivered by an
+    // exact public_id match with no automatic extension, so a stripped
+    // public_id like "books/171-abc" 404s while "books/171-abc.pdf"
+    // works — this was why previously-uploaded books "succeeded" on
+    // upload but wouldn't open from a resolved link.
+    const publicId = safeName;
     const result = await new Promise<{ public_id: string; resource_type: string }>((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream({ public_id: publicId, resource_type: "auto" }, (err, res) => {
         if (err || !res) { reject(err ?? new Error("Cloudinary upload returned no result")); return; }
@@ -92,7 +100,7 @@ export async function uploadFile(buffer: Buffer, originalName: string, mimeType:
   const ext = path.extname(originalName) || "";
   const safeName = `${folder}/${Date.now()}-${crypto.randomBytes(8).toString("hex")}${ext}`;
 
-  const result = await uploadToCloudinary(buffer, safeName, mimeType);
+  const result = await uploadToCloudinary(buffer, safeName);
   if ("path" in result) return result.path;
 
   throw new Error(`Couldn't save the uploaded file. ${result.error}`);

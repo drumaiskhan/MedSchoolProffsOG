@@ -10,7 +10,7 @@ import {
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
   GraduationCap, CalendarDays, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
   RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Link2 as LinkIcon, Lightbulb,
-  LayoutGrid, Presentation, Wand2, Loader2
+  LayoutGrid, Presentation, Wand2, Loader2, Crown, Globe, Star
 } from 'lucide-react';
 import {
   getListMembershipPlansQueryKey, getListPaymentsQueryKey, getListMcqsQueryKey, getListModulesQueryKey, getListStudentsQueryKey, getListNotificationsQueryKey, getGetCurrentUserQueryKey,
@@ -59,7 +59,7 @@ function progressVerdict(sessionScore: number | null, trend?: ProgressTrend | nu
   return { label: 'Steady', tone: 'flat', message: "Holding steady versus last week. Consistent is good — push for a new high next session." };
 }
 function ProgressBadge({ tone, label }: { tone: 'up' | 'down' | 'flat' | 'new'; label: string }) {
-  const styles = tone === 'up' ? 'bg-[#d7eee4] text-[#164b4b]' : tone === 'down' ? 'bg-[#fbe4dd] text-[#8a3a26]' : tone === 'new' ? 'bg-[#dceaf1] text-[#32647b]' : 'bg-muted text-muted-foreground';
+  const styles = tone === 'up' ? 'bg-[#d7eee4] text-[#164b4b]' : tone === 'down' ? 'bg-[#fff1ed] text-[#8a3a26]' : tone === 'new' ? 'bg-[#dceaf1] text-[#32647b]' : 'bg-muted text-muted-foreground';
   const Icon = tone === 'up' ? TrendingUp : tone === 'down' ? TrendingDown : Minus;
   return <span className={cn('inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-bold', styles)}><Icon size={12} /> {label}</span>;
 }
@@ -330,7 +330,7 @@ function Practice() {
 
   const controlPanel = <div className="space-y-3">
     <div className="rounded-2xl border border-border bg-card p-4">
-      <div className="flex items-center justify-between text-xs font-bold"><span className="flex items-center gap-1.5"><Clock3 size={14} /> Timer</span>{mode === 'timed' ? <span className={cn('font-mono-app rounded-full px-2.5 py-1 text-[11px]', remainingSeconds < 60 ? 'bg-[#fce3dc] text-[#a34c3e]' : 'bg-[#d7eee4] text-[#287058]')} data-testid="text-timer">{mm}:{ss}</span> : <span className="text-[11px] font-normal text-muted-foreground">Untimed</span>}</div>
+      <div className="flex items-center justify-between text-xs font-bold"><span className="flex items-center gap-1.5"><Clock3 size={14} /> Timer</span>{mode === 'timed' ? <span className={cn('font-mono-app rounded-full px-2.5 py-1 text-[11px]', remainingSeconds < 60 ? 'bg-[#fff1ed] text-[#a34c3e]' : 'bg-[#d7eee4] text-[#287058]')} data-testid="text-timer">{mm}:{ss}</span> : <span className="text-[11px] font-normal text-muted-foreground">Untimed</span>}</div>
       <div className="mt-3 text-[11px] text-muted-foreground">{percentAnswered}% answered</div>
       <div className="mt-1"><Progress value={percentAnswered} /></div>
       <div className="mt-3 text-[11px] text-muted-foreground">Difficulty: <Badge tone="blue">{current.difficulty}</Badge></div>
@@ -359,12 +359,12 @@ function Practice() {
         <div className="mt-7 space-y-3">{current.options.map((option, i) => <button key={option} onClick={() => selectOption(option)} className={cn('flex w-full items-center gap-3 rounded-xl border p-4 text-left text-sm transition-colors', answers[current.id] === option ? 'border-primary bg-[#e6f3ed]' : 'border-border hover:bg-muted')} data-testid={`button-answer-${i}`}><span className="grid size-7 shrink-0 place-items-center rounded-lg bg-muted font-mono-app text-[11px]">{String.fromCharCode(65 + i)}</span><span className="flex-1">{option}</span></button>)}</div>
 
         <div className="mt-6 flex flex-wrap gap-2">
-          <button onClick={() => setPanel(panel === 'hint' ? null : 'hint')} className={cn('inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2.5 text-xs font-bold', panel === 'hint' ? 'bg-[#e5a952] text-white' : 'border border-[#e5a952]/40 bg-[#fff4de] text-[#8a5a12]')} data-testid="button-hint"><Lightbulb size={13} /> Hint</button>
+          <button onClick={() => setPanel(panel === 'hint' ? null : 'hint')} className={cn('inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2.5 text-xs font-bold', panel === 'hint' ? 'bg-[#e5a952] text-white' : 'border border-[#e5a952]/40 bg-[#fdf6e8] text-[#8a5a12]')} data-testid="button-hint"><Lightbulb size={13} /> Hint</button>
           <button onClick={() => setPanel(panel === 'explain' ? null : 'explain')} className={cn('inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2.5 text-xs font-bold', panel === 'explain' ? 'bg-[#32647b] text-white' : 'border border-[#32647b]/40 bg-[#dceaf1] text-[#32647b]')} data-testid="button-explain"><CircleHelp size={13} /> Explain</button>
           <button onClick={() => setPanel(panel === 'references' ? null : 'references')} className={cn('inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2.5 text-xs font-bold', panel === 'references' ? 'bg-[#6a4c93] text-white' : 'border border-[#6a4c93]/40 bg-[#efe8f7] text-[#6a4c93]')} data-testid="button-references"><BookOpen size={13} /> References</button>
         </div>
 
-        {panel === 'hint' && <div className="mt-4 rounded-xl bg-[#fff4de] p-4 text-xs leading-6 text-[#8a5a12]" data-testid="panel-hint"><div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide"><Lightbulb size={10} /> Hint</div>{current.reference ? current.reference : 'Re-read the question stem carefully — focus on the specific mechanism or finding it\'s asking about, and rule out options that don\'t fit that exact scenario.'}</div>}
+        {panel === 'hint' && <div className="mt-4 rounded-xl bg-[#fdf6e8] p-4 text-xs leading-6 text-[#8a5a12]" data-testid="panel-hint"><div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide"><Lightbulb size={10} /> Hint</div>{current.reference ? current.reference : 'Re-read the question stem carefully — focus on the specific mechanism or finding it\'s asking about, and rule out options that don\'t fit that exact scenario.'}</div>}
         {panel === 'references' && <div className="mt-4 rounded-xl bg-[#efe8f7] p-4 text-xs leading-6 text-[#6a4c93]" data-testid="panel-references"><div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide"><BookOpen size={10} /> References</div>{current.reference || 'No reference has been attached to this question yet.'}</div>}
         {panel === 'explain' && <div className="mt-4 rounded-xl bg-[#dceaf1] p-4 text-xs leading-6 text-[#32647b]" data-testid="panel-explain">
           <div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide"><CircleHelp size={10} /> Explanation</div>
@@ -1082,15 +1082,21 @@ function FlaggedMcqs() {
 function Podium({ rows }: { rows: LeaderboardRow[] }) {
   const [first, second, third] = rows;
   const Slot = ({ row, place }: { row: LeaderboardRow; place: 1 | 2 | 3 }) => {
-    const config = { 1: { height: 'h-28', ring: 'ring-4 ring-[#e5a952]', badge: 'bg-[#e5a952] text-white', icon: Trophy, order: 'order-2' }, 2: { height: 'h-20', ring: 'ring-2 ring-[#c7d1da]', badge: 'bg-[#8a97a3] text-white', icon: Trophy, order: 'order-1' }, 3: { height: 'h-16', ring: 'ring-2 ring-[#cf9a6b]', badge: 'bg-[#b57c4c] text-white', icon: Trophy, order: 'order-3' } }[place];
-    return <div className={cn('flex flex-1 flex-col items-center', config.order)} data-testid={`podium-place-${place}`}>
-      <div className={cn('grid size-14 place-items-center rounded-full bg-[#d7eee4] text-sm font-extrabold text-[#164b4b]', config.ring)}>{initials(row.name)}</div>
-      <div className="mt-2 max-w-[90px] truncate text-center text-xs font-extrabold">{row.name}{row.isYou && <span className="block text-[9px] font-bold text-primary">(you)</span>}</div>
-      <div className="mt-0.5 font-mono-app text-[11px] text-muted-foreground">{row.points} pts</div>
-      <div className={cn('mt-2 flex w-full flex-col items-center justify-end rounded-t-xl pb-2 pt-3', config.height, place === 1 ? 'bg-[#fdeecb]' : place === 2 ? 'bg-[#eef1f4]' : 'bg-[#fbe9dc]')}><span className={cn('grid size-6 place-items-center rounded-full text-[11px] font-extrabold', config.badge)}>{place}</span></div>
+    const config = {
+      1: { height: 'h-32', ring: 'ring-4 ring-[#e8c34a]', glow: 'shadow-[0_0_30px_-6px_rgba(232,195,74,0.55)]', bar: 'bg-gradient-to-b from-[#3a2f10] to-[#1a1610]', badge: 'bg-[#e8c34a] text-[#1a1610]', avatarBg: 'bg-[#3a2f10]', avatarText: 'text-[#e8c34a]', crown: true, size: 'size-20 text-lg' },
+      2: { height: 'h-24', ring: 'ring-4 ring-[#b9c4d4]', glow: 'shadow-[0_0_22px_-6px_rgba(185,196,212,0.4)]', bar: 'bg-gradient-to-b from-[#232a35] to-[#141820]', badge: 'bg-[#b9c4d4] text-[#141820]', avatarBg: 'bg-[#232a35]', avatarText: 'text-[#cbd6e2]', crown: false, size: 'size-16 text-sm' },
+      3: { height: 'h-20', ring: 'ring-4 ring-[#d99a5c]', glow: 'shadow-[0_0_22px_-6px_rgba(217,154,92,0.4)]', bar: 'bg-gradient-to-b from-[#332215] to-[#181210]', badge: 'bg-[#d99a5c] text-[#181210]', avatarBg: 'bg-[#332215]', avatarText: 'text-[#f0c393]', crown: false, size: 'size-16 text-sm' },
+    }[place];
+    const order = place === 1 ? 'order-2' : place === 2 ? 'order-1' : 'order-3';
+    return <div className={cn('flex flex-1 flex-col items-center', order)} data-testid={`podium-place-${place}`}>
+      {config.crown && <Crown size={22} className="mb-1 text-[#e8c34a] drop-shadow-[0_0_6px_rgba(232,195,74,0.6)]" fill="currentColor" />}
+      <div className={cn('relative grid place-items-center rounded-full font-extrabold', config.size, config.ring, config.glow, config.avatarBg, config.avatarText)}>{initials(row.name)}</div>
+      <div className="mt-2.5 max-w-[92px] truncate text-center text-xs font-extrabold text-white">{row.name}{row.isYou && <span className="block text-[9px] font-bold text-[#7fe0c8]">(you)</span>}</div>
+      <div className="mt-0.5 font-mono-app text-[11px] font-bold text-[#e8c34a]">{row.points} pts</div>
+      <div className={cn('mt-3 flex w-full flex-col items-center justify-start rounded-t-2xl border-t border-white/10 pt-2.5', config.height, config.bar)}><span className={cn('grid size-7 place-items-center rounded-full text-xs font-extrabold', config.badge)}>{place}</span></div>
     </div>;
   };
-  return <div className="mb-6 flex items-end justify-center gap-2 rounded-2xl border border-border bg-card p-6 pt-8 sm:gap-4">
+  return <div className="mb-5 flex items-end justify-center gap-3 rounded-3xl border border-white/10 bg-gradient-to-b from-[#181d2e] to-[#0c0e16] p-6 pt-9 sm:gap-5">
     {second && <Slot row={second} place={2} />}
     {first && <Slot row={first} place={1} />}
     {third && <Slot row={third} place={3} />}
@@ -1103,9 +1109,31 @@ function Leaderboard() {
   const rows = board.data || [];
   const top3 = rows.slice(0, 3);
   const rest = rows.slice(3);
-  return <div><SectionHeader eyebrow="Community" title="Leaderboard" action={<div className="flex items-center gap-3"><span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground"><span className="relative flex size-1.5"><span className="absolute inline-flex size-full animate-ping rounded-full bg-[#8bcbb8] opacity-75" /><span className="relative inline-flex size-1.5 rounded-full bg-primary" /></span>Live</span><div className="flex gap-1.5">{['7d', '30d', '3m', '1y'].map((r) => <button key={r} onClick={() => setRange(r)} className={cn('rounded-lg px-2.5 py-1.5 text-[11px] font-bold', range === r ? 'bg-primary text-primary-foreground' : 'bg-muted')} data-testid={`button-range-${r}`}>{r.toUpperCase()}</button>)}</div></div>} />
-    {top3.length >= 1 && <Podium rows={top3} />}
-    <div className="overflow-hidden rounded-2xl border border-border bg-card">{rest.map((row) => <div key={row.userId} className={cn('flex items-center justify-between border-b border-border px-4 py-3 last:border-0', row.isYou && 'bg-[#eef7f1]')} data-testid={`row-leaderboard-${row.userId}`}><div className="flex items-center gap-3"><span className="w-6 text-center text-sm font-extrabold text-muted-foreground">{row.rank}</span><div className="grid size-8 place-items-center rounded-full bg-[#d7eee4] text-[11px] font-extrabold text-[#164b4b]">{initials(row.name)}</div><div className="text-sm font-bold">{row.name}{row.isYou && <span className="ml-1.5 text-[10px] font-bold text-primary">(you)</span>}</div></div><div className="text-right"><div className="text-sm font-extrabold">{row.points} pts</div><div className="text-[10px] text-muted-foreground">{row.accuracy}% acc · {row.questionsAnswered} questions · {row.sessions} sessions</div></div></div>)}{!rows.length && <EmptyState icon={Trophy} title="No activity yet" body="Complete a practice session to appear on the leaderboard." />}</div>
+  const you = rows.find((r) => r.isYou);
+  const beatPercent = you && rows.length > 1 ? Math.round(((rows.length - you.rank) / (rows.length - 1)) * 100) : null;
+  const rangeLabels: Record<string, string> = { '7d': 'Weekly', '30d': 'Monthly', '3m': 'Quarterly', '1y': 'Yearly' };
+  return <div>
+    <div className="overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-[#1b2036] via-[#141726] to-[#0b0d16] p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5"><span className="grid size-9 place-items-center rounded-xl bg-[#e8c34a]/15 text-[#e8c34a]"><Trophy size={18} /></span><div><h2 className="text-lg font-extrabold text-white">Leaderboard</h2><p className="text-[11px] font-semibold text-white/40">See how you stack up against the community</p></div></div>
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-white/5 px-2.5 py-1.5 text-[10px] font-bold text-white/70"><span className="relative flex size-1.5"><span className="absolute inline-flex size-full animate-ping rounded-full bg-[#7fe0c8] opacity-75" /><span className="relative inline-flex size-1.5 rounded-full bg-[#7fe0c8]" /></span>Live</span>
+      </div>
+      <div className="mt-4 flex gap-1.5 rounded-2xl bg-white/5 p-1.5">{['7d', '30d', '3m', '1y'].map((r) => <button key={r} onClick={() => setRange(r)} className={cn('flex-1 rounded-xl px-2 py-2 text-[11px] font-bold transition-colors', range === r ? 'bg-[#e8c34a] text-[#1a1610]' : 'text-white/60 hover:text-white')} data-testid={`button-range-${r}`}>{rangeLabels[r]}</button>)}</div>
+      {you && beatPercent !== null && <div className="mt-4 flex items-center gap-3 rounded-2xl bg-gradient-to-r from-[#d99a5c] to-[#e8c34a] px-4 py-3.5" data-testid="banner-your-rank">
+        <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-[#1a1610]/85 text-base font-extrabold text-[#e8c34a]">#{you.rank}</span>
+        <p className="text-xs font-extrabold leading-5 text-[#1a1610]">You are doing better than {beatPercent}% of other players!</p>
+      </div>}
+      <div className="mt-4 grid grid-cols-3 gap-3">
+        <div className="rounded-2xl bg-white/5 p-3.5 text-center"><Star size={16} className="mx-auto text-[#e8c34a]" fill="currentColor" /><div className="mt-1.5 text-lg font-extrabold text-white">{you?.points ?? 0}</div><div className="text-[9px] font-bold uppercase tracking-wide text-white/40">Points</div></div>
+        <div className="rounded-2xl bg-white/5 p-3.5 text-center"><Globe size={16} className="mx-auto text-[#7fa7e0]" /><div className="mt-1.5 text-lg font-extrabold text-white">{you ? `#${you.rank}` : '—'}</div><div className="text-[9px] font-bold uppercase tracking-wide text-white/40">Your rank</div></div>
+        <div className="rounded-2xl bg-white/5 p-3.5 text-center"><Zap size={16} className="mx-auto text-[#7fe0c8]" /><div className="mt-1.5 text-lg font-extrabold text-white">{you?.accuracy ?? 0}%</div><div className="text-[9px] font-bold uppercase tracking-wide text-white/40">Accuracy</div></div>
+      </div>
+    </div>
+    <div className="mt-5">{top3.length >= 1 && <Podium rows={top3} />}</div>
+    <div className="overflow-hidden rounded-2xl border border-border bg-card">{rest.map((row) => <div key={row.userId} className={cn('flex items-center justify-between border-b border-border px-4 py-3.5 last:border-0', row.isYou && 'bg-[#e8c34a]/10 ring-1 ring-inset ring-[#e8c34a]/40')} data-testid={`row-leaderboard-${row.userId}`}>
+      <div className="flex items-center gap-3"><span className="w-6 text-center text-sm font-extrabold text-muted-foreground">{row.rank}</span><div className="grid size-9 place-items-center rounded-full bg-[#1c4533] text-[11px] font-extrabold text-[#a8e6e6]">{initials(row.name)}</div><div className="text-sm font-bold">{row.name}{row.isYou && <span className="ml-1.5 text-[10px] font-bold text-[#e8c34a]">(you)</span>}</div></div>
+      <div className="text-right"><div className="text-sm font-extrabold text-[#e8c34a]">{row.points} pts</div><div className="text-[10px] text-muted-foreground">{row.accuracy}% acc · {row.questionsAnswered} questions · {row.sessions} sessions</div></div>
+    </div>)}{!rows.length && <EmptyState icon={Trophy} title="No activity yet" body="Complete a practice session to appear on the leaderboard." />}</div>
   </div>;
 }
 
@@ -1117,10 +1145,10 @@ function MyFeedbackThread({ item }: { item: MyFeedbackEntry }) {
     onSuccess: () => { setMessage(''); queryClient.invalidateQueries({ queryKey: ['my-feedback'] }); },
     onError: (err: unknown) => toast({ title: 'Could not send reply', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
-  const statusTone = item.status === 'open' ? 'bg-[#fdeecb] text-[#8a5a12]' : item.status === 'replied' ? 'bg-[#dceaf1] text-[#32647b]' : 'bg-[#d7eee4] text-[#164b4b]';
+  const statusTone = item.status === 'open' ? 'bg-[#4e3c12] text-[#e6cda8]' : item.status === 'replied' ? 'bg-[#1c3745] text-[#afd0df]' : 'bg-[#1c4533] text-[#a8e6e6]';
   return <div className="rounded-2xl border border-border bg-card p-5" data-testid={`card-my-feedback-${item.id}`}>
     <div className="flex items-start justify-between gap-4"><div className="flex-1"><div className="flex items-center gap-2"><span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold capitalize">{item.category}</span><span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold capitalize', statusTone)}>{item.status === 'replied' ? 'Team replied' : item.status}</span></div><p className="mt-2 text-sm leading-6">{item.message}</p><div className="mt-2 text-[10px] text-muted-foreground">{new Date(item.createdAt).toLocaleString()}</div></div>{item.replies.length > 0 && <button onClick={() => setOpen((v) => !v)} className="shrink-0 rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold" data-testid={`button-toggle-my-thread-${item.id}`}>{open ? 'Hide' : `${item.replies.length} repl${item.replies.length === 1 ? 'y' : 'ies'}`}</button>}</div>
-    {open && <div className="mt-4 space-y-2 border-t border-border pt-4">{item.replies.map((r) => <div key={r.id} className={cn('max-w-[85%] rounded-xl p-3 text-xs', r.authorRole === 'admin' ? 'bg-[#eef7f1]' : 'ml-auto bg-muted')}><div className="mb-1 text-[10px] font-bold text-muted-foreground">{r.authorRole === 'admin' ? 'Academic team' : 'You'} · {new Date(r.createdAt).toLocaleString()}</div>{r.message}</div>)}</div>}
+    {open && <div className="mt-4 space-y-2 border-t border-border pt-4">{item.replies.map((r) => <div key={r.id} className={cn('max-w-[85%] rounded-xl p-3 text-xs', r.authorRole === 'admin' ? 'bg-[#1c452a]' : 'ml-auto bg-muted')}><div className="mb-1 text-[10px] font-bold text-muted-foreground">{r.authorRole === 'admin' ? 'Academic team' : 'You'} · {new Date(r.createdAt).toLocaleString()}</div>{r.message}</div>)}</div>}
     {item.status !== 'open' && <div className="mt-3 flex gap-2"><textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Reply to the team…" className="min-h-12 flex-1 rounded-xl border border-border bg-background p-2 text-xs" data-testid={`input-my-feedback-reply-${item.id}`} /><button onClick={() => message.trim() && reply.mutate()} disabled={reply.isPending || !message.trim()} className="self-end rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid={`button-send-my-feedback-reply-${item.id}`}>{reply.isPending ? '…' : 'Reply'}</button></div>}
   </div>;
 }
@@ -1133,7 +1161,7 @@ function Feedback() {
   const site = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get, staleTime: 5 * 60 * 1000 });
   const whatsapp = site.data?.SUPPORT_WHATSAPP?.trim();
   return <div className="max-w-xl"><SectionHeader eyebrow="Community" title="Feedback" />
-    {whatsapp && <a href={`https://wa.me/${whatsapp.replace(/[^\d]/g, '')}`} target="_blank" rel="noreferrer" className="mb-5 flex items-center gap-3 rounded-2xl border border-[#8bcbb8]/50 bg-[#eef7f1] p-4 transition hover:border-primary/50" data-testid="link-whatsapp-contact">
+    {whatsapp && <a href={`https://wa.me/${whatsapp.replace(/[^\d]/g, '')}`} target="_blank" rel="noreferrer" className="mb-5 flex items-center gap-3 rounded-2xl border border-[#1c4539]/50 bg-[#1c452a] p-4 transition hover:border-primary/50" data-testid="link-whatsapp-contact">
       <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-[#25D366] text-white"><MessageSquare size={20} /></div>
       <div className="flex-1"><div className="text-sm font-bold">Chat with us on WhatsApp</div><div className="mt-0.5 text-xs text-muted-foreground">Faster than a ticket for quick questions — opens a chat with the academic team.</div></div>
       <ArrowRight size={16} className="text-primary" />
@@ -1147,8 +1175,8 @@ function ExamCard({ exam, onStart }: { exam: StudentExam; onStart: () => void })
   const scopeLabel = `${exam.programTargetKind || 'All Programs'} · ${exam.yearTargetNumber ? `${exam.yearTargetNumber}${['th', 'st', 'nd', 'rd'][exam.yearTargetNumber % 10 > 3 ? 0 : exam.yearTargetNumber % 10]} Year` : 'All Years'}`;
   return <div className="rounded-2xl border border-border bg-card p-5" data-testid={`card-exam-${exam.id}`}>
     <div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-extrabold">{exam.title}</h3><p className="mt-1 text-xs text-muted-foreground">{exam.description}</p></div><Badge tone={exam.windowStatus === 'open' ? 'green' : exam.windowStatus === 'upcoming' ? 'blue' : 'neutral'}>{exam.windowStatus}</Badge></div>
-    <div className="mt-3 flex flex-wrap gap-3 text-[11px] text-muted-foreground"><span className="inline-flex items-center gap-1"><Clock3 size={12} /> {exam.durationMinutes} min</span><span>{scopeLabel}</span><span>{exam.attemptsUsed}/{exam.maxAttempts} attempts used</span>{exam.negativeMarkingEnabled && <span className="inline-flex items-center gap-1 text-[#a34c3e]"><AlertTriangle size={12} /> -{exam.negativeMarkPerWrong} per wrong</span>}</div>
-    <div className="mt-4">{exam.inProgressAttemptId ? <Link href={`/exams/take/${exam.inProgressAttemptId}`} className="inline-flex items-center gap-1.5 rounded-xl bg-[#e5a952] px-4 py-2 text-xs font-bold text-[#183844]" data-testid={`button-resume-exam-${exam.id}`}>Resume exam <ArrowRight size={13} /></Link> : exam.canStart ? <button onClick={onStart} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground" data-testid={`button-start-exam-${exam.id}`}><ClipboardCheck size={14} /> Start exam</button> : <span className="text-[11px] font-semibold text-muted-foreground">{exam.windowStatus === 'upcoming' ? 'Not open yet' : exam.windowStatus === 'closed' ? 'Window closed' : 'No attempts remaining'}</span>}</div>
+    <div className="mt-3 flex flex-wrap gap-3 text-[11px] text-muted-foreground"><span className="inline-flex items-center gap-1"><Clock3 size={12} /> {exam.durationMinutes} min</span><span>{scopeLabel}</span><span>{exam.attemptsUsed}/{exam.maxAttempts} attempts used</span>{exam.negativeMarkingEnabled && <span className="inline-flex items-center gap-1 text-[#e0b5ae]"><AlertTriangle size={12} /> -{exam.negativeMarkPerWrong} per wrong</span>}</div>
+    <div className="mt-4">{exam.inProgressAttemptId ? <Link href={`/exams/take/${exam.inProgressAttemptId}`} className="inline-flex items-center gap-1.5 rounded-xl bg-[#4e3612] px-4 py-2 text-xs font-bold text-[#acd3e2]" data-testid={`button-resume-exam-${exam.id}`}>Resume exam <ArrowRight size={13} /></Link> : exam.canStart ? <button onClick={onStart} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground" data-testid={`button-start-exam-${exam.id}`}><ClipboardCheck size={14} /> Start exam</button> : <span className="text-[11px] font-semibold text-muted-foreground">{exam.windowStatus === 'upcoming' ? `Opens ${new Date(exam.startAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}` : exam.windowStatus === 'closed' ? 'Window closed' : 'No attempts remaining'}</span>}</div>
   </div>;
 }
 

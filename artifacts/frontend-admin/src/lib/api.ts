@@ -228,7 +228,7 @@ export const membershipPlansAdminApi = {
 export interface AdminMcqRow {
   id: number; question: string; options: string[]; correctAnswer: string | null; explanation: string | null; optionExplanations: (string | null)[] | null;
   explanationStatus: ExplanationStatus; reference: string | null; difficulty: string; tags: string[]; imagePath: string | null;
-  status: string; source: string; moduleId: number | null; subjectId: number | null; topicId: number | null; pastPaperId: number | null;
+  status: string; source: string; moduleId: number | null; subjectId: number | null; topicId: number | null; pastPaperId: number | null; examId: number | null;
   createdAt: string; updatedAt: string;
 }
 export const mcqAdminApi = {
@@ -258,7 +258,7 @@ export const mcqImportApi = {
     if (!res.ok) throw new ApiRequestError(res.status, (data && data.error) || 'Could not parse this file', data);
     return data;
   },
-  commit: (body: { moduleId?: number; subjectId?: number; topicId?: number; pastPaperId?: number; status: 'draft' | 'published'; mcqs: McqCandidate[] }) =>
+  commit: (body: { moduleId?: number; subjectId?: number; topicId?: number; pastPaperId?: number; examId?: number; status: 'draft' | 'published'; mcqs: McqCandidate[] }) =>
     request<{ imported: number; ids: number[] }>('/admin/mcq-import/commit', { method: 'POST', body: JSON.stringify(body) }),
 };
 
