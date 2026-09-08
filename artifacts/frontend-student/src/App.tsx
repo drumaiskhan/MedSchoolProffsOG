@@ -1,5 +1,5 @@
 import { type ReactNode, type ComponentProps, useState, useEffect, useRef } from 'react';
-import { QueryClient, QueryClientProvider, useMutation, useQuery } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, Route, Switch, useLocation, useParams, useSearch, Router as WouterRouter } from 'wouter';
 import {
   ArrowLeft, ArrowRight, BookOpen, Check, CheckCircle2, ChevronRight,
@@ -1182,8 +1182,21 @@ function ExamCard({ exam, onStart }: { exam: StudentExam; onStart: () => void })
 
 function Exams() {
   const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
   const q = useQuery({ queryKey: ['exams'], queryFn: examsApi.list });
-  const start = useMutation({ mutationFn: examsApi.start, onSuccess: (res) => setLocation(`/exams/take/${res.attemptId}`) });
+  const start = useMutation({
+    mutationFn: examsApi.start,
+    onSuccess: (res) => setLocation(`/exams/take/${res.attemptId}`),
+    onError: (err: unknown) => {
+      // Previously this failed completely silently — clicking "Start
+      // exam" would just do nothing if the server rejected it (no
+      // questions attached, window closed between page-load and click,
+      // attempts exhausted, etc.). Now the real reason actually reaches
+      // the student instead of looking like a dead button.
+      toast({ title: 'Could not start this exam', description: err instanceof ApiRequestError ? err.message : 'Something went wrong — please try again.', variant: 'destructive' });
+      queryClient.invalidateQueries({ queryKey: ['exams'] });
+    },
+  });
   const exams = q.data || [];
   return <div><SectionHeader eyebrow="Assessment" title="Pre-Proffs Exams" action={<span className="text-[10px] text-muted-foreground">Timed · results follow your admin's release settings</span>} />
     <div className="grid gap-3 sm:grid-cols-2">{exams.map((exam) => <ExamCard key={exam.id} exam={exam} onStart={() => start.mutate(exam.id)} />)}{!exams.length && <EmptyState icon={ClipboardCheck} title="No exams scheduled" body="Your admin hasn't published an exam for your program and year yet." />}</div>

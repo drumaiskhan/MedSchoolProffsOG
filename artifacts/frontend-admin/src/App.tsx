@@ -1731,7 +1731,16 @@ function AdminExams() {
       create.mutate({
         title: String(f.get('title')), description: String(f.get('description') || ''),
         programTargetKind: String(f.get('programTargetKind') || '') || null, yearTargetNumber: f.get('yearTargetNumber') ? Number(f.get('yearTargetNumber')) : null,
-        durationMinutes: Number(f.get('durationMinutes') || 60), startAt: String(f.get('startAt')), endAt: String(f.get('endAt')),
+        // startAt/endAt: the <input type="datetime-local"> value has no
+        // timezone info (e.g. "2026-09-08T14:30"). Sending that raw string
+        // let the SERVER's own timezone (not the admin's) decide what
+        // moment it means — on a UTC-hosted API that silently shifted the
+        // real open/close time by the admin's UTC offset, so an exam
+        // meant to open "now" could sit stuck on "Upcoming" for hours.
+        // `new Date(...)` parses it as the admin's browser-local time,
+        // and `.toISOString()` converts that to the correct absolute UTC
+        // instant before it ever leaves the browser.
+        durationMinutes: Number(f.get('durationMinutes') || 60), startAt: new Date(String(f.get('startAt'))).toISOString(), endAt: new Date(String(f.get('endAt'))).toISOString(),
         maxAttempts: Number(f.get('maxAttempts') || 1), negativeMarkingEnabled: f.get('negativeMarkingEnabled') === 'on', negativeMarkPerWrong: Number(f.get('negativeMarkPerWrong') || 0),
         passingPercent: f.get('passingPercent') ? Number(f.get('passingPercent')) : null, resultReleaseMode: f.get('resultReleaseMode') as Exam['resultReleaseMode'],
         showMarks: f.get('showMarks') === 'on', showPercentage: f.get('showPercentage') === 'on', showCorrectAnswers: f.get('showCorrectAnswers') === 'on', status: 'draft',
