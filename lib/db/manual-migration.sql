@@ -98,4 +98,26 @@ ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS exam_id INTEGER;
 -- ---------------------------------------------------------------------
 ALTER TABLE med_ai_visualizer_logs ADD COLUMN IF NOT EXISTS raw_response TEXT;
 
+-- ---------------------------------------------------------------------
+-- M: Block tier above Modules (Block -> Module -> Subject -> Topic), plus
+-- manual display ordering and a thumbnail image.
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS med_blocks (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  subtitle TEXT NOT NULL DEFAULT '',
+  program_target_kind TEXT,
+  year_target_number INTEGER,
+  icon_path TEXT,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  archived BOOLEAN NOT NULL DEFAULT FALSE,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Nullable — existing modules keep working ungrouped ("Unassigned
+-- modules") until an admin assigns them to a block.
+ALTER TABLE med_modules ADD COLUMN IF NOT EXISTS block_id INTEGER;
+
 COMMIT;

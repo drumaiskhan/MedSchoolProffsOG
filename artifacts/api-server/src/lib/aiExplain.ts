@@ -69,6 +69,11 @@ export interface GeneratedMcq {
   // Index-aligned with `options` — why each option specifically is right or
   // wrong, not just why the correct one is right.
   optionExplanations: string[];
+  // easy | moderate | hard — canonical values, matching medschool.ts's
+  // mcqsTable.difficulty column default and the admin's difficulty selects.
+  // Falls back to "moderate" below if the model omits it or returns
+  // something off-list, same as every other create path in this app.
+  difficulty: string;
 }
 
 function buildPrompt({ question, options, correctAnswer, reference }: ExplanationRequest): string {
@@ -166,13 +171,14 @@ function buildMcqGenerationPrompt({ topicLabel, existingQuestions, count }: McqG
     "Before finalizing each question, check: does this question directly test knowledge of the exact topic named above? If not, discard it and write a different one that does.",
     `Produce exactly ${count} single-best-answer multiple-choice questions (MBBS/BDS level) on "${topicLabel}".`,
     "Each question needs exactly 4 options (A-D equivalent, but return them as a plain string array, not labeled), and one correct answer that must be an exact string match to one of the options.",
+    "Also assign each question a difficulty of exactly \"easy\", \"moderate\", or \"hard\", based on how advanced the reasoning required is for an MBBS/BDS student — vary it across the set rather than making everything the same level.",
     "For EVERY option (not just the correct one), write a short 1-2 sentence explanation of why that specific option is right or wrong — a real distractor-analysis, not just a generic restatement. The correct option's explanation should say why it's correct; each wrong option's explanation should say specifically why it's wrong (e.g. what it's confused with, or what's missing/incorrect about it) — this is what a real exam-prep answer key looks like, not just one blanket explanation for the correct choice.",
     "Vary the sub-topics, question stems, and clinical vs. factual framing across the set so it doesn't feel repetitive.",
     existingBlock,
     `Remember: this entire question set is about "${topicLabel}" — nothing else.`,
     "",
-    "Respond with ONLY a valid JSON array, no prose before or after, no code fences, no introductory sentence, no closing remarks — the response must start with [ and end with ] and contain nothing else, in this exact shape (optionExplanations must have exactly one entry per option, in the same order as options):",
-    '[{"question": "...", "options": ["...", "...", "...", "..."], "correctAnswer": "...", "explanation": "...", "optionExplanations": ["...", "...", "...", "..."]}]',
+    "Respond with ONLY a valid JSON array, no prose before or after, no code fences, no introductory sentence, no closing remarks — the response must start with [ and end with ] and contain nothing else, in this exact shape (optionExplanations must have exactly one entry per option, in the same order as options; difficulty must be exactly \"easy\", \"moderate\", or \"hard\"):",
+    '[{"question": "...", "options": ["...", "...", "...", "..."], "correctAnswer": "...", "explanation": "...", "optionExplanations": ["...", "...", "...", "..."], "difficulty": "moderate"}]',
   ].join("\n");
 }
 
@@ -202,12 +208,15 @@ function parseMcqJson(raw: string): GeneratedMcq[] {
       const optionExplanations = Array.isArray(rawOptionExplanations) && rawOptionExplanations.length === options.length
         ? rawOptionExplanations.map((e) => String(e ?? "").trim())
         : [];
+      const rawDifficulty = String((m as { difficulty?: unknown }).difficulty ?? "").trim().toLowerCase();
+      const difficulty = ["easy", "moderate", "hard"].includes(rawDifficulty) ? rawDifficulty : "moderate";
       return {
         question: String((m as { question: unknown }).question ?? "").trim(),
         options,
         correctAnswer: String((m as { correctAnswer: unknown }).correctAnswer ?? "").trim(),
         explanation: String((m as { explanation: unknown }).explanation ?? "").trim(),
         optionExplanations,
+        difficulty,
       };
     })
     // Drop malformed entries (missing question/options) and ones where the

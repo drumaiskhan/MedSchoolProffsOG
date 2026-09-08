@@ -124,6 +124,27 @@ function withSecretsMasked(view: Record<string, string>): Record<string, string>
   return { ...rest, ...masked };
 }
 
+// One-time backfill for methods saved before accountNumber/accountName lived
+// on the method object itself: older admin UI wrote wallet numbers/account
+// names to dynamically-named keys (PAYMENT_RAAST_NUMBER, PAYMENT_JAZZCASH_
+// ACCOUNT_NAME, etc.) that PUBLIC_PAYMENT_KEYS never exposed to students.
+// Read those legacy keys once per request (cheap — `settings` is already in
+// memory) and copy them onto the matching method, without overwriting a
+// value already saved the new way.
+function backfillMethodAccounts(methods: unknown[], settings: Record<string, string>): unknown[] {
+  return methods.map((raw) => {
+    if (typeof raw !== "object" || raw === null || !("key" in raw)) return raw;
+    const m = raw as { key: string; accountNumber?: string; accountName?: string };
+    const legacyNumber = settings[`PAYMENT_${String(m.key).toUpperCase()}_NUMBER`];
+    const legacyName = settings[`PAYMENT_${String(m.key).toUpperCase()}_ACCOUNT_NAME`];
+    return {
+      ...m,
+      accountNumber: m.accountNumber || legacyNumber || "",
+      accountName: m.accountName || legacyName || "",
+    };
+  });
+}
+
 router.get("/payment-details", async (_req, res): Promise<void> => {
   const settings = await getAllSettings();
   const view: Record<string, string> = Object.fromEntries(PUBLIC_PAYMENT_KEYS.map((key) => [key, settings[key] ?? ""]));
@@ -133,7 +154,7 @@ router.get("/payment-details", async (_req, res): Promise<void> => {
   let methods: unknown[] = [];
   try { bankAccounts = JSON.parse(view.PAYMENT_BANK_ACCOUNTS || "[]"); } catch { bankAccounts = []; }
   try { methods = JSON.parse(view.PAYMENT_METHODS_CONFIG || "[]"); } catch { methods = []; }
-  res.json({ ...withResolvedMedia(view), bankAccounts, methods });
+  res.json({ ...withResolvedMedia(view), bankAccounts, methods: backfillMethodAccounts(methods, settings) });
 });
 
 router.get("/admin/settings", requireAdmin, async (_req, res): Promise<void> => {

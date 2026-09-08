@@ -209,10 +209,25 @@ CREATE TABLE IF NOT EXISTS med_payment_webhook_events (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS med_webhook_event_idx ON med_payment_webhook_events (provider, event_id);
 
+CREATE TABLE IF NOT EXISTS med_blocks (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  subtitle TEXT NOT NULL DEFAULT '',
+  program_target_kind TEXT,
+  year_target_number INTEGER,
+  icon_path TEXT,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  archived BOOLEAN NOT NULL DEFAULT FALSE,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS med_modules (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
   subtitle TEXT NOT NULL,
+  block_id INTEGER,
   program_target_kind TEXT,
   year_target_number INTEGER,
   active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -578,5 +593,7 @@ ALTER TABLE med_membership_plans ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN NOT
 ALTER TABLE med_membership_plans ADD COLUMN IF NOT EXISTS eligibility TEXT;
 ALTER TABLE med_membership_plans ADD COLUMN IF NOT EXISTS original_price NUMERIC(12, 2);
 ALTER TABLE med_membership_plans ADD COLUMN IF NOT EXISTS discount_label TEXT;
+
+ALTER TABLE med_modules ADD COLUMN IF NOT EXISTS block_id INTEGER;
 
 COMMIT;

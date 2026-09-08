@@ -92,7 +92,7 @@ export interface PlatformSettings {
 }
 
 export interface BankAccount { id: string; label: string; accountHolder: string; bankName: string; accountNumber: string; ifsc: string; branch: string; isPrimary: boolean }
-export interface PaymentMethodConfig { key: string; label: string; type: 'bank' | 'wallet' | 'card' | 'cash'; enabled: boolean; instructions: string }
+export interface PaymentMethodConfig { key: string; label: string; type: 'bank' | 'wallet' | 'card' | 'cash'; enabled: boolean; instructions: string; accountNumber?: string; accountName?: string }
 
 export interface AuditLogEntry { id: number; actorId: number | null; actorName: string; action: string; entity: string; entityId: number | null; metadata: string | null; createdAt: string }
 
@@ -138,16 +138,28 @@ export const teamApi = {
   removePermanent: (id: number) => request<{ ok: true }>(`/admin/team-members/${id}/permanent`, { method: 'DELETE' }),
 };
 
-export interface AdminModule { id: number; name: string; subtitle: string; subjectCount: number; topicCount: number; progress: number; active: boolean; programTargetKind?: string | null; yearTargetNumber?: number | null; targetingLabel?: string }
+export interface AdminModule { id: number; name: string; subtitle: string; subjectCount: number; topicCount: number; progress: number; active: boolean; blockId?: number | null; blockName?: string | null; displayOrder?: number; programTargetKind?: string | null; yearTargetNumber?: number | null; targetingLabel?: string }
 
 export const moduleAdminApi = {
   listAll: () => request<AdminModule[]>('/modules'),
-  create: (body: { name: string; subtitle: string; active?: boolean; programTargetKind?: string | null; yearTargetNumber?: number | null }) =>
+  create: (body: { name: string; subtitle: string; active?: boolean; blockId?: number | null; displayOrder?: number; programTargetKind?: string | null; yearTargetNumber?: number | null }) =>
     request<AdminModule>('/modules', { method: 'POST', body: JSON.stringify(body) }),
-  update: (id: number, body: Partial<{ name: string; subtitle: string; active: boolean; programTargetKind: string | null; yearTargetNumber: number | null }>) =>
+  update: (id: number, body: Partial<{ name: string; subtitle: string; active: boolean; blockId: number | null; displayOrder: number; programTargetKind: string | null; yearTargetNumber: number | null }>) =>
     request<AdminModule>(`/modules/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   remove: (id: number) => request<{ ok: true }>(`/modules/${id}`, { method: 'DELETE' }),
   removePermanent: (id: number) => request<{ ok: true }>(`/modules/${id}/permanent`, { method: 'DELETE' }),
+};
+
+export interface AdminBlock { id: number; name: string; subtitle: string; iconUrl: string | null; displayOrder: number; active: boolean; programTargetKind?: string | null; yearTargetNumber?: number | null; targetingLabel?: string }
+
+export const blockAdminApi = {
+  listAll: () => request<AdminBlock[]>('/blocks'),
+  create: (body: { name: string; subtitle?: string; active?: boolean; iconPath?: string | null; displayOrder?: number; programTargetKind?: string | null; yearTargetNumber?: number | null }) =>
+    request<AdminBlock>('/blocks', { method: 'POST', body: JSON.stringify(body) }),
+  update: (id: number, body: Partial<{ name: string; subtitle: string; active: boolean; iconPath: string | null; displayOrder: number; programTargetKind: string | null; yearTargetNumber: number | null }>) =>
+    request<AdminBlock>(`/blocks/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  remove: (id: number) => request<{ ok: true }>(`/blocks/${id}`, { method: 'DELETE' }),
+  removePermanent: (id: number) => request<{ ok: true }>(`/blocks/${id}/permanent`, { method: 'DELETE' }),
 };
 
 export interface Exam {
@@ -241,7 +253,7 @@ export const mcqAdminApi = {
   bulkCreate: (mcqs: Array<Partial<AdminMcqRow> & { question: string; options: string[] }>) =>
     request<{ ok: true; created: number; mcqs: AdminMcqRow[] }>('/admin/mcqs/bulk', { method: 'POST', body: JSON.stringify({ mcqs }) }),
   generateAi: (topicId: number, count: number) =>
-    request<{ drafts: Array<{ question: string; options: string[]; correctAnswer: string; explanation: string; optionExplanations?: (string | null)[] }>; topicLabel: string }>('/admin/mcqs/generate', { method: 'POST', body: JSON.stringify({ topicId, count }) }),
+    request<{ drafts: Array<{ question: string; options: string[]; correctAnswer: string; explanation: string; optionExplanations?: (string | null)[]; difficulty?: string }>; topicLabel: string }>('/admin/mcqs/generate', { method: 'POST', body: JSON.stringify({ topicId, count }) }),
 };
 
 export const mcqImportApi = {
@@ -376,12 +388,13 @@ export const auditApi = {
   list: (limit = 100) => request<AuditLogEntry[]>(`/admin/audit-logs?limit=${limit}`),
 };
 
-export interface AdminBook { id: number; title: string; author: string | null; moduleId: number | null; subjectId: number | null; topicId: number | null; storagePath: string; coverImagePath: string | null; active: boolean }
+export interface AdminBook { id: number; title: string; author: string | null; moduleId: number | null; subjectId: number | null; topicId: number | null; storagePath: string | null; coverImagePath: string | null; active: boolean }
 export const booksAdminApi = {
   list: () => request<AdminBook[]>('/admin/books'),
   create: (body: { title: string; author?: string; moduleId?: number; subjectId?: number; topicId?: number; storagePath: string; coverImagePath?: string }) => request<AdminBook>('/books', { method: 'POST', body: JSON.stringify(body) }),
   remove: (id: number) => request<{ ok: true }>(`/books/${id}`, { method: 'DELETE' }),
   removePermanent: (id: number) => request<{ ok: true }>(`/admin/books/${id}/permanent`, { method: 'DELETE' }),
+  backfillLinks: () => request<{ fixed: number; skipped: number; failed: number }>('/admin/books/backfill-links', { method: 'POST' }),
 };
 
 export async function uploadFile(file: File, kind: 'payment-proof' | 'profile-picture' | 'resource' | 'favicon' | 'book'): Promise<{ storagePath: string; url: string | null }> {

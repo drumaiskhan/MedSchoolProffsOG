@@ -1,4 +1,4 @@
-import { type ReactNode, type ComponentProps, useState, useEffect, useRef } from 'react';
+import { type ReactNode, type ComponentProps, type TouchEvent, useState, useEffect, useRef, createContext, useContext } from 'react';
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, Route, Switch, useLocation, useParams, useSearch, Router as WouterRouter } from 'wouter';
 import {
@@ -30,7 +30,7 @@ import { toast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
-import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, type MyFeedbackEntry, analyticsApi, type ProgressTrend, mcqImportApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, examsAdminApi, examsApi, explanationsApi, booksApi, type AdminBookStudent, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type StudentDetail, type SiteContent, type TeamMember, type AdminModule, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type PaymentDetails, aiVisualizerApi, type VisualizationSpec } from '@/lib/api';
+import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, type MyFeedbackEntry, analyticsApi, type ProgressTrend, mcqImportApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blocksApi, type Block, examsAdminApi, examsApi, explanationsApi, booksApi, type AdminBookStudent, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type StudentDetail, type SiteContent, type TeamMember, type AdminModule, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type PaymentDetails, type PaymentMethodConfig, aiVisualizerApi, type VisualizationSpec } from '@/lib/api';
 import { VisualizationRenderer, isStepBased } from '@/components/visualizer/VisualizationRenderer';
 import { StepControls } from '@/components/visualizer/StepControls';
 import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
@@ -126,6 +126,19 @@ function SideNav({ user, onClose }: { user: User; onClose: () => void }) {
   </aside>;
 }
 
+// "Focus mode" — hides the sidebar/collapses it to a slim exit bar during an
+// active MCQ practice session or exam attempt, both full-screen /
+// distraction-free by intent. Lifted above Shell (rather than local Shell
+// state) so Practice()/TakeExam() can set it from inside their own route.
+const FocusModeContext = createContext<{ focusMode: boolean; setFocusMode: (v: boolean) => void }>({ focusMode: false, setFocusMode: () => {} });
+function useFocusMode(active: boolean) {
+  const { setFocusMode } = useContext(FocusModeContext);
+  useEffect(() => {
+    setFocusMode(active);
+    return () => setFocusMode(false);
+  }, [active, setFocusMode]);
+}
+
 // Every route below is wrapped in <Shell>, so this is the one place that has
 // to enforce "must be signed in" and "must be admin for /admin/*" before
 // rendering real content — a signed-out or under-privileged user should never
@@ -138,6 +151,7 @@ function Shell({ children }: { children: ReactNode }) {
   const [location, setLocation] = useLocation();
   const isMobile = useIsMobile();
   const user = userQuery.data;
+  const { focusMode } = useContext(FocusModeContext);
 
   useEffect(() => {
     if (userQuery.isLoading) return;
@@ -160,6 +174,11 @@ function Shell({ children }: { children: ReactNode }) {
 
   const title = location === '/' ? `Good morning, ${user.name?.split(' ')[0] || 'there'}` : location.slice(1).split('/').map((part) => part.replaceAll('-', ' ')).join(' / ');
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+  // Focus mode: no left nav at all, just a slim top bar with a back/exit
+  // affordance — the full-width real estate goes to the question instead.
+  if (focusMode) return <div className="min-h-[100dvh] bg-background"><header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border/70 bg-background/90 px-4 backdrop-blur-md md:px-8"><button onClick={() => setLocation('/')} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold text-muted-foreground hover:bg-muted" data-testid="button-exit-focus-mode"><ArrowLeft size={15} /> Exit</button><span className="text-xs font-bold capitalize text-foreground">{title}</span></header><div className="page-enter px-5 py-6 md:px-10 md:py-8">{children}</div></div>;
+
   return <div className="flex min-h-[100dvh] bg-background"><div className={cn(menuOpen ? 'block' : 'hidden', 'fixed inset-0 z-30 bg-[#102c37]/40 md:hidden')} onClick={() => setMenuOpen(false)} />{(menuOpen || !isMobile) && <SideNav user={user} onClose={() => setMenuOpen(false)} />}<main className="min-w-0 flex-1"><header className="sticky top-0 z-20 flex h-[72px] items-center justify-between border-b border-border/70 bg-background/90 px-5 backdrop-blur-md md:px-10"><div className="flex items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} data-testid="button-open-menu"><Menu size={20} /></button><div><div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-muted-foreground">{today}</div><h1 className="mt-1 text-[17px] font-bold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="flex items-center gap-2"><Link href="/notifications" className="relative grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted" data-testid="link-notifications"><Bell size={17} /></Link><Link href="/profile" className="ml-1 grid size-9 place-items-center rounded-full bg-[#d7eee4] text-xs font-extrabold text-[#164b4b]" data-testid="link-header-profile">{initials(user.name)}</Link></div></header><div className="page-enter px-5 py-7 md:px-10 md:py-9">{children}</div></main></div>;
 }
 
@@ -167,6 +186,14 @@ function SkeletonPage() { return <div className="space-y-5"><div className="skel
 function EmptyState({ icon: Icon = FolderOpen, title, body, action }: { icon?: typeof FolderOpen; title: string; body: string; action?: ReactNode }) { return <div className="grid min-h-[260px] place-items-center rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center"><div><div className="mx-auto mb-4 grid size-12 place-items-center rounded-2xl bg-muted text-primary"><Icon size={22} /></div><h3 className="font-bold">{title}</h3><p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted-foreground">{body}</p>{action && <div className="mt-5">{action}</div>}</div></div>; }
 function ErrorState({ retry }: { retry?: () => void }) { return <div className="rounded-2xl border border-[#efc7bc] bg-[#fff5f0] p-6 text-sm text-[#9e4c39]"><div className="flex items-center gap-2 font-bold"><CircleHelp size={17} /> We couldn't load this view.</div><p className="mt-2 text-[#a96a5b]">Check your connection, then try again.</p>{retry && <button onClick={retry} className="mt-4 rounded-lg bg-[#a9533f] px-3 py-2 text-xs font-bold text-white" data-testid="button-retry">Try again</button>}</div>; }
 function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'green' | 'amber' | 'red' | 'blue' }) { return <span className={cn('inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold capitalize', tone === 'green' && 'bg-[#d7eee4] text-[#287058]', tone === 'amber' && 'bg-[#fff0cb] text-[#8d6420]', tone === 'red' && 'bg-[#f9ddd6] text-[#a34c3e]', tone === 'blue' && 'bg-[#dceaf1] text-[#32647b]', tone === 'neutral' && 'bg-muted text-muted-foreground')}>{children}</span>; }
+
+// easy -> green, moderate -> blue, hard -> red — was a hardcoded blue
+// regardless of value.
+function difficultyTone(difficulty?: string | null): 'green' | 'blue' | 'red' {
+  if (difficulty === 'easy') return 'green';
+  if (difficulty === 'hard') return 'red';
+  return 'blue';
+}
 function Progress({ value, color = 'bg-primary' }: { value: number; color?: string }) { return <div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className={cn('h-full rounded-full transition-all', color)} style={{ width: `${Math.min(100, Math.max(0, value))}%` }} /></div>; }
 function SectionHeader({ eyebrow, title, action }: { eyebrow?: string; title: string; action?: ReactNode }) { return <div className="mb-5 flex items-end justify-between gap-4"><div>{eyebrow && <div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-primary">{eyebrow}</div>}<h2 className="mt-1 text-[22px] font-extrabold tracking-[-.04em]">{title}</h2></div>{action}</div>; }
 function Stat({ label, value }: { label: string; value: string | number }) { return <div className="rounded-xl bg-card/70 p-3 text-center"><div className="font-display text-2xl">{value}</div><div className="mt-0.5 text-[10px] text-muted-foreground">{label}</div></div>; }
@@ -205,14 +232,49 @@ function Dashboard() {
   </div>}</>;
 }
 
+function ModuleCard({ m, i }: { m: Module; i: number }) {
+  return <Link href={`/modules/${m.id}`} key={m.id} className="card-lift group rounded-2xl border border-border bg-card p-6" data-testid={`card-module-${m.id}`}><div className="flex items-start justify-between"><div className={cn('grid size-11 place-items-center rounded-xl', i % 2 ? 'bg-[#fff0cb] text-[#94651c]' : 'bg-[#d7eee4] text-[#287058]')}><BookOpen size={20} /></div><ChevronRight size={18} className="text-muted-foreground transition-transform group-hover:translate-x-0.5" /></div><h3 className="mt-6 text-lg font-extrabold tracking-[-.03em]">{m.name}</h3><p className="mt-1 text-xs text-muted-foreground">{m.subtitle}</p><div className="mt-7 flex items-center justify-between text-[11px] text-muted-foreground"><span>{m.subjectCount} subject{m.subjectCount === 1 ? '' : 's'} · {m.mcqCount} question{m.mcqCount === 1 ? '' : 's'}</span><span className="font-mono-app text-foreground">{m.progress}%</span></div><div className="mt-2"><Progress value={m.progress} color={i % 2 ? 'bg-[#e5a952]' : 'bg-primary'} /></div><div className="mt-5 flex items-center gap-1 text-xs font-bold text-primary opacity-80 group-hover:opacity-100">Open module <ArrowRight size={14} /></div></Link>;
+}
+
 function Modules() {
   const q = useListModules(); const modules = q.data ?? []; const [search, setSearch] = useState('');
+  const blocksQ = useQuery({ queryKey: ['blocks'], queryFn: blocksApi.list });
+  const blocks = (blocksQ.data ?? []).filter((b) => b.active).sort((a, b) => a.displayOrder - b.displayOrder);
   const overviewQ = useQuery({ queryKey: ['practice-overview'], queryFn: analyticsApi.practiceOverview });
   const overview = overviewQ.data;
   const filtered = modules.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()));
+
+  // Group filtered modules by their block (Block A -> its modules, matching
+  // the admin structure), with an "Other modules" bucket for anything with
+  // no block assigned yet — same convention as the admin's "Unassigned".
+  const modulesByBlock = new Map<number, Module[]>();
+  const unassigned: Module[] = [];
+  for (const m of filtered) {
+    const blockId = (m as Module & { blockId?: number | null }).blockId;
+    if (blockId != null) {
+      if (!modulesByBlock.has(blockId)) modulesByBlock.set(blockId, []);
+      modulesByBlock.get(blockId)!.push(m);
+    } else unassigned.push(m);
+  }
+  const hasBlocks = blocks.length > 0;
+
   return <>{q.isLoading ? <SkeletonPage /> : <div><SectionHeader eyebrow="Curriculum map" title="Learning modules" action={<div className="flex gap-2"><div className="relative"><Search className="absolute left-3 top-2.5 text-muted-foreground" size={15} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Find a module" className="h-9 w-40 rounded-xl border border-border bg-card pl-9 pr-3 text-xs outline-none focus:ring-2 focus:ring-primary/20" data-testid="input-search-modules" /></div></div>} />
     {overview && <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4"><Stat label="Total topics" value={overview.totalTopics} /><Stat label="Total questions" value={overview.totalQuestions} /><Stat label="Avg questions" value={overview.avgQuestions} />{overview.avgDurationMinutes > 0 && <Stat label="Avg duration" value={`${overview.avgDurationMinutes} min`} />}</div>}
-    <div className="grid gap-4 md:grid-cols-2">{filtered.map((m, i) => <Link href={`/modules/${m.id}`} key={m.id} className="card-lift group rounded-2xl border border-border bg-card p-6" data-testid={`card-module-${m.id}`}><div className="flex items-start justify-between"><div className={cn('grid size-11 place-items-center rounded-xl', i % 2 ? 'bg-[#fff0cb] text-[#94651c]' : 'bg-[#d7eee4] text-[#287058]')}><BookOpen size={20} /></div><ChevronRight size={18} className="text-muted-foreground transition-transform group-hover:translate-x-0.5" /></div><h3 className="mt-6 text-lg font-extrabold tracking-[-.03em]">{m.name}</h3><p className="mt-1 text-xs text-muted-foreground">{m.subtitle}</p><div className="mt-7 flex items-center justify-between text-[11px] text-muted-foreground"><span>{m.subjectCount} subject{m.subjectCount === 1 ? '' : 's'} · {m.mcqCount} question{m.mcqCount === 1 ? '' : 's'}</span><span className="font-mono-app text-foreground">{m.progress}%</span></div><div className="mt-2"><Progress value={m.progress} color={i % 2 ? 'bg-[#e5a952]' : 'bg-primary'} /></div><div className="mt-5 flex items-center gap-1 text-xs font-bold text-primary opacity-80 group-hover:opacity-100">Open module <ArrowRight size={14} /></div></Link>)}</div>{!filtered.length && <EmptyState icon={BookOpen} title={modules.length ? 'No modules found' : 'No modules yet'} body={modules.length ? 'Try a shorter search or explore the full curriculum.' : 'Your academic team hasn\'t published any modules yet.'} />}</div>}</>;
+    {hasBlocks ? <div className="space-y-9">
+      {blocks.map((b) => {
+        const list = modulesByBlock.get(b.id) ?? [];
+        if (!list.length) return null;
+        return <section key={b.id}>
+          <div className="mb-4 flex items-center gap-3"><div className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-xl bg-[#eef7f1] text-primary">{b.iconUrl ? <img src={b.iconUrl} alt="" className="size-full object-cover" /> : <Library size={16} />}</div><h2 className="font-display text-xl tracking-[-.02em]">{b.name}</h2></div>
+          <div className="grid gap-4 md:grid-cols-2">{list.map((m, i) => <ModuleCard key={m.id} m={m} i={i} />)}</div>
+        </section>;
+      })}
+      {unassigned.length > 0 && <section>
+        <div className="mb-4 flex items-center gap-3"><div className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground"><Library size={16} /></div><h2 className="font-display text-xl tracking-[-.02em] text-muted-foreground">Other modules</h2></div>
+        <div className="grid gap-4 md:grid-cols-2">{unassigned.map((m, i) => <ModuleCard key={m.id} m={m} i={i} />)}</div>
+      </section>}
+    </div> : <div className="grid gap-4 md:grid-cols-2">{filtered.map((m, i) => <ModuleCard key={m.id} m={m} i={i} />)}</div>}
+    {!filtered.length && <EmptyState icon={BookOpen} title={modules.length ? 'No modules found' : 'No modules yet'} body={modules.length ? 'Try a shorter search or explore the full curriculum.' : 'Your academic team hasn\'t published any modules yet.'} />}</div>}</>;
 }
 
 function Subjects({ topics = false }: { topics?: boolean }) {
@@ -256,9 +318,22 @@ function Practice() {
   const [remainingSeconds, setRemainingSeconds] = useState(0);
   const mcqs: Mcq[] = q.data ?? [];
   const current = mcqs[index];
+  // Focus mode: on for the duration of an active session (mode chosen,
+  // not yet finished) — off during setup and on the results screen.
+  useFocusMode(mode !== null && !finished);
   const sessionStartRef = useRef<number>(Date.now());
   const submitAnswer = useMutation({ mutationFn: analyticsApi.submitSession });
   const saveNote = useMutation({ mutationFn: notebookApi.create });
+  const reportFlag = useMutation({
+    mutationFn: flaggedMcqsApi.create,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['flagged-mcqs'] }),
+    onError: (err: unknown) => toast({ title: 'Could not flag this question', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
+  const saveSession = useMutation({
+    mutationFn: savedSessionsApi.create,
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['saved-sessions'] }); toast({ title: 'Session saved', description: 'Find it later on the Saved Sessions page.' }); },
+    onError: (err: unknown) => toast({ title: 'Could not save this session', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
   // current can be undefined while loading/empty — askAi's mutationFn is only
   // ever invoked from a click once `current` is guaranteed to exist below,
   // but the hook itself must still be declared unconditionally every render.
@@ -304,6 +379,12 @@ function Practice() {
           <button onClick={() => { setMode('timed'); setRemainingSeconds(mcqs.length * 90); sessionStartRef.current = Date.now(); }} className="card-lift rounded-2xl border-2 border-primary bg-[#eef7f1] p-5 text-left" data-testid="button-mode-timed"><Clock3 size={18} className="text-primary" /><div className="mt-3 text-sm font-extrabold text-[#164b4b]">Timed</div><p className="mt-1 text-[11px] text-muted-foreground">A countdown timer, exam-style — {Math.round(mcqs.length * 1.5)} min for this set.</p></button>
           <button onClick={() => { setMode('untimed'); sessionStartRef.current = Date.now(); }} className="card-lift rounded-2xl border border-border bg-card p-5 text-left" data-testid="button-mode-untimed"><Target size={18} className="text-muted-foreground" /><div className="mt-3 text-sm font-extrabold">Untimed</div><p className="mt-1 text-[11px] text-muted-foreground">Go at your own pace, no clock on screen.</p></button>
         </div>
+        <button
+          onClick={() => saveSession.mutate({ name: `Practice — ${new Date().toLocaleDateString()}`, config: { topicId, pastPaperId } })}
+          disabled={saveSession.isPending}
+          className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-border px-4 py-2.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-50"
+          data-testid="button-save-session"
+        ><Bookmark size={14} /> {saveSession.isPending ? 'Saving…' : 'Save this filter for later'}</button>
       </div>
     </div>;
   }
@@ -312,11 +393,19 @@ function Practice() {
 
   const selectOption = (option: string) => { if (paused) return; setAnswers((prev) => ({ ...prev, [current.id]: option })); };
   const goTo = (i: number) => { setIndex(i); setPanel(null); askAi.reset(); };
-  // Session-local "flag for review" (like a real exam engine's flag icon) —
-  // distinct from the separate flaggedMcqsApi "report this question to
-  // admin" feature used on the standalone Flagged MCQs page. Deliberately
-  // not persisted past this session.
-  const toggleFlag = () => setFlaggedIds((prev) => { const next = new Set(prev); next.has(current.id) ? next.delete(current.id) : next.add(current.id); return next; });
+  // Flag icon does double duty: it drives the session-local "flag for
+  // review" highlight in the number grid (like a real exam engine), AND —
+  // when turning a flag ON — persists a report via flaggedMcqsApi so it
+  // actually shows up on the standalone Flagged MCQs page for the student
+  // (and admins) to revisit later. Un-flagging only clears the in-session
+  // highlight; it doesn't delete the persisted report (use the Flagged MCQs
+  // page's Remove button for that).
+  const toggleFlag = () => setFlaggedIds((prev) => {
+    const next = new Set(prev);
+    if (next.has(current.id)) { next.delete(current.id); }
+    else { next.add(current.id); reportFlag.mutate({ mcqId: current.id, reason: 'Flagged during practice session' }); }
+    return next;
+  });
   const saveQuestion = () => { if (savedIds.has(current.id)) return; saveNote.mutate({ content: current.question, mcqId: current.id }); setSavedIds((prev) => new Set(prev).add(current.id)); };
   const mm = String(Math.floor(remainingSeconds / 60)).padStart(2, '0');
   const ss = String(remainingSeconds % 60).padStart(2, '0');
@@ -333,7 +422,7 @@ function Practice() {
       <div className="flex items-center justify-between text-xs font-bold"><span className="flex items-center gap-1.5"><Clock3 size={14} /> Timer</span>{mode === 'timed' ? <span className={cn('font-mono-app rounded-full px-2.5 py-1 text-[11px]', remainingSeconds < 60 ? 'bg-[#fff1ed] text-[#a34c3e]' : 'bg-[#d7eee4] text-[#287058]')} data-testid="text-timer">{mm}:{ss}</span> : <span className="text-[11px] font-normal text-muted-foreground">Untimed</span>}</div>
       <div className="mt-3 text-[11px] text-muted-foreground">{percentAnswered}% answered</div>
       <div className="mt-1"><Progress value={percentAnswered} /></div>
-      <div className="mt-3 text-[11px] text-muted-foreground">Difficulty: <Badge tone="blue">{current.difficulty}</Badge></div>
+      <div className="mt-3 text-[11px] text-muted-foreground">Difficulty: <Badge tone={difficultyTone(current.difficulty)}>{current.difficulty}</Badge></div>
     </div>
     <button onClick={() => setPaused((p) => !p)} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#32647b] px-4 py-3 text-xs font-extrabold text-white" data-testid="button-pause-session">{paused ? <><Zap size={14} /> Resume</> : <><Clock3 size={14} /> Pause</>}</button>
     <button onClick={saveQuestion} disabled={savedIds.has(current.id)} className={cn('flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-xs font-extrabold', savedIds.has(current.id) ? 'bg-[#e6dcf3] text-[#6a4c93]' : 'bg-gradient-to-r from-[#6a4c93] to-[#815276] text-white')} data-testid="button-save-question"><Bookmark size={14} /> {savedIds.has(current.id) ? 'Saved to notebook' : 'Save'}</button>
@@ -346,15 +435,15 @@ function Practice() {
 
   if (paused) {
     return <div className="max-w-6xl"><SectionHeader eyebrow="Daily practice" title="Practice with purpose" />
-      <div className="grid gap-6 xl:grid-cols-[280px_1fr]"><div className="xl:order-1">{controlPanel}</div><div className="rounded-3xl border border-border bg-card p-9 text-center xl:order-2"><Clock3 size={28} className="mx-auto text-muted-foreground" /><h2 className="mt-4 font-display text-xl">Session paused</h2><p className="mt-2 text-xs text-muted-foreground">Your progress and timer are on hold. Hit Resume in the panel to keep going.</p></div></div>
+      <div className="grid gap-6 lg:grid-cols-[280px_1fr]"><div className="order-2 lg:order-1">{controlPanel}</div><div className="order-1 rounded-3xl border border-border bg-card p-9 text-center lg:order-2"><Clock3 size={28} className="mx-auto text-muted-foreground" /><h2 className="mt-4 font-display text-xl">Session paused</h2><p className="mt-2 text-xs text-muted-foreground">Your progress and timer are on hold. Hit Resume in the panel to keep going.</p></div></div>
     </div>;
   }
 
   return <div className="max-w-6xl"><SectionHeader eyebrow="Daily practice" title="Practice with purpose" action={<span className="font-mono-app text-[11px] text-muted-foreground">{index + 1} / {mcqs.length}</span>} />
-    <div className="grid gap-6 xl:grid-cols-[280px_1fr]">
-      <div className="xl:order-1">{controlPanel}</div>
-      <div className="rounded-3xl border border-border bg-card p-5 sm:p-6 md:p-9 xl:order-2">
-        <div className="flex items-center justify-between"><Badge tone="blue">{current.difficulty}</Badge><button onClick={toggleFlag} className={cn('rounded-lg p-1.5', flaggedIds.has(current.id) ? 'text-[#e5a952]' : 'text-muted-foreground hover:text-foreground')} data-testid="button-flag-question"><Flag size={17} fill={flaggedIds.has(current.id) ? 'currentColor' : 'none'} /></button></div>
+    <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
+      <div className="order-2 lg:order-1">{controlPanel}</div>
+      <div className="order-1 rounded-3xl border border-border bg-card p-5 sm:p-6 md:p-9 lg:order-2">
+        <div className="flex items-center justify-between"><Badge tone={difficultyTone(current.difficulty)}>{current.difficulty}</Badge><button onClick={toggleFlag} className={cn('rounded-lg p-1.5', flaggedIds.has(current.id) ? 'text-[#e5a952]' : 'text-muted-foreground hover:text-foreground')} data-testid="button-flag-question"><Flag size={17} fill={flaggedIds.has(current.id) ? 'currentColor' : 'none'} /></button></div>
         <h2 className="mt-6 max-w-2xl text-lg font-extrabold leading-7 tracking-[-.025em] sm:text-xl sm:leading-8">{current.question}</h2>
         <div className="mt-7 space-y-3">{current.options.map((option, i) => <button key={option} onClick={() => selectOption(option)} className={cn('flex w-full items-center gap-3 rounded-xl border p-4 text-left text-sm transition-colors', answers[current.id] === option ? 'border-primary bg-[#e6f3ed]' : 'border-border hover:bg-muted')} data-testid={`button-answer-${i}`}><span className="grid size-7 shrink-0 place-items-center rounded-lg bg-muted font-mono-app text-[11px]">{String.fromCharCode(65 + i)}</span><span className="flex-1">{option}</span></button>)}</div>
 
@@ -500,15 +589,17 @@ function Flashcards() {
             data-testid={`button-flip-flashcard-${c.id}`}
           >
             {/* Front — the question */}
-            <div className="card-lift absolute inset-0 flex flex-col rounded-2xl border bg-card p-6 [backface-visibility:hidden]" style={{ ...accent.border, ...accent.wash }}>
+            <div className="card-lift absolute inset-0 flex flex-col overflow-hidden rounded-2xl border bg-card p-6 [backface-visibility:hidden]" style={{ ...accent.border, ...accent.wash }}>
+              <div aria-hidden className="pointer-events-none absolute -right-6 -top-8 size-24 rotate-12 rounded-2xl border-[8px] border-current opacity-[0.06]" />
               <div className="flex flex-wrap items-center gap-2"><span className="rounded-full border border-border bg-card px-2.5 py-1 text-[10px] font-bold">Question {i + 1}</span><TopicBadge label={c.topic} /></div>
               <div className="flex flex-1 items-center justify-center"><p className="text-center text-base font-bold leading-7">{c.front}</p></div>
               <div className="flex flex-wrap items-center justify-center gap-2"><Badge tone="neutral">{c.module}</Badge></div>
               <div className="mt-3 text-center text-[11px] font-semibold text-muted-foreground transition-colors group-hover:text-foreground">Click to reveal the answer</div>
             </div>
             {/* Back — the answer, distinct tint so flip state is unmistakable */}
-            <div className="absolute inset-0 flex flex-col rounded-2xl border p-6 shadow-sm [backface-visibility:hidden]" style={{ transform: 'rotateY(180deg)', ...accent.border, background: 'hsl(var(--card))' }}>
-              <div className="flex flex-wrap items-center gap-2"><span className="rounded-full px-2.5 py-1 text-[10px] font-bold" style={accent.badge}>Answer</span><TopicBadge label={c.topic} /></div>
+            <div className="absolute inset-0 flex flex-col overflow-hidden rounded-2xl border p-6 shadow-sm [backface-visibility:hidden]" style={{ transform: 'rotateY(180deg)', ...accent.border, background: 'hsl(var(--card))' }}>
+              <div aria-hidden className="pointer-events-none absolute -bottom-8 -left-6 size-20 rounded-full border-[8px] border-current opacity-[0.06]" />
+              <div className="flex flex-wrap items-center gap-2"><span className="rounded-full px-2.5 py-1 text-[10px] font-bold" style={accent.badge}>Answer {i + 1}</span><TopicBadge label={c.topic} /></div>
               <div className="flex flex-1 items-center justify-center"><p className="text-center text-base font-bold leading-7">{c.back}</p></div>
               <div className="flex flex-wrap items-center justify-center gap-2"><Badge tone="neutral">{c.module}</Badge></div>
               <div className="mt-3 text-center text-[11px] font-semibold text-muted-foreground">Click to flip back</div>
@@ -522,10 +613,25 @@ function Flashcards() {
   const cardAccent = topicAccentStyles(card.topic || card.module);
   const stillLearningCount = Object.values(known).filter((v) => v === false).length;
   const reviewedCount = Object.keys(known).length;
+  const cardNumber = (index % cards.length) + 1;
+
+  const goPrev = () => { setIndex((i) => Math.max(0, i - 1)); setFlipped(false); askAi.reset(); };
+  const goNext = () => { setIndex((i) => (i + 1) % cards.length); setFlipped(false); askAi.reset(); };
+
+  // Minimal inline swipe hook — horizontal drag past a 50px threshold
+  // triggers Next (swipe left) / Previous (swipe right). No library needed
+  // for one gesture; small enough to keep next to the component that uses it.
+  const touchStartX = { current: 0 };
+  const onTouchStart = (e: TouchEvent) => { touchStartX.current = e.touches[0].clientX; };
+  const onTouchEnd = (e: TouchEvent) => {
+    const delta = e.changedTouches[0].clientX - touchStartX.current;
+    if (Math.abs(delta) < 50) return;
+    if (delta < 0) goNext(); else goPrev();
+  };
 
   return <div className="mx-auto max-w-3xl">{header}{toolbar}{statCards}{filterBar}
     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-      <span className="font-mono-app text-[11px] text-muted-foreground">Card {(index % cards.length) + 1} of {cards.length}</span>
+      <span className="font-mono-app text-[11px] text-muted-foreground">Card {cardNumber} of {cards.length}</span>
       <div className="flex items-center gap-2 text-[11px] font-bold">
         {knownCount > 0 && <span className="inline-flex items-center gap-1 rounded-full bg-[#d7eee4] px-2.5 py-1 text-[#287058]"><ThumbsUp size={11} /> {knownCount} known</span>}
         {stillLearningCount > 0 && <span className="inline-flex items-center gap-1 rounded-full bg-[#fff0cb] px-2.5 py-1 text-[#8d6420]"><ThumbsDown size={11} /> {stillLearningCount} learning</span>}
@@ -533,10 +639,34 @@ function Flashcards() {
     </div>
     <div className="mb-4"><Progress value={(reviewedCount / cards.length) * 100} color="bg-primary" /></div>
     <div className="mb-4 flex justify-center gap-1.5">{cards.map((c, i) => <div key={c.id} className={cn('h-1.5 w-6 rounded-full transition-colors', i === index % cards.length ? 'bg-primary' : known[c.id] === true ? 'bg-[#8bcbb8]' : known[c.id] === false ? 'bg-[#e5a952]' : 'bg-muted')} />)}</div>
-    <div className="[perspective:1600px]"><button onClick={() => setFlipped(!flipped)} className="relative min-h-[350px] w-full [transform-style:preserve-3d] transition-transform duration-500 ease-out hover:-translate-y-0.5 active:scale-[.99] md:min-h-[420px]" style={{ transform: flipped ? 'rotateY(180deg)' : 'none' }} data-testid="button-flashcard">
-      <div className="absolute inset-0 flex flex-col rounded-3xl border p-9 text-left text-[#eaf2e9] shadow-lg [backface-visibility:hidden] md:p-14" style={{ background: `linear-gradient(155deg, hsl(var(${topicColorVar(card.topic || card.module)}) / 0.92), hsl(208 40% 14%))` }}><div className="flex items-center justify-between text-[10px] uppercase tracking-[.18em] text-[#eaf2e9]/70"><span>{card.module}</span><span>Prompt</span></div><div className="flex flex-1 items-center justify-center text-center"><h2 className="mx-auto max-w-xl font-display text-3xl leading-tight md:text-5xl">{card.front}</h2></div><div className="flex justify-center text-xs text-[#eaf2e9]/70">Click to reveal the answer <ArrowRight size={14} className="ml-2" /></div></div>
-      <div className="absolute inset-0 flex flex-col rounded-3xl border p-9 text-left shadow-lg [backface-visibility:hidden] md:p-14" style={{ transform: 'rotateY(180deg)', background: `hsl(var(${topicColorVar(card.topic || card.module)}) / 0.1)`, ...cardAccent.border }}><div className="flex items-center justify-between text-[10px] uppercase tracking-[.18em]" style={{ color: `hsl(var(${topicColorVar(card.topic || card.module)}))` }}><span>{card.topic}</span><span>Answer</span></div><div className="flex flex-1 items-center justify-center text-center"><h2 className="mx-auto max-w-xl font-display text-2xl leading-tight text-[#164b4b] md:text-4xl">{card.back}</h2></div><div className="flex justify-center text-xs" style={{ color: `hsl(var(${topicColorVar(card.topic || card.module)}))` }}>Rate yourself below</div></div>
-    </button></div>
+    <div className="flex items-center gap-2 sm:gap-4">
+      <button onClick={goPrev} disabled={index === 0} className="hidden shrink-0 rounded-xl border border-border bg-card p-3 text-muted-foreground disabled:opacity-30 disabled:pointer-events-none hover:bg-muted sm:grid sm:place-items-center" data-testid="button-flashcard-prev" aria-label="Previous card"><ArrowLeft size={16} /></button>
+      <div className="flex-1 [perspective:1600px]" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}><button onClick={() => setFlipped(!flipped)} className="relative min-h-[350px] w-full [transform-style:preserve-3d] transition-transform duration-500 ease-out hover:-translate-y-0.5 active:scale-[.99] md:min-h-[420px]" style={{ transform: flipped ? 'rotateY(180deg)' : 'none' }} data-testid="button-flashcard">
+        {/* Front — same badge row / footer language as the grid card's front face, just at single-card scale, plus 3 low-opacity decorative shapes behind the content so grid and study read as one design language. */}
+        <div className="absolute inset-0 flex flex-col overflow-hidden rounded-3xl border p-9 text-left text-[#eaf2e9] shadow-lg [backface-visibility:hidden] md:p-14" style={{ background: `linear-gradient(155deg, hsl(var(${topicColorVar(card.topic || card.module)}) / 0.92), hsl(208 40% 14%))` }}>
+          <div aria-hidden className="pointer-events-none absolute -right-10 -top-14 size-48 rotate-12 rounded-[2rem] border-[14px] border-white/10" />
+          <div aria-hidden className="pointer-events-none absolute -bottom-16 -left-8 size-40 rounded-full border-[10px] border-white/10" />
+          <div className="relative flex flex-wrap items-center gap-2"><span className="rounded-full border border-white/20 bg-white/10 px-2.5 py-1 text-[10px] font-bold">Question {cardNumber}</span><TopicBadge label={card.topic} /></div>
+          <div className="relative flex flex-1 items-center justify-center text-center"><h2 className="mx-auto max-w-xl font-display text-3xl leading-tight md:text-5xl">{card.front}</h2></div>
+          <div className="relative flex flex-wrap items-center justify-center gap-2"><Badge tone="neutral">{card.module}</Badge></div>
+          <div className="relative mt-3 flex justify-center text-xs text-[#eaf2e9]/70">Click to reveal the answer <ArrowRight size={14} className="ml-2" /></div>
+        </div>
+        {/* Back — same tinted-card language as the grid card's back face */}
+        <div className="absolute inset-0 flex flex-col overflow-hidden rounded-3xl border p-9 text-left shadow-lg [backface-visibility:hidden] md:p-14" style={{ transform: 'rotateY(180deg)', background: `hsl(var(${topicColorVar(card.topic || card.module)}) / 0.1)`, ...cardAccent.border }}>
+          <div aria-hidden className="pointer-events-none absolute -right-8 -bottom-12 size-40 rotate-12 rounded-[2rem]" style={{ ...cardAccent.wash }} />
+          <div className="relative flex flex-wrap items-center gap-2"><span className="rounded-full px-2.5 py-1 text-[10px] font-bold" style={cardAccent.badge}>Answer {cardNumber}</span><TopicBadge label={card.topic} /></div>
+          <div className="relative flex flex-1 items-center justify-center text-center"><h2 className="mx-auto max-w-xl font-display text-2xl leading-tight text-[#164b4b] md:text-4xl">{card.back}</h2></div>
+          <div className="relative flex flex-wrap items-center justify-center gap-2"><Badge tone="neutral">{card.module}</Badge></div>
+          <div className="relative mt-3 text-center text-xs" style={{ color: `hsl(var(${topicColorVar(card.topic || card.module)}))` }}>Click to flip back</div>
+        </div>
+      </button></div>
+      <button onClick={goNext} className="hidden shrink-0 rounded-xl border border-border bg-card p-3 text-muted-foreground hover:bg-muted sm:grid sm:place-items-center" data-testid="button-flashcard-next" aria-label="Next card"><ArrowRight size={16} /></button>
+    </div>
+    {/* Mobile equivalents of the Prev/Next buttons above, hidden on sm+ where the flanking arrows already do the job */}
+    <div className="mt-3 flex justify-center gap-3 sm:hidden">
+      <button onClick={goPrev} disabled={index === 0} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold text-muted-foreground disabled:opacity-30" data-testid="button-flashcard-prev-mobile"><ArrowLeft size={13} /> Previous</button>
+      <button onClick={goNext} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold text-muted-foreground" data-testid="button-flashcard-next-mobile">Next <ArrowRight size={13} /></button>
+    </div>
     {flipped && <div className="mt-4 flex justify-center">{!askAi.data ? <button onClick={() => askAi.mutate()} disabled={askAi.isPending} className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-[#eef7f1] px-3 py-1.5 text-[11px] font-bold text-primary disabled:opacity-50" data-testid="button-ask-ai-flashcard">{askAi.isPending ? 'Thinking…' : <><Sparkles size={11} /> Ask AI to explain differently</>}</button> : <div className="max-w-xl rounded-xl bg-[#eef7f1] p-3 text-xs leading-5"><div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-primary"><Sparkles size={10} /> AI explanation</div>{askAi.data.explanation}</div>}{askAi.isError && <p className="mt-2 text-[11px] font-semibold text-destructive">{askAi.error instanceof ApiRequestError ? askAi.error.message : 'Could not reach AI right now.'}</p>}</div>}
     <div className="mt-6 flex justify-center gap-3">{flipped ? <><button onClick={() => advance(false)} className="inline-flex items-center gap-2 rounded-xl border border-[#e5a952] bg-[#fff0cb] px-5 py-3 text-xs font-bold text-[#8a5a12] transition-transform hover:-translate-y-0.5" data-testid="button-still-learning"><ThumbsDown size={14} /> Still learning</button><button onClick={() => advance(true)} className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-xs font-bold text-primary-foreground transition-transform hover:-translate-y-0.5" data-testid="button-know-it"><ThumbsUp size={14} /> I know this</button></> : <button onClick={() => setFlipped(true)} className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-6 py-3 text-xs font-bold hover:bg-muted" data-testid="button-reveal-card">Reveal answer <ChevronRight size={14} /></button>}</div>
     <div className="mt-3 flex justify-center"><button onClick={resetDeck} className="inline-flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground hover:text-foreground" data-testid="button-restart-deck"><RotateCcw size={12} /> Restart deck</button></div>
@@ -648,10 +778,11 @@ function Books() {
   const filtered = books.filter((b) => `${b.title} ${b.author ?? ''}`.toLowerCase().includes(search.toLowerCase()));
 
   return <div><SectionHeader eyebrow="Library" title="Books" action={<div className="relative"><Search className="absolute left-3 top-2.5 text-muted-foreground" size={15} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search books" className="h-9 w-44 rounded-xl border border-border bg-card pl-9 pr-3 text-xs outline-none focus:ring-2 focus:ring-primary/20" data-testid="input-search-books" /></div>} />
-    {filtered.length ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{filtered.map((b) => <a key={b.id} href={resolveUploadUrl(b.storagePath) || undefined} target="_blank" rel="noreferrer" className="card-lift rounded-2xl border border-border bg-card p-4" data-testid={`row-book-${b.id}`}>
+    {filtered.length ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{filtered.map((b) => { const url = resolveUploadUrl(b.storagePath); const Card = url ? 'a' : 'div'; return <Card key={b.id} {...(url ? { href: url, target: '_blank', rel: 'noreferrer' } : {})} className={cn('card-lift rounded-2xl border border-border bg-card p-4', !url && 'opacity-60')} data-testid={`row-book-${b.id}`}>
       {b.coverImagePath ? <img src={resolveUploadUrl(b.coverImagePath) ?? undefined} alt="" className="mb-3 h-36 w-full rounded-lg object-cover" /> : <div className="mb-3 grid h-36 w-full place-items-center rounded-lg bg-[#eef7f1]"><BookOpen size={26} className="text-primary" /></div>}
       <h3 className="text-sm font-bold leading-5">{b.title}</h3>{b.author && <p className="mt-1 text-xs text-muted-foreground">{b.author}</p>}
-    </a>)}</div> : <EmptyState icon={BookOpen} title="No books yet" body="Your admin hasn't added any books to the library yet." />}
+      {!url && <p className="mt-1.5 text-[10px] font-bold text-destructive">Unavailable right now — ask your admin to re-upload this book.</p>}
+    </Card>; })}</div> : <EmptyState icon={BookOpen} title="No books yet" body="Your admin hasn't added any books to the library yet." />}
   </div>;
 }
 
@@ -671,23 +802,50 @@ function Notifications() {
 // array yet), and the QR code if one's been uploaded. Shared by the
 // membership page and the sign-up flow so both stay in sync automatically.
 function PaymentDestinationCard({ pd }: { pd?: PaymentDetails }) {
-  if (!pd) return null;
-  const methods = (pd.methods || []).filter((m) => m.enabled);
-  const accounts = pd.bankAccounts?.length ? pd.bankAccounts : (pd.PAYMENT_ACCOUNT_HOLDER || pd.PAYMENT_BANK_NAME || pd.PAYMENT_ACCOUNT_NUMBER)
+  const accounts = pd?.bankAccounts?.length ? pd.bankAccounts : (pd?.PAYMENT_ACCOUNT_HOLDER || pd?.PAYMENT_BANK_NAME || pd?.PAYMENT_ACCOUNT_NUMBER)
     ? [{ id: 'legacy', label: 'Bank account', accountHolder: pd.PAYMENT_ACCOUNT_HOLDER, bankName: pd.PAYMENT_BANK_NAME, accountNumber: pd.PAYMENT_ACCOUNT_NUMBER, ifsc: pd.PAYMENT_IFSC_OR_ROUTING, branch: '', isPrimary: true }]
     : [];
-  const hasAnything = accounts.length || methods.length || pd.PAYMENT_UPI_ID || pd.PAYMENT_RAAST_ID || pd.PAYMENT_WALLET_NUMBER;
+  const methods = (pd?.methods || []).filter((m) => m.enabled);
+  // Selectable destinations: the primary/each bank account, plus each
+  // enabled non-bank method (wallets, cash). "Bank Transfer" as a method
+  // entry is skipped here since the actual bank accounts already cover it.
+  type Destination = { key: string; label: string; icon: 'bank' | 'wallet' | 'cash'; account?: (typeof accounts)[number]; method?: PaymentMethodConfig };
+  const destinations: Destination[] = [
+    ...accounts.map((a) => ({ key: `bank_${a.id}`, label: a.label || a.bankName || 'Bank account', icon: 'bank' as const, account: a })),
+    ...methods.filter((m) => m.type !== 'bank').map((m) => ({ key: `method_${m.key}`, label: m.label, icon: (m.type === 'wallet' ? 'wallet' : 'cash') as const, method: m })),
+  ];
+  const primaryIndex = Math.max(0, destinations.findIndex((d) => d.account?.isPrimary));
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  useEffect(() => { if (!selectedKey && destinations.length) setSelectedKey(destinations[primaryIndex]?.key ?? destinations[0].key); }, [destinations.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!pd) return null;
+  const hasAnything = destinations.length || pd.PAYMENT_UPI_ID || pd.PAYMENT_RAAST_ID || pd.PAYMENT_WALLET_NUMBER;
   if (!hasAnything) return null;
+  const selected = destinations.find((d) => d.key === selectedKey) ?? destinations[0];
 
   return <div className="rounded-2xl border border-border bg-muted p-4"><div className="mb-3 flex items-center gap-1.5 text-xs font-extrabold"><Landmark size={14} /> Where to send payment</div>
     {pd.PAYMENT_INSTRUCTIONS && <p className="mb-3 text-[11px] leading-5 text-muted-foreground">{pd.PAYMENT_INSTRUCTIONS}</p>}
-    {!!accounts.length && <div className="space-y-3">{accounts.map((a) => <div key={a.id} className={cn('rounded-xl bg-card p-3', accounts.length > 1 && 'border border-border')}>{accounts.length > 1 && <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold">{a.label || a.bankName}{a.isPrimary && <span className="rounded-full bg-[#d7eee4] px-1.5 py-0.5 text-[9px] text-[#164b4b]">Primary</span>}</div>}<div className="grid gap-1.5 sm:grid-cols-2">{a.accountHolder && <CopyRow label="Account holder" value={a.accountHolder} />}{a.bankName && <CopyRow label="Bank" value={a.bankName} />}{a.accountNumber && <CopyRow label="Account number" value={a.accountNumber} />}{a.ifsc && <CopyRow label="IFSC / routing" value={a.ifsc} />}</div></div>)}</div>}
-    {(!!methods.length ? methods.some((m) => m.type === 'wallet') : !!pd.PAYMENT_WALLET_NUMBER) || pd.PAYMENT_UPI_ID || pd.PAYMENT_RAAST_ID ? <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
+    {destinations.length > 1 && <div className="mb-3 flex flex-wrap gap-1.5" role="radiogroup" aria-label="Payment method">{destinations.map((d) => <button key={d.key} type="button" onClick={() => setSelectedKey(d.key)} className={cn('inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold', selectedKey === d.key ? 'bg-primary text-primary-foreground' : 'border border-border bg-card text-muted-foreground')} data-testid={`button-select-payment-method-${d.key}`}>{d.icon === 'bank' ? <Landmark size={12} /> : d.icon === 'wallet' ? <Smartphone size={12} /> : <CreditCard size={12} />}{d.label}</button>)}</div>}
+    {selected?.account && <div className="rounded-xl bg-card p-3">
+      {selected.account.isPrimary && destinations.length > 1 && <div className="mb-1.5"><span className="rounded-full bg-[#d7eee4] px-1.5 py-0.5 text-[9px] font-bold text-[#164b4b]">Primary</span></div>}
+      <div className="grid gap-1.5 sm:grid-cols-2">
+        {selected.account.accountHolder && <CopyRow label="Account holder" value={selected.account.accountHolder} />}
+        {selected.account.bankName && <CopyRow label="Bank" value={selected.account.bankName} />}
+        {selected.account.accountNumber && <CopyRow label="Account number" value={selected.account.accountNumber} />}
+        {selected.account.ifsc && <CopyRow label="IFSC / routing" value={selected.account.ifsc} />}
+      </div>
+    </div>}
+    {selected?.method && <div className="rounded-xl bg-card p-3">
+      <div className="grid gap-1.5 sm:grid-cols-2">
+        {selected.method.accountNumber && <CopyRow label={`${selected.method.label} number`} value={selected.method.accountNumber} />}
+        {selected.method.accountName && <CopyRow label="Account name" value={selected.method.accountName} />}
+      </div>
+      {selected.method.instructions && <p className="mt-2 text-[11px] leading-5 text-muted-foreground">{selected.method.instructions}</p>}
+    </div>}
+    {!destinations.length && (pd.PAYMENT_UPI_ID || pd.PAYMENT_RAAST_ID || pd.PAYMENT_WALLET_NUMBER) && <div className="grid gap-1.5 sm:grid-cols-2">
       {pd.PAYMENT_UPI_ID && <CopyRow label="UPI ID" value={pd.PAYMENT_UPI_ID} />}
       {pd.PAYMENT_RAAST_ID && <CopyRow label="Raast ID" value={pd.PAYMENT_RAAST_ID} />}
       {pd.PAYMENT_WALLET_NUMBER && <CopyRow label={pd.PAYMENT_WALLET_PROVIDER || 'Wallet'} value={pd.PAYMENT_WALLET_NUMBER} />}
-    </div> : null}
-    {methods.some((m) => m.instructions) && <div className="mt-3 space-y-1 border-t border-border pt-3">{methods.filter((m) => m.instructions).map((m) => <p key={m.key} className="text-[11px] leading-5 text-muted-foreground"><span className="font-bold text-foreground">{m.label}:</span> {m.instructions}</p>)}</div>}
+    </div>}
     {pd.PAYMENT_QR_CODE_URL && <div className="mt-3 flex justify-center border-t border-border pt-3"><img src={pd.PAYMENT_QR_CODE_URL} alt="Payment QR code" className="max-h-32 rounded-lg border border-border object-contain" /></div>}
   </div>;
 }
@@ -1069,13 +1227,21 @@ function Notebook() {
 
 function SavedSessions() {
   const sessions = useQuery({ queryKey: ['saved-sessions'], queryFn: savedSessionsApi.list });
-  const remove = useMutation({ mutationFn: savedSessionsApi.remove, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['saved-sessions'] }) });
-  return <div><SectionHeader eyebrow="Your tools" title="Saved Sessions" /><div className="space-y-3">{(sessions.data || []).map((session: SavedSession) => <div key={session.id} className="flex items-center justify-between rounded-2xl border border-border bg-card p-4" data-testid={`card-session-${session.id}`}><div><div className="text-sm font-extrabold">{session.name}</div><div className="text-[11px] text-muted-foreground">Saved {new Date(session.createdAt).toLocaleDateString()}</div></div><div className="flex gap-2"><Link href="/practice" className="rounded-lg border border-border px-3 py-1.5 text-xs font-bold" data-testid={`button-resume-session-${session.id}`}>Resume</Link><button onClick={() => remove.mutate(session.id)} className="rounded-lg border border-border px-3 py-1.5 text-xs font-bold text-destructive" data-testid={`button-delete-session-${session.id}`}>Delete</button></div></div>)}{!sessions.data?.length && <EmptyState icon={Bookmark} title="No saved sessions" body="Save a practice filter set from the Practice page to quickly resume it later." />}</div></div>;
+  const remove = useMutation({ mutationFn: savedSessionsApi.remove, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['saved-sessions'] }), onError: (err: unknown) => toast({ title: 'Could not delete session', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
+  const resumeHref = (session: SavedSession) => {
+    const config = (session.config ?? {}) as { topicId?: number; pastPaperId?: number };
+    const qs = new URLSearchParams();
+    if (config.topicId) qs.set('topic', String(config.topicId));
+    if (config.pastPaperId) qs.set('pastPaperId', String(config.pastPaperId));
+    const q = qs.toString();
+    return q ? `/practice?${q}` : '/practice';
+  };
+  return <div><SectionHeader eyebrow="Your tools" title="Saved Sessions" /><div className="space-y-3">{(sessions.data || []).map((session: SavedSession) => <div key={session.id} className="flex items-center justify-between rounded-2xl border border-border bg-card p-4" data-testid={`card-session-${session.id}`}><div><div className="text-sm font-extrabold">{session.name}</div><div className="text-[11px] text-muted-foreground">Saved {new Date(session.createdAt).toLocaleDateString()}</div></div><div className="flex gap-2"><Link href={resumeHref(session)} className="rounded-lg border border-border px-3 py-1.5 text-xs font-bold" data-testid={`button-resume-session-${session.id}`}>Resume</Link><button onClick={() => remove.mutate(session.id)} className="rounded-lg border border-border px-3 py-1.5 text-xs font-bold text-destructive" data-testid={`button-delete-session-${session.id}`}>Delete</button></div></div>)}{!sessions.data?.length && <EmptyState icon={Bookmark} title="No saved sessions" body="Save a practice filter set from the Practice page to quickly resume it later." />}</div></div>;
 }
 
 function FlaggedMcqs() {
   const flags = useQuery({ queryKey: ['flagged-mcqs'], queryFn: flaggedMcqsApi.list });
-  const remove = useMutation({ mutationFn: flaggedMcqsApi.remove, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['flagged-mcqs'] }) });
+  const remove = useMutation({ mutationFn: flaggedMcqsApi.remove, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['flagged-mcqs'] }), onError: (err: unknown) => toast({ title: 'Could not remove flag', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
   return <div><SectionHeader eyebrow="Your tools" title="Flagged MCQs" action={<span className="text-[10px] text-muted-foreground">Questions you marked for review</span>} /><div className="space-y-3">{(flags.data || []).map((flag: FlaggedMcq) => <div key={flag.id} className="flex items-center justify-between rounded-2xl border border-border bg-card p-4" data-testid={`card-flag-${flag.id}`}><div><div className="text-sm font-bold">MCQ #{flag.mcqId}</div>{flag.reason && <div className="text-[11px] text-muted-foreground">{flag.reason}</div>}<span className={cn('mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-bold', flag.status === 'open' ? 'bg-[#fdeecb] text-[#8a5a12]' : 'bg-[#d7eee4] text-[#164b4b]')}>{flag.status}</span></div><button onClick={() => remove.mutate(flag.id)} className="rounded-lg border border-border px-3 py-1.5 text-xs font-bold text-destructive" data-testid={`button-unflag-${flag.id}`}>Remove</button></div>)}{!flags.data?.length && <EmptyState icon={Flag} title="Nothing flagged" body="Flag a question from a practice session to come back to it later." />}</div></div>;
 }
 
@@ -1212,6 +1378,11 @@ function TakeExam() {
   const [answers, setAnswers] = useState<Record<number, string | null>>({});
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // On for the whole time this screen is mounted — TakeExam is only ever
+  // reached mid-attempt, so unlike Practice() there's no separate
+  // setup/results state to gate on; unmount (navigating to the result page
+  // included) turns it back off via useFocusMode's cleanup.
+  useFocusMode(true);
   const submit = useMutation({ mutationFn: () => examsApi.submit(attemptId), onSuccess: () => setLocation(`/exams/result/${attemptId}`) });
   const saveAnswer = useMutation({ mutationFn: ({ mcqId, selectedAnswer }: { mcqId: number; selectedAnswer: string | null }) => examsApi.answer(attemptId, mcqId, selectedAnswer) });
 
@@ -1248,7 +1419,7 @@ function TakeExam() {
   const selectAnswer = (opt: string) => { setAnswers((prev) => ({ ...prev, [current.id]: opt })); saveAnswer.mutate({ mcqId: current.id, selectedAnswer: opt }); };
 
   return <div className="max-w-4xl"><div className="mb-5 flex items-center justify-between rounded-2xl border border-border bg-card px-5 py-3"><div className="text-xs font-bold">Question {index + 1} / {session.questions.length} <span className="ml-2 text-muted-foreground">{answeredCount} answered</span></div><div className={cn('flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-extrabold', secondsLeft !== null && secondsLeft < 60 ? 'bg-destructive/10 text-destructive' : 'bg-muted')}><Clock3 size={13} /> {String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}</div></div>
-    <div className="rounded-3xl border border-border bg-card p-6 md:p-9"><Badge tone="blue">{current.difficulty}</Badge><h2 className="mt-6 text-xl font-extrabold leading-8">{current.question}</h2><div className="mt-7 space-y-3">{current.options.map((opt, i) => <button key={opt} onClick={() => selectAnswer(opt)} className={cn('flex w-full items-center gap-3 rounded-xl border p-4 text-left text-sm transition-colors', answers[current.id] === opt ? 'border-primary bg-[#e6f3ed]' : 'border-border hover:bg-muted')} data-testid={`button-exam-answer-${i}`}><span className="grid size-7 shrink-0 place-items-center rounded-lg bg-muted font-mono-app text-[11px]">{String.fromCharCode(65 + i)}</span>{opt}</button>)}</div></div>
+    <div className="rounded-3xl border border-border bg-card p-6 md:p-9"><Badge tone={difficultyTone(current.difficulty)}>{current.difficulty}</Badge><h2 className="mt-6 text-xl font-extrabold leading-8">{current.question}</h2><div className="mt-7 space-y-3">{current.options.map((opt, i) => <button key={opt} onClick={() => selectAnswer(opt)} className={cn('flex w-full items-center gap-3 rounded-xl border p-4 text-left text-sm transition-colors', answers[current.id] === opt ? 'border-primary bg-[#e6f3ed]' : 'border-border hover:bg-muted')} data-testid={`button-exam-answer-${i}`}><span className="grid size-7 shrink-0 place-items-center rounded-lg bg-muted font-mono-app text-[11px]">{String.fromCharCode(65 + i)}</span>{opt}</button>)}</div></div>
     <div className="mt-5 flex flex-wrap items-center justify-between gap-3"><div className="flex gap-2"><button disabled={index === 0} onClick={() => setIndex((i) => i - 1)} className="rounded-xl border border-border bg-card px-4 py-2.5 text-xs font-bold disabled:opacity-40" data-testid="button-exam-prev">Previous</button><button disabled={index === session.questions.length - 1} onClick={() => setIndex((i) => i + 1)} className="rounded-xl border border-border bg-card px-4 py-2.5 text-xs font-bold disabled:opacity-40" data-testid="button-exam-next">Next</button></div><button onClick={() => setConfirming(true)} className="rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-exam-finish">Submit exam</button></div>
     <div className="mt-4 flex flex-wrap gap-1.5">{session.questions.map((q, i) => <button key={q.id} onClick={() => setIndex(i)} className={cn('grid size-8 place-items-center rounded-lg text-[11px] font-bold', i === index ? 'bg-primary text-primary-foreground' : answers[q.id] != null ? 'bg-[#d7eee4] text-[#164b4b]' : 'bg-muted text-muted-foreground')} data-testid={`button-exam-nav-${i}`}>{i + 1}</button>)}</div>
     {confirming && <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"><div className="w-full max-w-sm rounded-2xl bg-card p-6"><h3 className="font-bold">Submit this exam?</h3><p className="mt-2 text-xs text-muted-foreground">You've answered {answeredCount} of {session.questions.length} questions. This can't be undone.</p><div className="mt-5 flex gap-2"><button onClick={() => setConfirming(false)} className="flex-1 rounded-xl border border-border py-2.5 text-xs font-bold" data-testid="button-cancel-submit">Keep going</button><button onClick={() => submit.mutate()} disabled={submit.isPending} className="flex-1 rounded-xl bg-primary py-2.5 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-confirm-submit">{submit.isPending ? 'Submitting…' : 'Submit'}</button></div></div></div>}
@@ -1283,5 +1454,8 @@ function useFaviconSync() {
 function AppRoutes() {
  useFaviconSync();
  return <Switch><Route path="/login" component={Login} /><Route path="/register" component={Register} /><Route path="/forgot-password" component={ForgotPassword} /><Route path="/reset-password" component={ResetPassword} /><Route path="/verify-email" component={VerifyEmail} /><Route path="/"><Shell><Dashboard /></Shell></Route><Route path="/modules"><Shell><Modules /></Shell></Route><Route path="/modules/:id"><Shell><Subjects /></Shell></Route><Route path="/subjects"><Shell><Subjects /></Shell></Route><Route path="/subjects/:id"><Shell><Subjects topics /></Shell></Route><Route path="/topics"><Shell><Subjects topics /></Shell></Route><Route path="/practice"><Shell><Practice /></Shell></Route><Route path="/exams"><Shell><Exams /></Shell></Route><Route path="/exams/take/:attemptId"><Shell><TakeExam /></Shell></Route><Route path="/exams/result/:attemptId"><Shell><ExamResult /></Shell></Route><Route path="/past-papers"><Shell><PastPapers /></Shell></Route><Route path="/flashcards"><Shell><Flashcards /></Shell></Route><Route path="/ai-visualizer"><Shell><AiVisualizer /></Shell></Route><Route path="/books"><Shell><Books /></Shell></Route><Route path="/resources"><Shell><Resources /></Shell></Route><Route path="/notebook"><Shell><Notebook /></Shell></Route><Route path="/saved-sessions"><Shell><SavedSessions /></Shell></Route><Route path="/flagged-mcqs"><Shell><FlaggedMcqs /></Shell></Route><Route path="/leaderboard"><Shell><Leaderboard /></Shell></Route><Route path="/notifications"><Shell><Notifications /></Shell></Route><Route path="/payments"><Shell><Payments /></Shell></Route><Route path="/feedback"><Shell><Feedback /></Shell></Route><Route path="/profile"><Shell><Profile /></Shell></Route><Route component={NotFound} /></Switch>; }
-function App() { return <QueryClientProvider client={queryClient}><TooltipProvider><WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}><ErrorBoundary><AppRoutes /></ErrorBoundary></WouterRouter><Toaster /></TooltipProvider></QueryClientProvider>; }
+function App() {
+  const [focusMode, setFocusMode] = useState(false);
+  return <QueryClientProvider client={queryClient}><TooltipProvider><FocusModeContext.Provider value={{ focusMode, setFocusMode }}><WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}><ErrorBoundary><AppRoutes /></ErrorBoundary></WouterRouter><Toaster /></FocusModeContext.Provider></TooltipProvider></QueryClientProvider>;
+}
 export default App;

@@ -44,6 +44,7 @@ import {
   membershipPlansTable,
   paymentsTable,
   membershipsTable,
+  blocksTable,
   modulesTable,
   subjectsTable,
   practiceAttemptsTable,
@@ -154,7 +155,7 @@ async function paymentView(payment: typeof paymentsTable.$inferSelect) {
     method: payment.method,
     reference: payment.reference,
     paymentDate: payment.paymentDate,
-    proofPath: resolveFileUrl(payment.proofPath) ?? payment.proofPath,
+    proofPath: resolveFileUrl(payment.proofPath),
     status: payment.status,
     submittedAt: payment.createdAt.toISOString(),
   };
@@ -164,7 +165,7 @@ router.get("/student/dashboard", requireAuth, async (req, res): Promise<void> =>
   const userId = req.user!.id;
   const weekAgo = new Date();
   weekAgo.setDate(weekAgo.getDate() - 7);
-  const [moduleRows, notificationRows, membership, user, weeklyAttempts, topicAttemptRows, [streakRow]] = await Promise.all([
+  const [moduleRows, notificationRows, membership, user, weeklyAttempts, questionAttemptRows, [streakRow]] = await Promise.all([
     db.select().from(modulesTable).where(eq(modulesTable.active, true)).orderBy(modulesTable.displayOrder),
     db.select().from(notificationsTable).where(or(eq(notificationsTable.userId, userId), sql`${notificationsTable.userId} IS NULL`)).orderBy(desc(notificationsTable.createdAt)).limit(4),
     db.select().from(membershipsTable).where(and(eq(membershipsTable.userId, userId), eq(membershipsTable.status, "ACTIVE"))).orderBy(desc(membershipsTable.expiresAt)).limit(1),
@@ -172,39 +173,40 @@ router.get("/student/dashboard", requireAuth, async (req, res): Promise<void> =>
     // "Weekly goal" progress: number of practice sessions completed in the
     // last 7 days (the frontend shows this against a fixed target of 5).
     db.select({ count: sql<number>`count(*)` }).from(practiceAttemptsTable).where(and(eq(practiceAttemptsTable.userId, userId), gte(practiceAttemptsTable.createdAt, weekAgo))),
-    // Distinct topics this student has attempted at least once, per module —
-    // used as a simple "coverage" progress metric until spaced-repetition
-    // mastery tracking exists. Joined through topics/subjects rather than
-    // trusting practiceAttemptsTable.moduleId, since Practice only ever
-    // sends topicId today.
-    db.selectDistinct({ moduleId: subjectsTable.moduleId, topicId: practiceAttemptsTable.topicId })
-      .from(practiceAttemptsTable)
-      .innerJoin(topicsTable, eq(topicsTable.id, practiceAttemptsTable.topicId))
-      .innerJoin(subjectsTable, eq(subjectsTable.id, topicsTable.subjectId))
-      .where(and(eq(practiceAttemptsTable.userId, userId), sql`${practiceAttemptsTable.topicId} IS NOT NULL`)),
+    // Distinct MCQs this student has actually answered at least once, per
+    // module — question-level, not topic-level (see fix-brief section 7: a
+    // module with only 1 topic but 30 questions used to hit 1/1 = 100% the
+    // instant a single question was answered, regardless of how many of the
+    // 30 the student had actually done).
+    db.selectDistinct({ moduleId: mcqsTable.moduleId, mcqId: practiceAnswersTable.mcqId })
+      .from(practiceAnswersTable)
+      .innerJoin(practiceAttemptsTable, eq(practiceAttemptsTable.id, practiceAnswersTable.attemptId))
+      .innerJoin(mcqsTable, eq(mcqsTable.id, practiceAnswersTable.mcqId))
+      .where(and(eq(practiceAttemptsTable.userId, userId), sql`${mcqsTable.moduleId} IS NOT NULL`)),
     // userView() is a deliberately limited public projection that doesn't
     // include streak fields — fetch separately rather than widen it.
     db.select({ currentStreak: usersTable.currentStreak }).from(usersTable).where(eq(usersTable.id, userId)),
   ]);
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
 
-  const attemptedTopicsByModule = new Map<number, Set<number>>();
-  for (const row of topicAttemptRows) {
-    if (row.moduleId == null || row.topicId == null) continue;
-    if (!attemptedTopicsByModule.has(row.moduleId)) attemptedTopicsByModule.set(row.moduleId, new Set());
-    attemptedTopicsByModule.get(row.moduleId)!.add(row.topicId);
+  const attemptedQuestionsByModule = new Map<number, Set<number>>();
+  for (const row of questionAttemptRows) {
+    if (row.moduleId == null) continue;
+    if (!attemptedQuestionsByModule.has(row.moduleId)) attemptedQuestionsByModule.set(row.moduleId, new Set());
+    attemptedQuestionsByModule.get(row.moduleId)!.add(row.mcqId);
   }
 
-  let totalTopics = 0;
-  let totalAttemptedTopics = 0;
+  let totalQuestions = 0;
+  let totalAttemptedQuestions = 0;
   const modules = await Promise.all(moduleRows.map(async (module) => {
     const [subjectCount] = await db.select({ count: sql<number>`count(*)` }).from(subjectsTable).where(eq(subjectsTable.moduleId, module.id));
     const [topicCount] = await db.select({ count: sql<number>`count(*)` }).from(topicsTable).innerJoin(subjectsTable, eq(topicsTable.subjectId, subjectsTable.id)).where(eq(subjectsTable.moduleId, module.id));
-    const topics = Number(topicCount?.count ?? 0);
-    const attempted = attemptedTopicsByModule.get(module.id)?.size ?? 0;
-    totalTopics += topics;
-    totalAttemptedTopics += attempted;
-    return { id: module.id, name: module.name, subtitle: module.subtitle, subjectCount: Number(subjectCount?.count ?? 0), topicCount: topics, progress: topics ? Math.round((attempted / topics) * 100) : 0, active: module.active };
+    const [mcqCount] = await db.select({ count: sql<number>`count(*)` }).from(mcqsTable).where(and(eq(mcqsTable.moduleId, module.id), eq(mcqsTable.status, "published")));
+    const questions = Number(mcqCount?.count ?? 0);
+    const attempted = attemptedQuestionsByModule.get(module.id)?.size ?? 0;
+    totalQuestions += questions;
+    totalAttemptedQuestions += attempted;
+    return { id: module.id, name: module.name, subtitle: module.subtitle, subjectCount: Number(subjectCount?.count ?? 0), topicCount: Number(topicCount?.count ?? 0), progress: questions ? Math.round((attempted / questions) * 100) : 0, active: module.active };
   }));
 
   const activeMembership = membership[0];
@@ -213,7 +215,7 @@ router.get("/student/dashboard", requireAuth, async (req, res): Promise<void> =>
     user,
     membershipStatus: activeMembership ? "ACTIVE" : "INACTIVE",
     membershipExpiry: activeMembership ? activeMembership.expiresAt.toISOString() : null,
-    progress: totalTopics ? Math.round((totalAttemptedTopics / totalTopics) * 100) : 0,
+    progress: totalQuestions ? Math.round((totalAttemptedQuestions / totalQuestions) * 100) : 0,
     weeklyGoal: Number(weeklyAttempts[0]?.count ?? 0),
     streak: streakRow?.currentStreak ?? 0,
     modules,
@@ -413,6 +415,93 @@ router.delete("/payments/:id/permanent", requireAdmin, async (req, res): Promise
   res.json({ ok: true });
 });
 
+// ---------------------------------------------------------------------------
+// Blocks — top-level curriculum grouping above Modules (Block -> Module ->
+// Subject -> Topic). Mirrors the /modules routes below 1:1: list is open to
+// any authenticated user (student "Modules" page groups by block too),
+// mutations are admin-only. See PROJECT-BRIEF.md / fix-brief section 1.
+// ---------------------------------------------------------------------------
+
+router.get("/blocks", requireAuth, async (req, res): Promise<void> => {
+  const isAdmin = isAdminRole(req.user!.role);
+  const rows = await db.select().from(blocksTable)
+    .where(isAdmin ? undefined : eq(blocksTable.active, true))
+    .orderBy(blocksTable.displayOrder);
+  res.json(rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    subtitle: row.subtitle,
+    iconUrl: resolveFileUrl(row.iconPath),
+    displayOrder: row.displayOrder,
+    active: row.active,
+    ...(isAdmin ? { programTargetKind: row.programTargetKind, yearTargetNumber: row.yearTargetNumber, targetingLabel: describeModuleTargeting(row.programTargetKind, row.yearTargetNumber) } : {}),
+  })));
+});
+
+const BlockBody = z.object({
+  name: z.string().min(1),
+  subtitle: z.string().optional(),
+  active: z.boolean().optional(),
+  iconPath: z.string().nullable().optional(),
+  displayOrder: z.number().int().optional(),
+  programTargetKind: z.string().max(40).nullable().optional(),
+  yearTargetNumber: z.number().int().min(1).max(5).nullable().optional(),
+});
+
+router.post("/blocks", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = BlockBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const [maxRow] = await db.select({ max: sql<number>`coalesce(max(${blocksTable.displayOrder}), -1)` }).from(blocksTable);
+  const [block] = await db.insert(blocksTable).values({
+    name: parsed.data.name,
+    subtitle: parsed.data.subtitle ?? "",
+    active: parsed.data.active ?? true,
+    iconPath: parsed.data.iconPath ?? null,
+    displayOrder: parsed.data.displayOrder ?? Number(maxRow?.max ?? -1) + 1,
+    programTargetKind: parsed.data.programTargetKind ? parsed.data.programTargetKind.trim().toUpperCase() : null,
+    yearTargetNumber: parsed.data.yearTargetNumber ?? null,
+  }).returning();
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "BLOCK_CREATED", entity: "block", entityId: block.id });
+  res.status(201).json({ id: block.id, name: block.name, subtitle: block.subtitle, iconUrl: resolveFileUrl(block.iconPath), displayOrder: block.displayOrder, active: block.active });
+});
+
+router.patch("/blocks/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const parsed = BlockBody.partial().safeParse(req.body);
+  if (!parsed.success || Number.isNaN(id)) { res.status(400).json({ error: "Invalid block" }); return; }
+  const { programTargetKind, yearTargetNumber, ...rest } = parsed.data;
+  const [block] = await db.update(blocksTable).set({
+    ...rest,
+    ...(programTargetKind !== undefined ? { programTargetKind: programTargetKind ? programTargetKind.trim().toUpperCase() : null } : {}),
+    ...(yearTargetNumber !== undefined ? { yearTargetNumber } : {}),
+  }).where(eq(blocksTable.id, id)).returning();
+  if (!block) { res.status(404).json({ error: "Block not found" }); return; }
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "BLOCK_UPDATED", entity: "block", entityId: block.id });
+  res.json({ id: block.id, name: block.name, subtitle: block.subtitle, iconUrl: resolveFileUrl(block.iconPath), displayOrder: block.displayOrder, active: block.active, programTargetKind: block.programTargetKind, yearTargetNumber: block.yearTargetNumber, targetingLabel: describeModuleTargeting(block.programTargetKind, block.yearTargetNumber) });
+});
+
+router.delete("/blocks/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const [block] = await db.update(blocksTable).set({ active: false, archived: true }).where(eq(blocksTable.id, id)).returning();
+  if (!block) { res.status(404).json({ error: "Block not found" }); return; }
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "BLOCK_ARCHIVED", entity: "block", entityId: block.id });
+  res.json({ ok: true });
+});
+
+// Hard delete — only reachable once already archived, same convention as
+// modules' permanent delete. Un-assigns (does not delete) any modules that
+// were in this block, so no module or its subjects/topics/MCQs are lost.
+router.delete("/blocks/:id/permanent", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) { res.status(400).json({ error: "Invalid block id" }); return; }
+  const [block] = await db.select().from(blocksTable).where(eq(blocksTable.id, id));
+  if (!block) { res.status(404).json({ error: "Block not found" }); return; }
+  await db.update(modulesTable).set({ blockId: null }).where(eq(modulesTable.blockId, id));
+  await db.delete(blocksTable).where(eq(blocksTable.id, id));
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "BLOCK_PERMANENTLY_DELETED", entity: "block", entityId: id });
+  res.json({ ok: true });
+});
+
 router.get("/modules", requireAuth, async (req, res): Promise<void> => {
   const params = ListModulesQueryParams.safeParse(req.query);
   if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
@@ -428,47 +517,61 @@ router.get("/modules", requireAuth, async (req, res): Promise<void> => {
     visibleIds ? inArray(modulesTable.id, visibleIds) : undefined,
   )).orderBy(modulesTable.displayOrder);
 
-  // Real per-module progress (was hardcoded to 0 here — same underlying
-  // formula GET /student/dashboard already computes correctly: distinct
-  // topics this student has attempted at least once, divided by the
-  // module's total topic count. Ported here since this is the endpoint the
-  // actual Modules page calls, not the dashboard one.
-  const topicAttemptRows = await db.selectDistinct({ moduleId: subjectsTable.moduleId, topicId: practiceAttemptsTable.topicId })
-    .from(practiceAttemptsTable)
-    .innerJoin(topicsTable, eq(topicsTable.id, practiceAttemptsTable.topicId))
-    .innerJoin(subjectsTable, eq(subjectsTable.id, topicsTable.subjectId))
-    .where(and(eq(practiceAttemptsTable.userId, req.user!.id), sql`${practiceAttemptsTable.topicId} IS NOT NULL`));
-  const attemptedTopicsByModule = new Map<number, Set<number>>();
-  for (const r of topicAttemptRows) {
-    if (r.moduleId == null || r.topicId == null) continue;
-    if (!attemptedTopicsByModule.has(r.moduleId)) attemptedTopicsByModule.set(r.moduleId, new Set());
-    attemptedTopicsByModule.get(r.moduleId)!.add(r.topicId);
+  const blockRows = await db.select({ id: blocksTable.id, name: blocksTable.name }).from(blocksTable);
+  const blockNameById = new Map(blockRows.map((b) => [b.id, b.name]));
+
+  // Real per-module progress (was hardcoded to 0 here) — question-level
+  // coverage, matching GET /student/dashboard's fix (fix-brief section 7):
+  // distinct MCQs this student has actually answered at least once, divided
+  // by the module's total published question count. Topic-level counting
+  // hit 100% the instant a single question was answered in a module with
+  // only 1 topic, however many questions that topic actually had.
+  const questionAttemptRows = await db.selectDistinct({ moduleId: mcqsTable.moduleId, mcqId: practiceAnswersTable.mcqId })
+    .from(practiceAnswersTable)
+    .innerJoin(practiceAttemptsTable, eq(practiceAttemptsTable.id, practiceAnswersTable.attemptId))
+    .innerJoin(mcqsTable, eq(mcqsTable.id, practiceAnswersTable.mcqId))
+    .where(and(eq(practiceAttemptsTable.userId, req.user!.id), sql`${mcqsTable.moduleId} IS NOT NULL`));
+  const attemptedQuestionsByModule = new Map<number, Set<number>>();
+  for (const r of questionAttemptRows) {
+    if (r.moduleId == null) continue;
+    if (!attemptedQuestionsByModule.has(r.moduleId)) attemptedQuestionsByModule.set(r.moduleId, new Set());
+    attemptedQuestionsByModule.get(r.moduleId)!.add(r.mcqId);
   }
 
   const withCounts = await Promise.all(rows.map(async (row) => {
     const counts = await getModuleCounts(row.id);
-    const attempted = attemptedTopicsByModule.get(row.id)?.size ?? 0;
-    const progress = counts.topicCount ? Math.round((attempted / counts.topicCount) * 100) : 0;
+    const attempted = attemptedQuestionsByModule.get(row.id)?.size ?? 0;
+    const progress = counts.mcqCount ? Math.round((attempted / counts.mcqCount) * 100) : 0;
     return {
       id: row.id, name: row.name, subtitle: row.subtitle, subjectCount: counts.subjectCount, topicCount: counts.topicCount, mcqCount: counts.mcqCount, progress, active: row.active,
+      blockId: row.blockId, blockName: row.blockId != null ? (blockNameById.get(row.blockId) ?? null) : null,
+      displayOrder: row.displayOrder,
       ...(isAdmin ? { programTargetKind: row.programTargetKind, yearTargetNumber: row.yearTargetNumber, targetingLabel: describeModuleTargeting(row.programTargetKind, row.yearTargetNumber) } : {}),
     };
   }));
   res.json(withCounts);
 });
 
-const ModuleTargetingFields = { programTargetKind: z.string().max(40).nullable().optional(), yearTargetNumber: z.number().int().min(1).max(5).nullable().optional() };
+const ModuleTargetingFields = {
+  programTargetKind: z.string().max(40).nullable().optional(),
+  yearTargetNumber: z.number().int().min(1).max(5).nullable().optional(),
+  blockId: z.number().int().positive().nullable().optional(),
+  displayOrder: z.number().int().optional(),
+};
 
 router.post("/modules", requireAdmin, async (req, res): Promise<void> => {
   const parsed = CreateModuleBody.and(z.object(ModuleTargetingFields)).safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const [maxRow] = await db.select({ max: sql<number>`coalesce(max(${modulesTable.displayOrder}), -1)` }).from(modulesTable);
   const [module] = await db.insert(modulesTable).values({
     name: parsed.data.name, subtitle: parsed.data.subtitle, active: parsed.data.active ?? true,
+    blockId: parsed.data.blockId ?? null,
+    displayOrder: parsed.data.displayOrder ?? Number(maxRow?.max ?? -1) + 1,
     programTargetKind: parsed.data.programTargetKind ? parsed.data.programTargetKind.trim().toUpperCase() : null,
     yearTargetNumber: parsed.data.yearTargetNumber ?? null,
   }).returning();
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MODULE_CREATED", entity: "module", entityId: module.id });
-  res.status(201).json(CreateModuleResponse.parse({ id: module.id, name: module.name, subtitle: module.subtitle, subjectCount: 0, topicCount: 0, progress: 0, active: module.active })); // genuinely 0/0 — brand-new module has no subjects/topics yet
+  res.status(201).json({ ...CreateModuleResponse.parse({ id: module.id, name: module.name, subtitle: module.subtitle, subjectCount: 0, topicCount: 0, progress: 0, active: module.active }), blockId: module.blockId, displayOrder: module.displayOrder }); // genuinely 0/0 — brand-new module has no subjects/topics yet
 });
 
 router.patch("/modules/:id", requireAdmin, async (req, res): Promise<void> => {
@@ -484,7 +587,7 @@ router.patch("/modules/:id", requireAdmin, async (req, res): Promise<void> => {
   if (!module) { res.status(404).json({ error: "Module not found" }); return; }
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MODULE_UPDATED", entity: "module", entityId: module.id });
   const moduleCounts = await getModuleCounts(module.id);
-  res.json({ id: module.id, name: module.name, subtitle: module.subtitle, subjectCount: moduleCounts.subjectCount, topicCount: moduleCounts.topicCount, progress: 0, active: module.active, programTargetKind: module.programTargetKind, yearTargetNumber: module.yearTargetNumber, targetingLabel: describeModuleTargeting(module.programTargetKind, module.yearTargetNumber) });
+  res.json({ id: module.id, name: module.name, subtitle: module.subtitle, subjectCount: moduleCounts.subjectCount, topicCount: moduleCounts.topicCount, progress: 0, active: module.active, blockId: module.blockId, displayOrder: module.displayOrder, programTargetKind: module.programTargetKind, yearTargetNumber: module.yearTargetNumber, targetingLabel: describeModuleTargeting(module.programTargetKind, module.yearTargetNumber) });
 });
 
 router.delete("/modules/:id", requireAdmin, async (req, res): Promise<void> => {
@@ -876,7 +979,7 @@ router.get("/resources", requireAuth, requireActiveMembership, async (req, res):
   const params = ListResourcesQueryParams.safeParse(req.query);
   if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
   const rows = await db.select().from(resourcesTable).where(and(params.data.kind ? eq(resourcesTable.kind, params.data.kind) : undefined, eq(resourcesTable.active, true)));
-  res.json(ListResourcesResponse.parse(rows.map((row) => ({ ...row, storagePath: resolveFileUrl(row.storagePath) ?? row.storagePath, updatedAt: row.updatedAt.toISOString() }))));
+  res.json(ListResourcesResponse.parse(rows.map((row) => ({ ...row, storagePath: resolveFileUrl(row.storagePath), updatedAt: row.updatedAt.toISOString() }))));
 });
 
 router.post("/resources", requireAdmin, async (req, res): Promise<void> => {

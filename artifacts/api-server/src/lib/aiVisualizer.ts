@@ -131,12 +131,15 @@ MEDICAL ACCURACY RULES (do not violate these):
 - If a detail is genuinely uncertain or debated, say so briefly in the relevant description field rather than presenting it as settled fact.
 - Prefer several short, concrete steps over one dense block of text. Each "description" field should be 1-4 sentences, exam-focused, not a textbook paragraph.
 
+SHAPE RULE (applies to every "shape" element, in every type below): "shapeType" must be EXACTLY one of "circle", "rect", or "ellipse" — never "line", "polygon", "triangle", "path", "square", "oval", "diamond", "star", or any other value. There is no fourth option. To represent a line, dendrite, axon, vessel, membrane, or any other elongated structure, use a thin "rect" (small height, longer width) instead of inventing a new shape type.
+
 CHOOSE ONE TYPE AND FOLLOW ITS EXACT JSON SHAPE:
 
 1. "process" or "cycle" — a multi-step mechanism (cycle loops back to step 1; process has a clear end):
 {"type":"process","title":"...","description":"...","loop":false,"steps":[{"title":"...","description":"...","elements":[{"kind":"shape","id":"sr","shapeType":"circle","x":30,"y":40,"radius":8,"color":"#3b82f6","label":"SR"},{"kind":"label","id":"lbl1","text":"Ca2+","x":30,"y":30},{"kind":"arrow","id":"a1","fromId":"sr","toId":"troponin","label":"release","style":"solid"},{"kind":"particle","id":"p1","text":"Ca2+","color":"#f59e0b","fromId":"sr","toId":"troponin"}],"highlightIds":["sr","p1"]}]}
 - Use "cycle" (same shape, "type":"cycle","loop":true) when the mechanism loops back to its start (e.g. cardiac cycle, citric acid cycle, cross-bridge cycling).
 - Every element needs a unique "id" referenced consistently across steps (an element present in multiple steps should reuse the same id, not a new one each time) and a normalized position (x, y each 0-100).
+- Remember the SHAPE RULE above: "shapeType" is only ever "circle", "rect", or "ellipse" — represent a line/dendrite/axon/vessel as a thin "rect", never as "line" or any other value.
 - "particle" elements show something moving between two existing element ids across a step — this is how motion/animation is expressed; never describe motion only in the text.
 - "highlightIds" on a step lists which element ids are the focus of that step.
 - Keep each step focused on ONE event, not the whole mechanism at once. 1-20 steps.
@@ -165,6 +168,7 @@ CHOOSE ONE TYPE AND FOLLOW ITS EXACT JSON SHAPE:
 7. "anatomy" — one labeled diagram, no step progression:
 {"type":"anatomy","title":"...","description":"...","elements":[{"kind":"shape","id":"a1","shapeType":"ellipse","x":50,"y":30,"width":20,"height":12,"color":"#ef4444","label":"Right Atrium"},{"kind":"label","id":"l1","text":"RA","x":50,"y":20}]}
 - Same element "kind"s as process/cycle above (shape/label/arrow/particle), 1-60 elements.
+- Remember the SHAPE RULE above: "shapeType" is only ever "circle", "rect", or "ellipse" — represent a line/vessel/duct/membrane as a thin "rect", never as "line" or any other value.
 
 Respond with ONLY the JSON object matching the shape for your chosen type. No markdown fences, no leading/trailing text, no fields beyond what's shown above.`;
 
@@ -220,6 +224,68 @@ function tryParse(cleaned: string): unknown | undefined {
   }
 }
 
+// Defense-in-depth for whatever the SHAPE RULE prompt instruction doesn't
+// catch. The AI is asked to use only "circle"|"rect"|"ellipse", but models
+// still occasionally reach for "line"/"polygon"/"triangle"/etc. for
+// concepts that don't map cleanly onto those three primitives (neuron
+// structure, nephron anatomy, muscle cross-bridge cycling — exactly the
+// prompts in the admin logs). Rather than reject an otherwise-good
+// visualization over one mislabeled field, remap known aliases to the
+// nearest of the three real primitives before validating, and fall back to
+// "rect" for anything unrecognized. This only normalizes a string enum
+// value — it does not add rendering capability, widen the schema, or touch
+// anything eval-adjacent, so it doesn't weaken the security posture
+// described at the top of this file.
+const SHAPE_TYPE_ALIASES: Record<string, "circle" | "rect" | "ellipse"> = {
+  square: "rect",
+  box: "rect",
+  oval: "ellipse",
+  diamond: "rect",
+  triangle: "rect",
+  line: "rect",
+  polygon: "rect",
+  path: "rect",
+  star: "rect",
+  pentagon: "rect",
+  hexagon: "rect",
+};
+const VALID_SHAPE_TYPES = new Set(["circle", "rect", "ellipse"]);
+
+function normalizeElement(el: unknown): unknown {
+  if (!el || typeof el !== "object") return el;
+  const rec = el as Record<string, unknown>;
+  if (rec.kind !== "shape" || typeof rec.shapeType !== "string") return el;
+  if (VALID_SHAPE_TYPES.has(rec.shapeType)) return el;
+  const normalized = SHAPE_TYPE_ALIASES[rec.shapeType.toLowerCase()] ?? "rect";
+  return { ...rec, shapeType: normalized };
+}
+
+function normalizeElementsArray(elements: unknown): unknown {
+  if (!Array.isArray(elements)) return elements;
+  return elements.map(normalizeElement);
+}
+
+/** Walks the parsed-but-not-yet-validated spec and normalizes every
+ * shapeType it can find, whichever of the "elements" (anatomy/process's
+ * top level) or "steps[].elements" (process/cycle) shapes it turns out to
+ * be — cheaper and safer than trying to guess the type before validation. */
+function normalizeShapeTypes(parsed: unknown): unknown {
+  if (!parsed || typeof parsed !== "object") return parsed;
+  const rec = { ...(parsed as Record<string, unknown>) };
+  if (Array.isArray(rec.elements)) {
+    rec.elements = normalizeElementsArray(rec.elements);
+  }
+  if (Array.isArray(rec.steps)) {
+    rec.steps = rec.steps.map((step) => {
+      if (!step || typeof step !== "object") return step;
+      const stepRec = { ...(step as Record<string, unknown>) };
+      if (Array.isArray(stepRec.elements)) stepRec.elements = normalizeElementsArray(stepRec.elements);
+      return stepRec;
+    });
+  }
+  return rec;
+}
+
 async function attemptGeneration(prompt: string, maxTokens: number): Promise<{ raw: string; spec?: VisualizationSpecT; truncated: boolean; issues?: string }> {
   const raw = await runPrompt(prompt, maxTokens, "object");
   const cleaned = stripFences(raw);
@@ -228,7 +294,8 @@ async function attemptGeneration(prompt: string, maxTokens: number): Promise<{ r
   if (parsedJson === undefined) {
     return { raw, truncated: looksTruncated(cleaned), issues: "Response was not valid JSON" };
   }
-  const result = VisualizationSpec.safeParse(parsedJson);
+  const normalized = normalizeShapeTypes(parsedJson);
+  const result = VisualizationSpec.safeParse(normalized);
   if (!result.success) {
     // A validation failure on an array field that's suspiciously at (or
     // past) its max length, combined with a response that never closed
@@ -247,15 +314,17 @@ export async function generateVisualization(userPrompt: string): Promise<Visuali
   const first = await attemptGeneration(buildPrompt(trimmed), VISUALIZATION_MAX_TOKENS);
   if (first.spec) return first.spec;
 
-  // Only retry when truncation is the likely cause — a non-truncated
-  // invalid response (e.g. the model ignored the schema entirely) won't
-  // be fixed by a bigger token budget, so don't spend a second AI call on it.
-  if (!first.truncated) {
-    throw new InvalidVisualizationError(first.issues ?? "Response was not valid JSON", first.raw);
-  }
-
-  const retryPrompt = `${buildPrompt(trimmed)}\n\nIMPORTANT: Your previous response was too long and got cut off before it was valid JSON. This time, keep it to at most 10 steps (or fewer elements per step) and be more concise in every "description" field, while still producing complete, valid JSON that fully closes every object and array.`;
-  const second = await attemptGeneration(retryPrompt, VISUALIZATION_RETRY_MAX_TOKENS);
+  // Retry once for either failure mode: truncation (bigger budget, fewer
+  // steps) or a schema validation failure that normalization didn't fully
+  // resolve (feed the exact issues back so the model can self-correct).
+  // Only give up and 502 if this second attempt also fails — a single
+  // schema mismatch on an otherwise-complete response shouldn't be a dead
+  // end when one corrective round-trip usually fixes it.
+  const retryPrompt = first.truncated
+    ? `${buildPrompt(trimmed)}\n\nIMPORTANT: Your previous response was too long and got cut off before it was valid JSON. This time, keep it to at most 10 steps (or fewer elements per step) and be more concise in every "description" field, while still producing complete, valid JSON that fully closes every object and array.`
+    : `${buildPrompt(trimmed)}\n\nIMPORTANT: Your previous response had these validation errors: ${first.issues}. Fix them and return complete, valid JSON matching the schema exactly — pay close attention to the SHAPE RULE ("shapeType" must be exactly "circle", "rect", or "ellipse", nothing else).`;
+  const retryTokens = first.truncated ? VISUALIZATION_RETRY_MAX_TOKENS : VISUALIZATION_MAX_TOKENS;
+  const second = await attemptGeneration(retryPrompt, retryTokens);
   if (second.spec) return second.spec;
   throw new InvalidVisualizationError(second.issues ?? "Response was not valid JSON", second.raw);
 }

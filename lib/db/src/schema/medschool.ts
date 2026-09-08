@@ -206,10 +206,32 @@ export const paymentWebhookEventsTable = pgTable("med_payment_webhook_events", {
 // Academic content
 // ---------------------------------------------------------------------------
 
+// Top-level curriculum grouping above Modules, e.g. "Block A" containing
+// "Foundation II", "Blood", etc. Nullable FK on modulesTable.blockId means
+// existing/ungrouped modules keep working, shown under "Unassigned".
+export const blocksTable = pgTable("med_blocks", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  subtitle: text("subtitle").notNull().default(""),
+  // Mirrors modulesTable's targeting columns exactly, same semantics.
+  programTargetKind: text("program_target_kind"),
+  yearTargetNumber: integer("year_target_number"),
+  // Optional thumbnail, resolved the same way as other storagePath-style
+  // columns via resolveFileUrl() in api-server/src/lib/storage.ts.
+  iconPath: text("icon_path"),
+  active: boolean("active").notNull().default(true),
+  archived: boolean("archived").notNull().default(false),
+  displayOrder: integer("display_order").notNull().default(0),
+  ...timestamps,
+});
+
 export const modulesTable = pgTable("med_modules", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   subtitle: text("subtitle").notNull(),
+  // Nullable — modules with no block show up under "Unassigned modules"
+  // until an admin assigns them to a Block.
+  blockId: integer("block_id"),
   // Content targeting — null means visible to everyone. Set programTargetKind
   // to restrict to students whose program.kind matches (e.g. "MBBS"), and/or
   // yearTargetNumber to restrict to a specific academic year (1-5). Subjects,
@@ -598,6 +620,7 @@ export const insertUserSchema = createInsertSchema(usersTable);
 export const insertMembershipPlanSchema = createInsertSchema(membershipPlansTable);
 export const insertPaymentSchema = createInsertSchema(paymentsTable);
 export const insertModuleSchema = createInsertSchema(modulesTable);
+export const insertBlockSchema = createInsertSchema(blocksTable);
 export const insertMcqSchema = createInsertSchema(mcqsTable);
 export const insertInstitutionSchema = createInsertSchema(institutionsTable);
 export const insertProgramSchema = createInsertSchema(programsTable);
@@ -608,6 +631,7 @@ export type User = typeof usersTable.$inferSelect;
 export type MembershipPlan = typeof membershipPlansTable.$inferSelect;
 export type Payment = typeof paymentsTable.$inferSelect;
 export type Module = typeof modulesTable.$inferSelect;
+export type Block = typeof blocksTable.$inferSelect;
 export type Mcq = typeof mcqsTable.$inferSelect;
 export type Institution = typeof institutionsTable.$inferSelect;
 export type Program = typeof programsTable.$inferSelect;

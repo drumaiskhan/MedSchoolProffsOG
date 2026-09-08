@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, booksTable, auditLogsTable } from "@workspace/db";
 import { requireAuth, requireAdmin, requireActiveMembership, isAdminRole } from "../middlewares/auth";
-import { resolveFileUrl } from "../lib/storage";
+import { resolveFileUrl, reresolveLegacyCloudinaryPath } from "../lib/storage";
 import { getStudentTargeting, getVisibleModuleIds } from "../lib/contentVisibility";
 
 const router: IRouter = Router();
@@ -16,8 +16,17 @@ function serializeBook(row: typeof booksTable.$inferSelect) {
     moduleId: row.moduleId,
     subjectId: row.subjectId,
     topicId: row.topicId,
-    storagePath: resolveFileUrl(row.storagePath) ?? row.storagePath,
-    coverImagePath: row.coverImagePath ? resolveFileUrl(row.coverImagePath) ?? row.coverImagePath : null,
+    // NOTE: fall back to null, never to the raw row.storagePath — that raw
+    // value is an internal "cloudinary:image/books/xyz.pdf"-style storage
+    // key, not a URL. Leaking it to the client used to make the frontend
+    // build a bogus request to its own API origin (resolveUploadUrl treats
+    // any non-"http(s)://" string as a relative path), which is what
+    // produced "This site can't be reached" instead of a clean "no file"
+    // state. A null here always means "genuinely not resolvable right now"
+    // (e.g. Cloudinary not configured), and the frontend already handles
+    // that as a disabled/missing link.
+    storagePath: resolveFileUrl(row.storagePath),
+    coverImagePath: row.coverImagePath ? resolveFileUrl(row.coverImagePath) : null,
     active: row.active,
   };
 }
@@ -86,6 +95,33 @@ router.delete("/admin/books/:id/permanent", requireAdmin, async (req, res): Prom
   await db.delete(booksTable).where(eq(booksTable.id, id));
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "BOOK_PERMANENTLY_DELETED", entity: "book", entityId: id });
   res.json({ ok: true });
+});
+
+// One-time backward-compat fix for books uploaded before the "keep the
+// extension in Cloudinary's public_id" bug was fixed (see storage.ts). Those
+// rows resolve to a URL Cloudinary can't serve, which is why a pre-existing
+// book can still fail to open even after a fresh upload works fine. Looks up
+// each affected book's real format on Cloudinary and rewrites its stored
+// path with the extension. Safe to re-run — it's a no-op for already-correct
+// rows and for books whose file isn't on Cloudinary (e.g. legacy Supabase
+// rows or ones with no storagePath at all).
+router.post("/admin/books/backfill-links", requireAdmin, async (_req, res): Promise<void> => {
+  const rows = await db.select().from(booksTable);
+  let fixed = 0;
+  let skipped = 0;
+  let failed = 0;
+  for (const row of rows) {
+    if (!row.storagePath) { skipped++; continue; }
+    const corrected = await reresolveLegacyCloudinaryPath(row.storagePath);
+    if (!corrected) { skipped++; continue; }
+    try {
+      await db.update(booksTable).set({ storagePath: corrected }).where(eq(booksTable.id, row.id));
+      fixed++;
+    } catch (err) {
+      failed++;
+    }
+  }
+  res.json({ fixed, skipped, failed });
 });
 
 export default router;

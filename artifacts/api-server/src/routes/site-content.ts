@@ -27,7 +27,7 @@ const SITE_CONTENT_KEYS = [
 ] as const;
 
 function teamView(member: typeof teamMembersTable.$inferSelect) {
-  return { ...member, photoPath: resolveFileUrl(member.photoPath) ?? member.photoPath };
+  return { ...member, photoPath: resolveFileUrl(member.photoPath) };
 }
 
 // Bundles everything the footer / about page needs in one request.

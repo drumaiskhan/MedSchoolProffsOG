@@ -140,6 +140,18 @@ export interface Module {
   mcqCount: number;
   progress: number;
   active: boolean;
+  blockId?: number | null;
+  blockName?: string | null;
+  displayOrder?: number;
+}
+
+export interface Block {
+  id: number;
+  name: string;
+  subtitle: string;
+  iconUrl: string | null;
+  displayOrder: number;
+  active: boolean;
 }
 
 export interface ModuleInput {

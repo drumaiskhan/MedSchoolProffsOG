@@ -2,7 +2,7 @@ import { type ReactNode, type ComponentProps, useState, useEffect } from 'react'
 import { QueryClient, QueryClientProvider, useMutation, useQuery } from '@tanstack/react-query';
 import { Link, Route, Switch, useLocation, useSearch, useParams, Router as WouterRouter } from 'wouter';
 import {
-  ArrowLeft, ArrowRight, BookOpen, Check, CheckCircle2, ChevronRight,
+  ArrowLeft, ArrowRight, BookOpen, Check, CheckCircle2, ChevronRight, ChevronUp, ChevronDown,
   CircleHelp, Clock3, CreditCard, FileText, Flame, FolderOpen,
   LayoutDashboard, Library, LockKeyhole, LogOut, Menu, MoreHorizontal, Pencil, Plus,
   ReceiptText, Search, Settings, ShieldCheck, Sparkles, Stethoscope, Target, Trash2,
@@ -29,7 +29,7 @@ import { toast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
-import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, analyticsApi, mcqImportApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, subjectAdminApi, topicAdminApi, flashcardsAdminApi, flashcardsAiApi, booksAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, examsAdminApi, examsApi, explanationsApi, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type StudentDetail, type SiteContent, type TeamMember, type AdminModule, type AdminSubject, type AdminTopic, type AdminFlashcard, type GeneratedFlashcard, type AdminMcqRow, type AdminBook, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type BankAccount, type PaymentMethodConfig, aiVisualizerAdminApi, type AiVisualizerLogEntry } from '@/lib/api';
+import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, analyticsApi, mcqImportApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, subjectAdminApi, topicAdminApi, flashcardsAdminApi, flashcardsAiApi, booksAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blockAdminApi, examsAdminApi, examsApi, explanationsApi, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type StudentDetail, type SiteContent, type TeamMember, type AdminModule, type AdminBlock, type AdminSubject, type AdminTopic, type AdminFlashcard, type GeneratedFlashcard, type AdminMcqRow, type AdminBook, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type BankAccount, type PaymentMethodConfig, aiVisualizerAdminApi, type AiVisualizerLogEntry } from '@/lib/api';
 import './index.css';
 
 const queryClient = new QueryClient();
@@ -325,34 +325,179 @@ function ModuleTargetingFields({ programTargetKind, yearTargetNumber, onChange }
   return <div className="flex flex-wrap gap-3"><label className="text-xs font-bold">Program<select value={programTargetKind} onChange={(e) => onChange({ programTargetKind: e.target.value })} className="mt-1 h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-module-program-target"><option value="">All Programs</option><option value="MBBS">MBBS</option><option value="BDS">BDS</option></select></label><label className="text-xs font-bold">Academic year<select value={yearTargetNumber} onChange={(e) => onChange({ yearTargetNumber: e.target.value })} className="mt-1 h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-module-year-target"><option value="">All Years</option>{YEAR_OPTIONS.map((y) => <option key={y} value={y}>{y}{y === 1 ? 'st' : y === 2 ? 'nd' : y === 3 ? 'rd' : 'th'} Year</option>)}</select></label></div>;
 }
 
+// A single module row — exactly the markup AdminContent always rendered,
+// just extracted so it can be reused inside each block's group and inside
+// the "Unassigned modules" group without redesigning it.
+function ModuleRow({ m, canMoveUp, canMoveDown, onReorder, update, curriculumId, setCurriculumId, editingId, setEditingId, editProgram, setEditProgram, editYear, setEditYear, setDeletingId }: {
+  m: AdminModule; canMoveUp: boolean; canMoveDown: boolean; onReorder: (direction: 'up' | 'down') => void;
+  update: ReturnType<typeof useMutation<AdminModule, unknown, { id: number; body: Parameters<typeof moduleAdminApi.update>[1] }>>;
+  curriculumId: number | null; setCurriculumId: (id: number | null) => void;
+  editingId: number | null; setEditingId: (id: number | null) => void;
+  editProgram: string; setEditProgram: (v: string) => void; editYear: string; setEditYear: (v: string) => void;
+  setDeletingId: (id: number) => void;
+}) {
+  return <div className="border-b border-border p-5 last:border-0" data-testid={`row-content-module-${m.id}`}>
+    <div className="flex items-center gap-4">
+      <div className="flex flex-col gap-0.5">
+        <button onClick={() => onReorder('up')} disabled={!canMoveUp || update.isPending} className="rounded p-0.5 text-muted-foreground disabled:opacity-25 hover:bg-muted" data-testid={`button-module-move-up-${m.id}`}><ChevronUp size={13} /></button>
+        <button onClick={() => onReorder('down')} disabled={!canMoveDown || update.isPending} className="rounded p-0.5 text-muted-foreground disabled:opacity-25 hover:bg-muted" data-testid={`button-module-move-down-${m.id}`}><ChevronDown size={13} /></button>
+      </div>
+      <div className="grid size-10 place-items-center rounded-xl bg-[#d7eee4] text-primary"><BookOpen size={18} /></div>
+      <div className="flex-1"><div className="text-sm font-bold">{m.name}</div><div className="mt-1 text-xs text-muted-foreground">{m.subjectCount} subjects · {m.topicCount} topics</div></div>
+      <button onClick={() => update.mutate({ id: m.id, body: { active: !m.active } })} disabled={update.isPending} data-testid={`button-toggle-published-${m.id}`}><Badge tone={m.active ? 'green' : 'neutral'}>{m.active ? 'published' : 'draft'}</Badge></button>
+      <span className="rounded-full bg-muted px-2.5 py-1 text-[10px] font-bold text-muted-foreground" data-testid={`text-targeting-${m.id}`}>{m.targetingLabel || 'All Programs + All Years'}</span>
+      <button onClick={() => setCurriculumId(curriculumId === m.id ? null : m.id)} className={cn('rounded-lg px-3 py-2 text-[11px] font-bold', curriculumId === m.id ? 'bg-[#eef7f1] text-primary' : 'border border-border text-muted-foreground hover:bg-muted')} data-testid={`button-manage-curriculum-${m.id}`}>{curriculumId === m.id ? 'Hide subjects' : 'Subjects & topics'}</button>
+      <button onClick={() => { if (editingId === m.id) { setEditingId(null); } else { setEditingId(m.id); setEditProgram(m.programTargetKind || ''); setEditYear(m.yearTargetNumber ? String(m.yearTargetNumber) : ''); } }} className="rounded-lg p-2 text-muted-foreground hover:bg-muted" data-testid={`button-content-menu-${m.id}`}><Pencil size={15} /></button>
+      <button onClick={() => setDeletingId(m.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-module-${m.id}`}><Trash2 size={15} /></button>
+    </div>
+    {editingId === m.id && <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-border pt-4"><ModuleTargetingFields programTargetKind={editProgram} yearTargetNumber={editYear} onChange={(patch) => { if (patch.programTargetKind !== undefined) setEditProgram(patch.programTargetKind); if (patch.yearTargetNumber !== undefined) setEditYear(patch.yearTargetNumber); }} /><button onClick={() => update.mutate({ id: m.id, body: { programTargetKind: editProgram || null, yearTargetNumber: editYear ? Number(editYear) : null } }, { onSuccess: () => setEditingId(null) } as never)} className="h-10 rounded-xl bg-primary px-4 text-xs font-bold text-primary-foreground" data-testid={`button-save-targeting-${m.id}`}>Update visibility</button></div>}
+    {curriculumId === m.id && <div className="mt-4 border-t border-border pt-4"><SubjectsTopicsManager moduleId={m.id} /></div>}
+  </div>;
+}
+
+// The "Add module" form, scoped to a specific block (or null for
+// Unassigned) — pre-fills blockId so a module created from inside a block's
+// section lands in that block.
+function AddModuleForm({ blockId, onCreate, onDone }: { blockId: number | null; onCreate: ReturnType<typeof useMutation<AdminModule, unknown, Parameters<typeof moduleAdminApi.create>[0]>>; onDone: () => void }) {
+  const [program, setProgram] = useState('');
+  const [year, setYear] = useState('');
+  return <form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); onCreate.mutate({ name: String(f.get('name')), subtitle: String(f.get('subtitle')), active: true, blockId, programTargetKind: program || null, yearTargetNumber: year ? Number(year) : null }, { onSuccess: onDone }); }} className="mb-5 space-y-3 rounded-2xl border border-primary/30 bg-[#eef7f1] p-5">
+    <div className="flex flex-wrap gap-3"><input required name="name" placeholder="Module name" className="h-10 flex-1 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-module-name" /><input required name="subtitle" placeholder="Subtitle" className="h-10 flex-1 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-module-subtitle" /></div>
+    <ModuleTargetingFields programTargetKind={program} yearTargetNumber={year} onChange={(patch) => { if (patch.programTargetKind !== undefined) setProgram(patch.programTargetKind); if (patch.yearTargetNumber !== undefined) setYear(patch.yearTargetNumber); }} />
+    <p className="text-[11px] text-muted-foreground">This module will be visible to: <span className="font-bold text-primary">{(program || 'All Programs')} + {(year ? `${year}${year === '1' ? 'st' : year === '2' ? 'nd' : year === '3' ? 'rd' : 'th'} Year` : 'All Years')}</span></p>
+    <button className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground" data-testid="button-save-module">Save</button>
+  </form>;
+}
+
+// The "Add block" / edit-block form, with an optional thumbnail upload
+// (reuses AdminImageUpload the same way the payment QR code does).
+function BlockForm({ initial, onSubmit, pending, onCancel }: { initial?: AdminBlock; onSubmit: (body: Parameters<typeof blockAdminApi.create>[0]) => void; pending: boolean; onCancel: () => void }) {
+  const [program, setProgram] = useState(initial?.programTargetKind || '');
+  const [year, setYear] = useState(initial?.yearTargetNumber ? String(initial.yearTargetNumber) : '');
+  const [iconPath, setIconPath] = useState<string | null>(null);
+  const [iconPreview, setIconPreview] = useState<string | null>(initial?.iconUrl ?? null);
+  return <form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); onSubmit({ name: String(f.get('name')), subtitle: String(f.get('subtitle') || ''), active: true, iconPath: iconPath ?? undefined, programTargetKind: program || null, yearTargetNumber: year ? Number(year) : null }); }} className="mb-5 space-y-3 rounded-2xl border border-primary/30 bg-[#eef7f1] p-5">
+    <div className="flex flex-wrap gap-3"><input required name="name" defaultValue={initial?.name} placeholder="Block name (e.g. Block A)" className="h-10 flex-1 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-block-name" /><input name="subtitle" defaultValue={initial?.subtitle} placeholder="Subtitle" className="h-10 flex-1 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-block-subtitle" /></div>
+    <AdminImageUpload currentUrl={iconPreview || ''} kind="resource" accept="image/png,image/jpeg,image/webp" hint="Optional thumbnail · PNG, JPEG, or WEBP." testId="input-block-icon-upload" onUploaded={(storagePath, previewUrl) => { setIconPath(storagePath); setIconPreview(previewUrl); }} />
+    <ModuleTargetingFields programTargetKind={program} yearTargetNumber={year} onChange={(patch) => { if (patch.programTargetKind !== undefined) setProgram(patch.programTargetKind); if (patch.yearTargetNumber !== undefined) setYear(patch.yearTargetNumber); }} />
+    <div className="flex gap-2"><button disabled={pending} className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground" data-testid="button-save-block">Save</button><button type="button" onClick={onCancel} className="rounded-xl border border-border px-4 py-2 text-xs font-bold text-muted-foreground">Cancel</button></div>
+  </form>;
+}
+
 function AdminContent() {
-  const q = useQuery({ queryKey: ['admin-modules'], queryFn: moduleAdminApi.listAll });
-  const modules = q.data ?? [];
-  const create = useMutation({ mutationFn: moduleAdminApi.create, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['admin-modules'] }); queryClient.invalidateQueries({ queryKey: getListModulesQueryKey() }); }, onError: (err: unknown) => toast({ title: 'Could not create module', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
-  const update = useMutation({ mutationFn: ({ id, body }: { id: number; body: Parameters<typeof moduleAdminApi.update>[1] }) => moduleAdminApi.update(id, body), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['admin-modules'] }); queryClient.invalidateQueries({ queryKey: getListModulesQueryKey() }); } });
-  const removeModulePermanent = useMutation({ mutationFn: moduleAdminApi.removePermanent, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['admin-modules'] }); queryClient.invalidateQueries({ queryKey: getListModulesQueryKey() }); setDeletingId(null); }, onError: (err: unknown) => toast({ title: 'Could not delete module', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
-  const [open, setOpen] = useState(false);
-  const [newProgram, setNewProgram] = useState('');
-  const [newYear, setNewYear] = useState('');
+  const modulesQ = useQuery({ queryKey: ['admin-modules'], queryFn: moduleAdminApi.listAll });
+  const blocksQ = useQuery({ queryKey: ['admin-blocks'], queryFn: blockAdminApi.listAll });
+  const modules = modulesQ.data ?? [];
+  const blocks = [...(blocksQ.data ?? [])].sort((a, b) => a.displayOrder - b.displayOrder);
+
+  const invalidateModules = () => { queryClient.invalidateQueries({ queryKey: ['admin-modules'] }); queryClient.invalidateQueries({ queryKey: getListModulesQueryKey() }); };
+  const invalidateBlocks = () => queryClient.invalidateQueries({ queryKey: ['admin-blocks'] });
+
+  const createModule = useMutation({ mutationFn: moduleAdminApi.create, onSuccess: invalidateModules, onError: (err: unknown) => toast({ title: 'Could not create module', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
+  const update = useMutation({ mutationFn: ({ id, body }: { id: number; body: Parameters<typeof moduleAdminApi.update>[1] }) => moduleAdminApi.update(id, body), onSuccess: invalidateModules, onError: (err: unknown) => toast({ title: 'Could not update module', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
+  const removeModulePermanent = useMutation({ mutationFn: moduleAdminApi.removePermanent, onSuccess: () => { invalidateModules(); setDeletingId(null); }, onError: (err: unknown) => toast({ title: 'Could not delete module', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
+
+  const createBlock = useMutation({ mutationFn: blockAdminApi.create, onSuccess: invalidateBlocks, onError: (err: unknown) => toast({ title: 'Could not create block', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
+  const updateBlock = useMutation({ mutationFn: ({ id, body }: { id: number; body: Parameters<typeof blockAdminApi.update>[1] }) => blockAdminApi.update(id, body), onSuccess: invalidateBlocks, onError: (err: unknown) => toast({ title: 'Could not update block', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
+  const removeBlockPermanent = useMutation({ mutationFn: blockAdminApi.removePermanent, onSuccess: () => { invalidateBlocks(); invalidateModules(); setDeletingBlockId(null); }, onError: (err: unknown) => toast({ title: 'Could not delete block', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
+
+  const [openBlockForm, setOpenBlockForm] = useState(false);
+  const [editingBlockId, setEditingBlockId] = useState<number | null>(null);
+  const [deletingBlockId, setDeletingBlockId] = useState<number | null>(null);
+  const [openModuleFormFor, setOpenModuleFormFor] = useState<number | 'unassigned' | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<number | 'unassigned'>>(new Set());
+
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editProgram, setEditProgram] = useState('');
   const [editYear, setEditYear] = useState('');
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [curriculumId, setCurriculumId] = useState<number | null>(null);
 
-  return <div><SectionHeader eyebrow="Curriculum operations" title="Academic content" action={<button onClick={() => setOpen(true)} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-create-module"><Plus size={15} /> Add module</button>} />
-    {open && <form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); create.mutate({ name: String(f.get('name')), subtitle: String(f.get('subtitle')), active: true, programTargetKind: newProgram || null, yearTargetNumber: newYear ? Number(newYear) : null }, { onSuccess: () => { setOpen(false); setNewProgram(''); setNewYear(''); } }); }} className="mb-5 space-y-3 rounded-2xl border border-primary/30 bg-[#eef7f1] p-5">
-      <div className="flex flex-wrap gap-3"><input required name="name" placeholder="Module name" className="h-10 flex-1 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-module-name" /><input required name="subtitle" placeholder="Subtitle" className="h-10 flex-1 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-module-subtitle" /></div>
-      <ModuleTargetingFields programTargetKind={newProgram} yearTargetNumber={newYear} onChange={(patch) => { if (patch.programTargetKind !== undefined) setNewProgram(patch.programTargetKind); if (patch.yearTargetNumber !== undefined) setNewYear(patch.yearTargetNumber); }} />
-      <p className="text-[11px] text-muted-foreground">This module will be visible to: <span className="font-bold text-primary">{(newProgram || 'All Programs')} + {(newYear ? `${newYear}${newYear === '1' ? 'st' : newYear === '2' ? 'nd' : newYear === '3' ? 'rd' : 'th'} Year` : 'All Years')}</span></p>
-      <button className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground" data-testid="button-save-module">Save</button>
-    </form>}
-    {q.isLoading ? <SkeletonPage /> : modules.length ? <div className="rounded-2xl border border-border bg-card">{modules.map((m) => <div key={m.id} className="border-b border-border p-5 last:border-0" data-testid={`row-content-module-${m.id}`}>
-      <div className="flex items-center gap-4"><div className="grid size-10 place-items-center rounded-xl bg-[#d7eee4] text-primary"><BookOpen size={18} /></div><div className="flex-1"><div className="text-sm font-bold">{m.name}</div><div className="mt-1 text-xs text-muted-foreground">{m.subjectCount} subjects · {m.topicCount} topics</div></div><button onClick={() => update.mutate({ id: m.id, body: { active: !m.active } })} disabled={update.isPending} data-testid={`button-toggle-published-${m.id}`}><Badge tone={m.active ? 'green' : 'neutral'}>{m.active ? 'published' : 'draft'}</Badge></button><span className="rounded-full bg-muted px-2.5 py-1 text-[10px] font-bold text-muted-foreground" data-testid={`text-targeting-${m.id}`}>{m.targetingLabel || 'All Programs + All Years'}</span><button onClick={() => setCurriculumId(curriculumId === m.id ? null : m.id)} className={cn('rounded-lg px-3 py-2 text-[11px] font-bold', curriculumId === m.id ? 'bg-[#eef7f1] text-primary' : 'border border-border text-muted-foreground hover:bg-muted')} data-testid={`button-manage-curriculum-${m.id}`}>{curriculumId === m.id ? 'Hide subjects' : 'Subjects & topics'}</button><button onClick={() => { if (editingId === m.id) { setEditingId(null); } else { setEditingId(m.id); setEditProgram(m.programTargetKind || ''); setEditYear(m.yearTargetNumber ? String(m.yearTargetNumber) : ''); } }} className="rounded-lg p-2 text-muted-foreground hover:bg-muted" data-testid={`button-content-menu-${m.id}`}><Pencil size={15} /></button><button onClick={() => setDeletingId(m.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-module-${m.id}`}><Trash2 size={15} /></button></div>
-      {editingId === m.id && <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-border pt-4"><ModuleTargetingFields programTargetKind={editProgram} yearTargetNumber={editYear} onChange={(patch) => { if (patch.programTargetKind !== undefined) setEditProgram(patch.programTargetKind); if (patch.yearTargetNumber !== undefined) setEditYear(patch.yearTargetNumber); }} /><button onClick={() => update.mutate({ id: m.id, body: { programTargetKind: editProgram || null, yearTargetNumber: editYear ? Number(editYear) : null } }, { onSuccess: () => setEditingId(null) } as never)} className="h-10 rounded-xl bg-primary px-4 text-xs font-bold text-primary-foreground" data-testid={`button-save-targeting-${m.id}`}>Update visibility</button></div>}
-      {curriculumId === m.id && <div className="mt-4 border-t border-border pt-4"><SubjectsTopicsManager moduleId={m.id} /></div>}
-    </div>)}</div> : <EmptyState icon={Library} title="No modules yet" body="Add your first module above to start building the curriculum." />}
+  const modulesByBlock = new Map<number, AdminModule[]>();
+  const unassigned: AdminModule[] = [];
+  for (const m of modules) {
+    if (m.blockId != null) {
+      if (!modulesByBlock.has(m.blockId)) modulesByBlock.set(m.blockId, []);
+      modulesByBlock.get(m.blockId)!.push(m);
+    } else unassigned.push(m);
+  }
+  const sortByOrder = (list: AdminModule[]) => [...list].sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+
+  const reorderModule = (list: AdminModule[], m: AdminModule, direction: 'up' | 'down') => {
+    const sorted = sortByOrder(list);
+    const idx = sorted.findIndex((x) => x.id === m.id);
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= sorted.length) return;
+    const other = sorted[swapIdx];
+    update.mutate({ id: m.id, body: { displayOrder: other.displayOrder ?? 0 } });
+    update.mutate({ id: other.id, body: { displayOrder: m.displayOrder ?? 0 } });
+  };
+
+  const reorderBlock = (b: (typeof blocks)[number], direction: 'up' | 'down') => {
+    const idx = blocks.findIndex((x) => x.id === b.id);
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= blocks.length) return;
+    const other = blocks[swapIdx];
+    updateBlock.mutate({ id: b.id, body: { displayOrder: other.displayOrder } });
+    updateBlock.mutate({ id: other.id, body: { displayOrder: b.displayOrder } });
+  };
+
+  const renderModuleGroup = (list: AdminModule[]) => {
+    const sorted = sortByOrder(list);
+    return sorted.map((m, i) => <ModuleRow key={m.id} m={m} canMoveUp={i > 0} canMoveDown={i < sorted.length - 1} onReorder={(dir) => reorderModule(sorted, m, dir)}
+      update={update} curriculumId={curriculumId} setCurriculumId={setCurriculumId} editingId={editingId} setEditingId={setEditingId}
+      editProgram={editProgram} setEditProgram={setEditProgram} editYear={editYear} setEditYear={setEditYear} setDeletingId={setDeletingId} />);
+  };
+
+  const loading = modulesQ.isLoading || blocksQ.isLoading;
+
+  return <div>
+    <SectionHeader eyebrow="Curriculum operations" title="Academic content" action={<div className="flex gap-2">
+      <button onClick={() => setOpenBlockForm(true)} className="inline-flex items-center gap-2 rounded-xl border border-primary/40 px-4 py-2.5 text-xs font-extrabold text-primary" data-testid="button-create-block"><Plus size={15} /> Add block</button>
+      <button onClick={() => setOpenModuleFormFor('unassigned')} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-create-module"><Plus size={15} /> Add module</button>
+    </div>} />
+    {openBlockForm && <BlockForm pending={createBlock.isPending} onCancel={() => setOpenBlockForm(false)} onSubmit={(body) => createBlock.mutate(body, { onSuccess: () => setOpenBlockForm(false) })} />}
+
+    {loading ? <SkeletonPage /> : (!blocks.length && !modules.length) ? <EmptyState icon={Library} title="No modules yet" body="Add your first block or module above to start building the curriculum." /> : <div className="space-y-5">
+      {blocks.map((b, bi) => {
+        const list = modulesByBlock.get(b.id) ?? [];
+        const isCollapsed = collapsed.has(b.id);
+        return <div key={b.id} className="rounded-2xl border border-border bg-card" data-testid={`section-block-${b.id}`}>
+          <div className="flex items-center gap-3 p-4">
+            <button onClick={() => setCollapsed((s) => { const next = new Set(s); if (next.has(b.id)) next.delete(b.id); else next.add(b.id); return next; })} className="rounded-lg p-1 text-muted-foreground hover:bg-muted" data-testid={`button-toggle-block-${b.id}`}><ChevronRight size={16} className={cn('transition-transform', !isCollapsed && 'rotate-90')} /></button>
+            <div className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-xl bg-[#eef7f1] text-primary">{b.iconUrl ? <img src={b.iconUrl} alt="" className="size-full object-cover" /> : <Library size={16} />}</div>
+            <div className="flex-1"><div className="text-sm font-extrabold" data-testid={`text-block-name-${b.id}`}>{b.name}</div>{b.subtitle && <div className="text-xs text-muted-foreground">{b.subtitle}</div>}</div>
+            <span className="text-[11px] text-muted-foreground">{list.length} module{list.length === 1 ? '' : 's'}</span>
+            <div className="flex flex-col gap-0.5"><button onClick={() => reorderBlock(b, 'up')} disabled={bi === 0} className="rounded p-0.5 text-muted-foreground disabled:opacity-25 hover:bg-muted" data-testid={`button-block-move-up-${b.id}`}><ChevronUp size={13} /></button><button onClick={() => reorderBlock(b, 'down')} disabled={bi === blocks.length - 1} className="rounded p-0.5 text-muted-foreground disabled:opacity-25 hover:bg-muted" data-testid={`button-block-move-down-${b.id}`}><ChevronDown size={13} /></button></div>
+            <button onClick={() => setOpenModuleFormFor(openModuleFormFor === b.id ? null : b.id)} className="rounded-lg border border-border px-3 py-2 text-[11px] font-bold text-muted-foreground hover:bg-muted" data-testid={`button-add-module-to-block-${b.id}`}>+ Module</button>
+            <button onClick={() => setEditingBlockId(editingBlockId === b.id ? null : b.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-muted" data-testid={`button-edit-block-${b.id}`}><Pencil size={15} /></button>
+            <button onClick={() => setDeletingBlockId(b.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-block-${b.id}`}><Trash2 size={15} /></button>
+          </div>
+          {editingBlockId === b.id && <div className="border-t border-border p-4"><BlockForm initial={b} pending={updateBlock.isPending} onCancel={() => setEditingBlockId(null)} onSubmit={(body) => updateBlock.mutate({ id: b.id, body }, { onSuccess: () => setEditingBlockId(null) })} /></div>}
+          {!isCollapsed && <div className="border-t border-border">
+            {openModuleFormFor === b.id && <div className="p-4"><AddModuleForm blockId={b.id} onCreate={createModule} onDone={() => setOpenModuleFormFor(null)} /></div>}
+            {list.length ? renderModuleGroup(list) : <p className="p-5 text-xs text-muted-foreground">No modules in this block yet — use "+ Module" above to add one.</p>}
+          </div>}
+        </div>;
+      })}
+
+      <div className="rounded-2xl border border-dashed border-border bg-card" data-testid="section-block-unassigned">
+        <div className="flex items-center gap-3 p-4">
+          <button onClick={() => setCollapsed((s) => { const next = new Set(s); if (next.has('unassigned')) next.delete('unassigned'); else next.add('unassigned'); return next; })} className="rounded-lg p-1 text-muted-foreground hover:bg-muted" data-testid="button-toggle-block-unassigned"><ChevronRight size={16} className={cn('transition-transform', !collapsed.has('unassigned') && 'rotate-90')} /></button>
+          <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground"><Library size={16} /></div>
+          <div className="flex-1 text-sm font-extrabold text-muted-foreground">Unassigned modules</div>
+          <span className="text-[11px] text-muted-foreground">{unassigned.length} module{unassigned.length === 1 ? '' : 's'}</span>
+          <button onClick={() => setOpenModuleFormFor(openModuleFormFor === 'unassigned' ? null : 'unassigned')} className="rounded-lg border border-border px-3 py-2 text-[11px] font-bold text-muted-foreground hover:bg-muted" data-testid="button-add-module-unassigned">+ Module</button>
+        </div>
+        {!collapsed.has('unassigned') && <div className="border-t border-border">
+          {openModuleFormFor === 'unassigned' && <div className="p-4"><AddModuleForm blockId={null} onCreate={createModule} onDone={() => setOpenModuleFormFor(null)} /></div>}
+          {unassigned.length ? renderModuleGroup(unassigned) : <p className="p-5 text-xs text-muted-foreground">No unassigned modules.</p>}
+        </div>}
+      </div>
+    </div>}
+
     {deletingId !== null && <ConfirmDialog title="Permanently delete this module?" body="This erases the module and its subjects/topics for good — MCQs and flashcards filed under it stay in their banks, just unassigned. There is no undo." confirmLabel="Delete forever" onCancel={() => setDeletingId(null)} onConfirm={() => removeModulePermanent.mutate(deletingId)} pending={removeModulePermanent.isPending} />}
+    {deletingBlockId !== null && <ConfirmDialog title="Permanently delete this block?" body="Modules inside it are kept — they move to Unassigned, not deleted. There is no undo for the block itself." confirmLabel="Delete forever" onCancel={() => setDeletingBlockId(null)} onConfirm={() => removeBlockPermanent.mutate(deletingBlockId)} pending={removeBlockPermanent.isPending} />}
   </div>;
 }
 
@@ -434,7 +579,7 @@ function McqEditForm({ mcq, onDone }: { mcq: AdminMcqRow; onDone: () => void }) 
   const [correctAnswer, setCorrectAnswer] = useState(mcq.correctAnswer ?? '');
   const [explanation, setExplanation] = useState(mcq.explanation ?? '');
   const [status, setStatus] = useState(mcq.status);
-  const [difficulty, setDifficulty] = useState(mcq.difficulty || 'medium');
+  const [difficulty, setDifficulty] = useState(mcq.difficulty || 'moderate');
   const save = useMutation({
     mutationFn: () => mcqAdminApi.update(mcq.id, {
       question: question.trim(),
@@ -455,7 +600,7 @@ function McqEditForm({ mcq, onDone }: { mcq: AdminMcqRow; onDone: () => void }) 
       <span className="text-[11px] font-bold text-muted-foreground">Correct:</span>
       <select value={correctAnswer} onChange={(e) => setCorrectAnswer(e.target.value)} className="h-8 flex-1 rounded-lg border border-border bg-card px-2 text-xs" data-testid={`select-edit-mcq-answer-${mcq.id}`}><option value="">Not set</option>{cleanedOptions.map((opt, oi) => <option key={oi} value={opt}>{String.fromCharCode(65 + oi)}. {opt.slice(0, 40)}</option>)}</select>
       <select value={status} onChange={(e) => setStatus(e.target.value)} className="h-8 rounded-lg border border-border bg-card px-2 text-xs" data-testid={`select-edit-mcq-status-${mcq.id}`}><option value="draft">Draft</option><option value="published">Published</option></select>
-      <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} className="h-8 rounded-lg border border-border bg-card px-2 text-xs capitalize" data-testid={`select-edit-mcq-difficulty-${mcq.id}`}>{['easy', 'medium', 'hard'].map((x) => <option key={x} value={x}>{x}</option>)}</select>
+      <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} className="h-8 rounded-lg border border-border bg-card px-2 text-xs capitalize" data-testid={`select-edit-mcq-difficulty-${mcq.id}`}>{['easy', 'moderate', 'hard'].map((x) => <option key={x} value={x}>{x}</option>)}</select>
     </div>
     <textarea value={explanation} onChange={(e) => setExplanation(e.target.value)} placeholder="Explanation (optional)" className="min-h-12 w-full rounded-lg border border-border bg-card p-2 text-xs" data-testid={`input-edit-mcq-explanation-${mcq.id}`} />
     <div className="flex gap-2"><button onClick={() => save.mutate()} disabled={save.isPending || !question.trim() || cleanedOptions.length < 2} className="rounded-lg bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground disabled:opacity-50" data-testid={`button-save-edit-mcq-${mcq.id}`}>{save.isPending ? 'Saving…' : 'Save changes'}</button><button onClick={onDone} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold" data-testid={`button-cancel-edit-mcq-${mcq.id}`}>Cancel</button></div>
@@ -583,7 +728,7 @@ function AdminMcqs() {
     onSuccess: (res) => { queryClient.invalidateQueries({ queryKey: getListMcqsQueryKey() }); setSelectedIds(new Set()); setBulkDeleteMode(null); toast({ title: `Deleted ${res.deleted} question${res.deleted === 1 ? '' : 's'}` }); },
     onError: (err: unknown) => toast({ title: 'Bulk delete failed', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
-  const bulkAddRowsInit = () => [{ question: '', a: '', b: '', c: '', d: '', e: '', correct: 'a', explanation: '', ea: '', eb: '', ec: '', ed: '', ee: '', difficulty: 'medium', showOptionExplanations: false }];
+  const bulkAddRowsInit = () => [{ question: '', a: '', b: '', c: '', d: '', e: '', correct: 'a', explanation: '', ea: '', eb: '', ec: '', ed: '', ee: '', difficulty: 'moderate', showOptionExplanations: false }];
   const [bulkRows, setBulkRows] = useState(bulkAddRowsInit);
   const [aiCount, setAiCount] = useState(5);
   const generateAiMcqs = useMutation({
@@ -595,7 +740,7 @@ function AdminMcqs() {
         correct: (['a', 'b', 'c', 'd', 'e'][d.options.findIndex((o) => o === d.correctAnswer)] ?? 'a'),
         explanation: d.explanation,
         ea: d.optionExplanations?.[0] ?? '', eb: d.optionExplanations?.[1] ?? '', ec: d.optionExplanations?.[2] ?? '', ed: d.optionExplanations?.[3] ?? '', ee: d.optionExplanations?.[4] ?? '',
-        difficulty: (d as unknown as { difficulty?: string }).difficulty ?? 'medium',
+        difficulty: d.difficulty ?? 'moderate',
         showOptionExplanations: !!(d.optionExplanations && d.optionExplanations.some((e) => e?.trim())),
       })));
       toast({ title: `Generated ${res.drafts.length} draft questions`, description: 'Review each before saving — nothing is added to the bank yet.' });
@@ -609,7 +754,7 @@ function AdminMcqs() {
       const rawOptionExplanations = [r.ea, r.eb, r.ec, r.ed, r.ee].slice(0, options.length).map((e) => e.trim() || null);
       const optionExplanations = rawOptionExplanations.some((e) => e) ? rawOptionExplanations : null;
       const explanation = r.explanation.trim() || rawOptionExplanations[correctIndex] || null;
-      return { question: r.question.trim(), options, correctAnswer: options[correctIndex] ?? null, explanation, optionExplanations, difficulty: r.difficulty || 'medium', moduleId: Number(moduleId), subjectId: Number(subjectId), topicId: Number(topicId) } as unknown as Partial<AdminMcqRow> & { question: string; options: string[] };
+      return { question: r.question.trim(), options, correctAnswer: options[correctIndex] ?? null, explanation, optionExplanations, difficulty: r.difficulty || 'moderate', moduleId: Number(moduleId), subjectId: Number(subjectId), topicId: Number(topicId) } as unknown as Partial<AdminMcqRow> & { question: string; options: string[] };
     })),
     onSuccess: (res) => { queryClient.invalidateQueries({ queryKey: getListMcqsQueryKey() }); setBulkRows(bulkAddRowsInit()); setBulkAddOpen(false); toast({ title: `Added ${res.created} questions` }); },
     onError: (err: unknown) => toast({ title: 'Could not add questions', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
@@ -709,8 +854,8 @@ function AdminMcqs() {
       const correctLetter = String(f.get('correct') || '');
       const correctIndex = correctLetter ? correctLetter.charCodeAt(0) - 97 : -1;
       const correctAnswer = correctIndex >= 0 ? options[correctIndex] ?? null : null;
-      create.mutate({ data: { question: String(f.get('question')), options, correctAnswer: correctAnswer ?? '', explanation: String(f.get('explanation')), reference: '', difficulty: String(f.get('difficulty') || 'medium'), moduleId: Number(moduleId), subjectId: Number(subjectId), topicId: Number(topicId) } }, { onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListMcqsQueryKey() }); e.currentTarget.reset(); } });
-    }} className="mt-6 space-y-3 rounded-2xl border border-border bg-card p-5">{!targetReady && <p className="text-[11px] font-semibold text-[#8a5a12]">Select module/subject/topic above first.</p>}<textarea name="question" required placeholder="Write the question..." className="min-h-20 w-full rounded-xl border border-border bg-background p-3 text-xs" data-testid="input-mcq-question" /><div className="grid gap-3 sm:grid-cols-2">{['a', 'b', 'c', 'd', 'e'].map((x) => <input key={x} name={x} required={x !== 'e'} placeholder={`Option ${x.toUpperCase()}${x === 'e' ? ' (optional)' : ''}`} className="h-10 rounded-xl border border-border bg-background px-3 text-xs" data-testid={`input-mcq-option-${x}`} />)}</div><div className="grid gap-3 sm:grid-cols-2"><label className="flex items-center gap-2 text-xs font-bold">Correct answer<select name="correct" required className="h-9 flex-1 rounded-lg border border-border bg-background px-2 text-xs font-normal" data-testid="select-mcq-correct"><option value="">Select the correct option</option>{['a', 'b', 'c', 'd', 'e'].map((x) => <option key={x} value={x}>{x.toUpperCase()}</option>)}</select></label><label className="flex items-center gap-2 text-xs font-bold">Difficulty<select name="difficulty" defaultValue="medium" className="h-9 flex-1 rounded-lg border border-border bg-background px-2 text-xs font-normal capitalize" data-testid="select-mcq-difficulty">{['easy', 'medium', 'hard'].map((x) => <option key={x} value={x}>{x}</option>)}</select></label></div><input name="explanation" placeholder="Explanation shown after answer" className="h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-mcq-explanation" /><button disabled={!targetReady} className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-save-mcq">Save as draft</button></form>}
+      create.mutate({ data: { question: String(f.get('question')), options, correctAnswer: correctAnswer ?? '', explanation: String(f.get('explanation')), reference: '', difficulty: String(f.get('difficulty') || 'moderate'), moduleId: Number(moduleId), subjectId: Number(subjectId), topicId: Number(topicId) } }, { onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListMcqsQueryKey() }); e.currentTarget.reset(); } });
+    }} className="mt-6 space-y-3 rounded-2xl border border-border bg-card p-5">{!targetReady && <p className="text-[11px] font-semibold text-[#8a5a12]">Select module/subject/topic above first.</p>}<textarea name="question" required placeholder="Write the question..." className="min-h-20 w-full rounded-xl border border-border bg-background p-3 text-xs" data-testid="input-mcq-question" /><div className="grid gap-3 sm:grid-cols-2">{['a', 'b', 'c', 'd', 'e'].map((x) => <input key={x} name={x} required={x !== 'e'} placeholder={`Option ${x.toUpperCase()}${x === 'e' ? ' (optional)' : ''}`} className="h-10 rounded-xl border border-border bg-background px-3 text-xs" data-testid={`input-mcq-option-${x}`} />)}</div><div className="grid gap-3 sm:grid-cols-2"><label className="flex items-center gap-2 text-xs font-bold">Correct answer<select name="correct" required className="h-9 flex-1 rounded-lg border border-border bg-background px-2 text-xs font-normal" data-testid="select-mcq-correct"><option value="">Select the correct option</option>{['a', 'b', 'c', 'd', 'e'].map((x) => <option key={x} value={x}>{x.toUpperCase()}</option>)}</select></label><label className="flex items-center gap-2 text-xs font-bold">Difficulty<select name="difficulty" defaultValue="moderate" className="h-9 flex-1 rounded-lg border border-border bg-background px-2 text-xs font-normal capitalize" data-testid="select-mcq-difficulty">{['easy', 'moderate', 'hard'].map((x) => <option key={x} value={x}>{x}</option>)}</select></label></div><input name="explanation" placeholder="Explanation shown after answer" className="h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-mcq-explanation" /><button disabled={!targetReady} className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-save-mcq">Save as draft</button></form>}
 
     <div className="mt-8"><SectionHeader eyebrow="Question bank" title={`${mcqs.length} questions`} action={<div className="flex flex-wrap items-center gap-2"><button onClick={() => setBulkAddOpen((v) => !v)} className="rounded-xl border border-border bg-card px-3 py-2 text-xs font-bold" data-testid="button-toggle-bulk-add">Add multiple</button><div className="flex overflow-hidden rounded-xl border border-border text-xs font-bold"><button onClick={() => setBankView('tree')} className={cn('px-3 py-2', bankView === 'tree' ? 'bg-primary text-primary-foreground' : 'bg-card')} data-testid="button-bank-view-tree">Module tree</button><button onClick={() => setBankView('flat')} className={cn('px-3 py-2', bankView === 'flat' ? 'bg-primary text-primary-foreground' : 'bg-card')} data-testid="button-bank-view-flat">Flat list</button></div></div>} /><ExplanationCoverage />
 
@@ -723,7 +868,7 @@ function AdminMcqs() {
           <textarea value={row.question} onChange={(e) => setBulkRows((rows) => rows.map((r, ri) => ri === i ? { ...r, question: e.target.value } : r))} placeholder="Write the question..." className="mt-2 min-h-14 w-full rounded-lg border border-border bg-background p-2 text-xs" data-testid={`input-bulk-question-${i}`} />
           <div className="mt-2 grid gap-2 sm:grid-cols-2">{(['a', 'b', 'c', 'd', 'e'] as const).map((x) => <input key={x} value={row[x]} onChange={(e) => setBulkRows((rows) => rows.map((r, ri) => ri === i ? { ...r, [x]: e.target.value } : r))} placeholder={`Option ${x.toUpperCase()}${x === 'e' ? ' (optional)' : ''}`} className="h-9 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`input-bulk-option-${i}-${x}`} />)}</div>
           <div className="mt-2 flex flex-wrap items-center gap-2"><span className="text-[11px] font-bold text-muted-foreground">Correct:</span><select value={row.correct} onChange={(e) => setBulkRows((rows) => rows.map((r, ri) => ri === i ? { ...r, correct: e.target.value } : r))} className="h-8 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`select-bulk-correct-${i}`}>{['a', 'b', 'c', 'd', 'e'].map((x) => <option key={x} value={x}>{x.toUpperCase()}</option>)}</select>
-            <span className="text-[11px] font-bold text-muted-foreground">Difficulty:</span><select value={row.difficulty} onChange={(e) => setBulkRows((rows) => rows.map((r, ri) => ri === i ? { ...r, difficulty: e.target.value } : r))} className="h-8 rounded-lg border border-border bg-background px-2 text-xs capitalize" data-testid={`select-bulk-difficulty-${i}`}>{['easy', 'medium', 'hard'].map((x) => <option key={x} value={x}>{x}</option>)}</select>
+            <span className="text-[11px] font-bold text-muted-foreground">Difficulty:</span><select value={row.difficulty} onChange={(e) => setBulkRows((rows) => rows.map((r, ri) => ri === i ? { ...r, difficulty: e.target.value } : r))} className="h-8 rounded-lg border border-border bg-background px-2 text-xs capitalize" data-testid={`select-bulk-difficulty-${i}`}>{['easy', 'moderate', 'hard'].map((x) => <option key={x} value={x}>{x}</option>)}</select>
             <button type="button" onClick={() => setBulkRows((rows) => rows.map((r, ri) => ri === i ? { ...r, showOptionExplanations: !r.showOptionExplanations } : r))} className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-primary" data-testid={`button-toggle-option-explanations-${i}`}><CircleHelp size={12} /> {row.showOptionExplanations ? 'Hide' : 'Add'} explanations</button>
           </div>
           {row.showOptionExplanations && <div className="mt-2 space-y-1.5 rounded-lg bg-muted/50 p-2.5">
@@ -1146,11 +1291,19 @@ const DEFAULT_METHODS: PaymentMethodConfig[] = [
 ];
 
 function parseMethods(values: PaymentSettingsValues): PaymentMethodConfig[] {
+  let methods: PaymentMethodConfig[];
   try {
     const parsed = JSON.parse(values.PAYMENT_METHODS_CONFIG || '[]');
-    if (Array.isArray(parsed) && parsed.length) return parsed;
-  } catch { /* fall through to defaults */ }
-  return DEFAULT_METHODS;
+    methods = Array.isArray(parsed) && parsed.length ? parsed : DEFAULT_METHODS;
+  } catch { methods = DEFAULT_METHODS; }
+  // Backfill from the legacy per-method settings keys (PAYMENT_RAAST_NUMBER
+  // etc.) so numbers/names entered before this fix still show up here —
+  // matches the same backfill GET /payment-details does for students.
+  return methods.map((m) => ({
+    ...m,
+    accountNumber: m.accountNumber || values[`PAYMENT_${m.key.toUpperCase()}_NUMBER`] || '',
+    accountName: m.accountName || values[`PAYMENT_${m.key.toUpperCase()}_ACCOUNT_NAME`] || '',
+  }));
 }
 
 // ── Tab: Collection Details (instructions, currency, QR, legacy wallet fields) ──
@@ -1221,8 +1374,6 @@ function PaymentMethodsTab({ values, set }: { values: PaymentSettingsValues; set
   const writeMethods = (next: PaymentMethodConfig[]) => set('PAYMENT_METHODS_CONFIG', JSON.stringify(next));
   const updateMethod = (key: string, patch: Partial<PaymentMethodConfig>) => writeMethods(methods.map((m) => (m.key === key ? { ...m, ...patch } : m)));
 
-  const walletKey = (key: string, field: string) => `PAYMENT_${key.toUpperCase()}_${field}`;
-
   return <div className="max-w-3xl space-y-3">
     <p className="text-xs text-muted-foreground">Toggle which payment methods students can use, and set per-method instructions. Bank Transfer details live under the Bank Accounts tab.</p>
     {methods.map((m) => <div key={m.key} className="rounded-2xl border border-border bg-card p-5" data-testid={`card-method-${m.key}`}>
@@ -1231,8 +1382,8 @@ function PaymentMethodsTab({ values, set }: { values: PaymentSettingsValues; set
       </div>
       {m.enabled && <div className="mt-4 space-y-3 border-t border-border pt-4">
         {m.type === 'wallet' && <div className="grid gap-3 sm:grid-cols-2">
-          <label className="text-xs font-bold">{m.label} number<input value={values[walletKey(m.key, 'NUMBER')] || ''} onChange={(e) => set(walletKey(m.key, 'NUMBER'), e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs font-mono-app" data-testid={`input-${m.key}-number`} /></label>
-          <label className="text-xs font-bold">Account name<input value={values[walletKey(m.key, 'ACCOUNT_NAME')] || ''} onChange={(e) => set(walletKey(m.key, 'ACCOUNT_NAME'), e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid={`input-${m.key}-account-name`} /></label>
+          <label className="text-xs font-bold">{m.label} number<input value={m.accountNumber || ''} onChange={(e) => updateMethod(m.key, { accountNumber: e.target.value })} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs font-mono-app" data-testid={`input-${m.key}-number`} /></label>
+          <label className="text-xs font-bold">Account name<input value={m.accountName || ''} onChange={(e) => updateMethod(m.key, { accountName: e.target.value })} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid={`input-${m.key}-account-name`} /></label>
         </div>}
         <label className="text-xs font-bold">Instructions for this method<textarea value={m.instructions} onChange={(e) => updateMethod(m.key, { instructions: e.target.value })} className="mt-2 min-h-16 w-full rounded-xl border border-border bg-background p-3 text-xs" data-testid={`input-${m.key}-instructions`} /></label>
       </div>}
@@ -1521,7 +1672,13 @@ function AdminBooks() {
     onError: (err: unknown) => toast({ title: 'Could not delete book', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
 
-  return <div><SectionHeader eyebrow="Study tools" title="Books library" action={<button onClick={() => setOpen((v) => !v)} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-toggle-add-book"><Plus size={15} /> {open ? 'Close' : 'Add book'}</button>} />
+  const backfill = useMutation({
+    mutationFn: booksAdminApi.backfillLinks,
+    onSuccess: (result) => { invalidate(); toast({ title: 'Link check complete', description: `Fixed ${result.fixed}, skipped ${result.skipped}, failed ${result.failed}.` }); },
+    onError: (err: unknown) => toast({ title: 'Could not fix links', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
+
+  return <div><SectionHeader eyebrow="Study tools" title="Books library" action={<div className="flex gap-2"><button onClick={() => backfill.mutate()} disabled={backfill.isPending} className="inline-flex items-center gap-2 rounded-xl border border-border px-4 py-2.5 text-xs font-extrabold text-muted-foreground hover:text-foreground disabled:opacity-50" data-testid="button-backfill-book-links">{backfill.isPending ? 'Checking…' : 'Fix broken links'}</button><button onClick={() => setOpen((v) => !v)} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-toggle-add-book"><Plus size={15} /> {open ? 'Close' : 'Add book'}</button></div>} />
     {open && <form onSubmit={(e) => { e.preventDefault(); create.mutate(); }} className="mb-5 space-y-3 rounded-2xl border border-border bg-card p-5">
       <div className="grid gap-2 sm:grid-cols-2"><input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" required className="h-10 rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-book-title" /><input value={author} onChange={(e) => setAuthor(e.target.value)} placeholder="Author (optional)" className="h-10 rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-book-author" /></div>
       <div className="grid gap-2 sm:grid-cols-3"><select value={moduleId} onChange={(e) => { setModuleId(e.target.value); setSubjectId(''); setTopicId(''); }} className="h-10 rounded-xl border border-border bg-background px-3 text-xs" data-testid="select-book-module"><option value="">All modules</option>{modules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select><select value={subjectId} onChange={(e) => { setSubjectId(e.target.value); setTopicId(''); }} disabled={!moduleId} className="h-10 rounded-xl border border-border bg-background px-3 text-xs disabled:opacity-50" data-testid="select-book-subject"><option value="">All subjects</option>{(subjectsQ.data || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select><select value={topicId} onChange={(e) => setTopicId(e.target.value)} disabled={!subjectId} className="h-10 rounded-xl border border-border bg-background px-3 text-xs disabled:opacity-50" data-testid="select-book-topic"><option value="">All topics</option>{(topicsQ.data || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
@@ -1532,7 +1689,7 @@ function AdminBooks() {
     {books.length ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{books.map((b) => <div key={b.id} className="rounded-2xl border border-border bg-card p-4" data-testid={`card-book-${b.id}`}>
       {b.coverImagePath && <img src={resolveUploadUrl(b.coverImagePath) ?? undefined} alt="" className="mb-3 h-32 w-full rounded-lg object-cover" />}
       <p className="text-sm font-bold leading-5">{b.title}</p>{b.author && <p className="mt-1 text-xs text-muted-foreground">{b.author}</p>}
-      <div className="mt-3 flex items-center justify-between"><a href={resolveUploadUrl(b.storagePath) ?? '#'} target="_blank" rel="noreferrer" className="text-xs font-bold text-primary" data-testid={`link-open-book-${b.id}`}>Open PDF <ArrowRight size={12} className="ml-1 inline" /></a><button onClick={() => setDeletingId(b.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-book-${b.id}`}><Trash2 size={14} /></button></div>
+      <div className="mt-3 flex items-center justify-between">{resolveUploadUrl(b.storagePath) ? <a href={resolveUploadUrl(b.storagePath)!} target="_blank" rel="noreferrer" className="text-xs font-bold text-primary" data-testid={`link-open-book-${b.id}`}>Open PDF <ArrowRight size={12} className="ml-1 inline" /></a> : <span className="text-[11px] font-bold text-destructive" data-testid={`text-book-unavailable-${b.id}`}>Link broken — try "Fix broken links"</span>}<button onClick={() => setDeletingId(b.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-book-${b.id}`}><Trash2 size={14} /></button></div>
     </div>)}</div> : <EmptyState icon={BookOpen} title="No books yet" body="Upload a PDF above — students can browse and open it from their Books tab." />}
     {deletingId !== null && <ConfirmDialog title="Permanently delete this book?" body="It will be removed from the students' library and the admin list for good. There is no undo." confirmLabel="Delete forever" onCancel={() => setDeletingId(null)} onConfirm={() => remove.mutate(deletingId)} pending={remove.isPending} />}
   </div>;

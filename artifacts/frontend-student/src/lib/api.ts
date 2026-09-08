@@ -74,7 +74,7 @@ export interface PlatformSettings {
 }
 
 export interface BankAccount { id: string; label: string; accountHolder: string; bankName: string; accountNumber: string; ifsc: string; branch: string; isPrimary: boolean }
-export interface PaymentMethodConfig { key: string; label: string; type: 'bank' | 'wallet' | 'card' | 'cash'; enabled: boolean; instructions: string }
+export interface PaymentMethodConfig { key: string; label: string; type: 'bank' | 'wallet' | 'card' | 'cash'; enabled: boolean; instructions: string; accountNumber?: string; accountName?: string }
 
 export interface AuditLogEntry { id: number; actorId: number | null; actorName: string; action: string; entity: string; entityId: number | null; metadata: string | null; createdAt: string }
 
@@ -119,12 +119,12 @@ export const teamApi = {
   remove: (id: number) => request<{ ok: true }>(`/admin/team-members/${id}`, { method: 'DELETE' }),
 };
 
-export interface AdminBookStudent { id: number; title: string; author: string | null; moduleId: number | null; subjectId: number | null; topicId: number | null; storagePath: string; coverImagePath: string | null }
+export interface AdminBookStudent { id: number; title: string; author: string | null; moduleId: number | null; subjectId: number | null; topicId: number | null; storagePath: string | null; coverImagePath: string | null }
 export const booksApi = {
   list: () => request<AdminBookStudent[]>('/books'),
 };
 
-export interface AdminModule { id: number; name: string; subtitle: string; subjectCount: number; topicCount: number; progress: number; active: boolean; programTargetKind?: string | null; yearTargetNumber?: number | null; targetingLabel?: string }
+export interface AdminModule { id: number; name: string; subtitle: string; subjectCount: number; topicCount: number; progress: number; active: boolean; blockId?: number | null; blockName?: string | null; displayOrder?: number; programTargetKind?: string | null; yearTargetNumber?: number | null; targetingLabel?: string }
 
 export const moduleAdminApi = {
   listAll: () => request<AdminModule[]>('/modules'),
@@ -133,6 +133,11 @@ export const moduleAdminApi = {
   update: (id: number, body: Partial<{ name: string; subtitle: string; active: boolean; programTargetKind: string | null; yearTargetNumber: number | null }>) =>
     request<AdminModule>(`/modules/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   remove: (id: number) => request<{ ok: true }>(`/modules/${id}`, { method: 'DELETE' }),
+};
+
+export interface Block { id: number; name: string; subtitle: string; iconUrl: string | null; displayOrder: number; active: boolean }
+export const blocksApi = {
+  list: () => request<Block[]>('/blocks'),
 };
 
 export interface Exam {

@@ -130,6 +130,42 @@ export async function testCloudinaryConnection(): Promise<{ ok: boolean; error?:
   }
 }
 
+/**
+ * One-time backward-compat helper for rows saved before the "keep the
+ * extension in public_id" fix (see the comment in uploadToCloudinary above).
+ * Those rows are stored as "cloudinary:{resourceType}/{publicId}" with NO
+ * extension on publicId, which resolves to a URL Cloudinary can't serve
+ * (ERR_INVALID_RESPONSE for PDFs, a 404 for other raw files). This looks the
+ * asset up by its existing public_id via Cloudinary's Admin API, reads back
+ * the real delivered `format`, and returns a corrected storage path with the
+ * extension appended — or null if it's not a legacy path, Cloudinary isn't
+ * configured, or the asset can't be found (e.g. already deleted).
+ */
+export async function reresolveLegacyCloudinaryPath(storagePath: string): Promise<string | null> {
+  if (!storagePath.startsWith("cloudinary:")) return null;
+  const rest = storagePath.slice("cloudinary:".length);
+  const slash = rest.indexOf("/");
+  if (slash < 0) return null;
+  const resourceType = rest.slice(0, slash) || "auto";
+  const publicId = rest.slice(slash + 1);
+  // Already has an extension (post-fix upload) — nothing to do.
+  if (/\.[^./]+$/.test(publicId)) return null;
+
+  const config = await resolveCloudinaryConfig();
+  if (!config) return null;
+  try {
+    const { v2: cloudinary } = await import("cloudinary");
+    cloudinary.config({ cloud_name: config.cloudName, api_key: config.apiKey, api_secret: config.apiSecret });
+    const resource = await cloudinary.api.resource(publicId, { resource_type: resourceType === "auto" ? "image" : resourceType });
+    const format = resource?.format;
+    if (!format) return null;
+    return `cloudinary:${resourceType}/${publicId}.${format}`;
+  } catch (err) {
+    logger.error({ err, publicId }, "Could not re-resolve legacy Cloudinary path");
+    return null;
+  }
+}
+
 /** Resolves a stored path (from uploadFile) into a URL the frontend can fetch. */
 export function resolveFileUrl(storagePath: string | null | undefined): string | null {
   if (!storagePath) return null;
