@@ -17,6 +17,35 @@
 
 import { getSetting } from "./settings";
 
+// A raw `fetch` to an AI provider has no timeout of its own — left alone,
+// a slow/hung request just keeps waiting until the *hosting platform's*
+// own gateway eventually kills the connection (a bare 504 with no body,
+// which our Express error handling never even sees, so the student gets
+// no useful message — just a generic "Request failed (504)" from the
+// frontend). This wraps any provider fetch with an AbortController so a
+// slow call fails on OUR terms — quickly enough to stay under typical
+// gateway timeouts, and with an error our route handlers already know how
+// to turn into a clean 502 response. 25s per call was chosen so that even
+// the AI Visualizer's worst case (one failed attempt + one retry) stays
+// close to 50s total, comfortably under most hosts' request-timeout
+// ceilings (commonly 30-100s) rather than compounding past them.
+const AI_FETCH_TIMEOUT_MS = 25_000;
+
+async function fetchWithTimeout(url: string, init: RequestInit, providerLabel: string): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), AI_FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`${providerLabel} took too long to respond (over ${AI_FETCH_TIMEOUT_MS / 1000}s) — try again, or try a shorter/simpler prompt.`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export class AiNotConfiguredError extends Error {
   constructor() {
     super("No AI provider is configured. Set it from Admin -> Platform settings -> AI, or set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY in the environment.");
@@ -272,7 +301,7 @@ async function generateWithAnthropic(apiKey: string, model: string, prompt: stri
   const messages = prefill
     ? [{ role: "user", content: prompt }, { role: "assistant", content: prefill }]
     : [{ role: "user", content: prompt }];
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({
@@ -280,7 +309,7 @@ async function generateWithAnthropic(apiKey: string, model: string, prompt: stri
       max_tokens: maxTokens,
       messages,
     }),
-  });
+  }, "Anthropic");
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(`Anthropic API error (${res.status}): ${body.slice(0, 300)}`);
@@ -299,7 +328,7 @@ async function generateWithOpenAi(apiKey: string, model: string, prompt: string,
   // the array in an object instead, breaking the parser downstream. So this
   // is only ever enabled for "object" mode; "array" mode falls back to the
   // prompt's own instructions, same as before.
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
@@ -308,7 +337,7 @@ async function generateWithOpenAi(apiKey: string, model: string, prompt: string,
       messages: [{ role: "user", content: prompt }],
       ...(jsonMode === "object" ? { response_format: { type: "json_object" } } : {}),
     }),
-  });
+  }, "OpenAI");
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(`OpenAI API error (${res.status}): ${body.slice(0, 300)}`);
@@ -321,7 +350,7 @@ async function generateWithOpenAi(apiKey: string, model: string, prompt: string,
 
 async function generateWithGemini(apiKey: string, model: string, prompt: string, maxTokens = 400, jsonMode: JsonMode = false): Promise<string> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -333,7 +362,7 @@ async function generateWithGemini(apiKey: string, model: string, prompt: string,
         ...(jsonMode ? { responseMimeType: "application/json" } : {}),
       },
     }),
-  });
+  }, "Gemini");
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(`Gemini API error (${res.status}): ${body.slice(0, 300)}`);

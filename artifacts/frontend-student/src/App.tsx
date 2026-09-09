@@ -10,8 +10,9 @@ import {
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
   GraduationCap, CalendarDays, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
   RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Link2 as LinkIcon, Lightbulb,
-  LayoutGrid, Presentation, Wand2, Loader2, Crown, Globe, Star
+  LayoutGrid, Presentation, Wand2, Loader2, Crown, Globe, Star, Activity
 } from 'lucide-react';
+import { applyThemeVars } from '@/lib/theme';
 import {
   getListMembershipPlansQueryKey, getListPaymentsQueryKey, getListMcqsQueryKey, getListModulesQueryKey, getListStudentsQueryKey, getListNotificationsQueryKey, getGetCurrentUserQueryKey,
   useApprovePayment, useCreateMembershipPlan, useCreateMcq, useCreateModule, useGetAdminDashboard,
@@ -30,7 +31,7 @@ import { toast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
-import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, type MyFeedbackEntry, analyticsApi, type ProgressTrend, mcqImportApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blocksApi, type Block, examsAdminApi, examsApi, explanationsApi, booksApi, type AdminBookStudent, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type StudentDetail, type SiteContent, type TeamMember, type AdminModule, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type PaymentDetails, type PaymentMethodConfig, aiVisualizerApi, type VisualizationSpec } from '@/lib/api';
+import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, type MyFeedbackEntry, analyticsApi, type ProgressTrend, mcqImportApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blocksApi, type Block, examsAdminApi, examsApi, explanationsApi, booksApi, type AdminBookStudent, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type StudentDetail, type SiteContent, type TeamMember, type AdminModule, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type PaymentDetails, type PaymentMethodConfig, aiVisualizerApi, type VisualizationSpec, LeaderboardRow } from '@/lib/api';
 import { VisualizationRenderer, isStepBased } from '@/components/visualizer/VisualizationRenderer';
 import { StepControls } from '@/components/visualizer/StepControls';
 import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
@@ -103,9 +104,9 @@ function ConfirmDialog({ title, body, confirmLabel = 'Delete', onConfirm, onCanc
 }
 
 function Logo({ dark = false }: { dark?: boolean }) {
-  return <Link href="/" className="flex items-center gap-3" data-testid="link-logo">
-    <span className={cn('grid size-9 place-items-center rounded-xl', dark ? 'bg-[#8bcbb8] text-[#102c37]' : 'bg-[#164b4b] text-[#d7eee4]')}><Stethoscope size={19} strokeWidth={2.4} /></span>
-    <span className={cn('text-[15px] font-extrabold tracking-[-.03em]', dark ? 'text-[#f3f1e9]' : 'text-[#164b4b]')}>medschool<span className="text-[#e5a952]">proffs</span></span>
+  return <Link href="/" className="flex items-center gap-2" data-testid="link-logo">
+    <Activity size={20} strokeWidth={2.4} className={dark ? 'text-sidebar-primary' : 'text-primary'} aria-hidden="true" />
+    <span className={cn('text-[15px] font-extrabold tracking-[-.03em]', dark ? 'text-sidebar-foreground' : 'text-primary')}>MedschoolProffs</span>
   </Link>;
 }
 
@@ -128,17 +129,25 @@ function SideNav({ user, onClose }: { user: User; onClose: () => void }) {
   const notifQ = useListNotifications();
   const unreadCount = (notifQ.data ?? []).filter((n) => !n.read).length;
   const logout = useMutation({ mutationFn: authApi.logout, onSuccess: () => { queryClient.clear(); window.location.href = '/login'; } });
-  return <aside className="fixed inset-y-0 left-0 z-40 flex w-[252px] flex-col overflow-y-auto bg-sidebar px-4 py-5 text-sidebar-foreground shadow-xl md:sticky md:top-0 md:h-[100dvh] md:shadow-none">
+  return <aside className="fixed inset-y-0 left-0 z-40 flex w-[240px] flex-col overflow-y-auto bg-sidebar px-3 py-5 text-sidebar-foreground shadow-xl md:sticky md:top-0 md:h-[100dvh] md:shadow-none">
     <div className="mb-8 flex items-center justify-between px-2"><Logo dark /><button className="rounded-lg p-2 text-sidebar-foreground/60 hover:bg-sidebar-accent md:hidden" onClick={onClose} data-testid="button-close-menu"><X size={18} /></button></div>
-    <div className="mb-2 px-3 font-mono-app text-[10px] uppercase tracking-[.18em] text-sidebar-foreground/45">Study desk</div>
-    <nav className="space-y-4">
-      {groups.map((group) => <div key={group.label}><div className="mb-1 px-3 text-[10px] font-bold uppercase tracking-[.1em] text-sidebar-foreground/35">{group.label}</div><div className="space-y-1">{group.items.map(([href, label, Icon]) => <Link key={href} href={href} onClick={onClose} className={cn('group flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-semibold transition-colors', location === href ? 'bg-sidebar-primary text-sidebar-primary-foreground' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground')} data-testid={`link-nav-${label.toLowerCase().replaceAll(' ', '-')}`}><Icon size={17} strokeWidth={location === href ? 2.4 : 1.8} /><span>{label}</span>{label === 'Notifications' && unreadCount > 0 && <span className="ml-auto grid size-5 place-items-center rounded-full bg-[#e5a952] text-[10px] font-bold text-[#183844]">{unreadCount > 9 ? '9+' : unreadCount}</span>}</Link>)}</div></div>)}
+    <nav className="space-y-5">
+       {groups.map((group) => <div key={group.label}><div className="mb-1.5 px-3.5 font-mono-app text-[9px] font-bold uppercase tracking-[.14em] text-sidebar-foreground/40">{group.label}</div><div className="space-y-1">{group.items.map(([href, label, Icon]) => <Link key={href} href={href} onClick={onClose} className={cn('group flex items-center gap-3 rounded-xl px-3.5 py-3 text-[13px] font-semibold transition-colors', location === href ? 'nav-active bg-white text-sidebar shadow-sm' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground')} data-testid={`link-nav-${label.toLowerCase().replaceAll(' ', '-')}`}><Icon size={18} strokeWidth={location === href ? 2.2 : 1.8} /><span>{label}</span>{label === 'Notifications' && unreadCount > 0 && <span className="ml-auto grid size-5 place-items-center rounded-full bg-[#e5a952] text-[10px] font-bold text-[#183844]">{unreadCount > 9 ? '9+' : unreadCount}</span>}</Link>)}</div></div>)}
     </nav>
-    <div className="mt-auto pt-4">
+    <div className="mt-auto pt-5">
       <div className="mb-3 rounded-2xl border border-sidebar-border bg-sidebar-accent/70 p-4"><div className="mb-2 flex items-center gap-2 text-sidebar-foreground/75"><Sparkles size={14} className="text-[#e5a952]" /><span className="text-xs font-bold">Small steps, daily.</span></div><p className="text-[11px] leading-5 text-sidebar-foreground/50">Keep your streak alive with a 10-minute review.</p><Link href="/modules" className="mt-3 inline-flex items-center gap-1 text-[11px] font-bold text-sidebar-primary" data-testid="link-sidebar-practice">Start a review <ArrowRight size={12} /></Link></div>
-      <div className="flex items-center gap-3 rounded-xl px-2 py-2"><div className="grid size-8 place-items-center rounded-full bg-[#d7eee4] text-xs font-extrabold text-[#164b4b]">{initials(user.name)}</div><div className="min-w-0 flex-1"><div className="truncate text-xs font-bold text-sidebar-foreground">{user.name}</div><div className="truncate text-[10px] text-sidebar-foreground/45">{user.institution || 'Medical student'}</div></div><button onClick={() => logout.mutate()} disabled={logout.isPending} className="text-sidebar-foreground/50 hover:text-sidebar-foreground disabled:opacity-50" data-testid="button-signout" title="Sign out"><LogOut size={15} /></button></div>
+      <div className="flex items-center gap-3 rounded-xl px-2.5 py-2.5"><div className="grid size-9 shrink-0 place-items-center rounded-full bg-sidebar-primary text-xs font-extrabold text-sidebar-primary-foreground">{initials(user.name)}</div><div className="min-w-0 flex-1"><div className="truncate text-xs font-bold text-sidebar-foreground">{user.name}</div><div className="truncate text-[10px] text-sidebar-foreground/45">{user.institution || 'Medical student'}</div></div><button onClick={() => logout.mutate()} disabled={logout.isPending} className="text-sidebar-foreground/50 hover:text-sidebar-foreground disabled:opacity-50" data-testid="button-signout" title="Sign out"><LogOut size={15} /></button></div>
     </div>
   </aside>;
+}
+
+function QuickJump({ open, value, onChange, onClose }: { open: boolean; value: string; onChange: (value: string) => void; onClose: () => void }) {
+  if (!open) return null;
+  const options = navGroups.flatMap((group) => group.items.map(([href, label, Icon]) => ({ href, label, Icon }))).filter((item) => item.label.toLowerCase().includes(value.toLowerCase()));
+  return <div className="absolute right-5 top-[58px] z-30 w-[min(360px,calc(100vw-2.5rem))] overflow-hidden rounded-xl border border-border bg-card shadow-xl md:right-10" data-testid="panel-quick-jump">
+    <div className="border-b border-border/70 p-2"><div className="flex items-center gap-2 rounded-lg bg-muted/70 px-2.5"><Search size={14} className="text-muted-foreground" /><input autoFocus value={value} onChange={(event) => onChange(event.target.value)} placeholder="Jump to a study area" className="h-9 min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground" data-testid="input-quick-jump" /><button onClick={onClose} className="rounded p-1 text-muted-foreground hover:bg-card" data-testid="button-close-quick-jump"><X size={14} /></button></div></div>
+    <div className="max-h-72 overflow-y-auto p-1.5">{options.length ? options.map(({ href, label, Icon }) => <Link key={href} href={href} onClick={onClose} className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-xs font-semibold text-foreground hover:bg-muted" data-testid={`link-quick-jump-${label.toLowerCase().replaceAll(' ', '-')}`}><span className="grid size-7 place-items-center rounded-md bg-secondary text-primary"><Icon size={14} /></span>{label}<ChevronRight size={13} className="ml-auto text-muted-foreground" /></Link>) : <div className="px-3 py-5 text-center text-xs text-muted-foreground">No study areas match that search.</div>}</div>
+  </div>;
 }
 
 // "Focus mode" — hides the sidebar/collapses it to a slim exit bar during an
@@ -160,13 +169,29 @@ function useFocusMode(active: boolean) {
 // see so much as a flash of the dashboard/admin UI underneath.
 function Shell({ children }: { children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [quickJumpOpen, setQuickJumpOpen] = useState(false);
+  const [quickJumpValue, setQuickJumpValue] = useState('');
   // retry: false — a failed/unusable current-user response should send the
   // user to /login promptly, not spend several silent retries first.
-  const userQuery = useGetCurrentUser({ query: { retry: false } });
+  const userQuery = useGetCurrentUser({ query: { retry: false, queryKey: getGetCurrentUserQueryKey() } });
   const [location, setLocation] = useLocation();
   const isMobile = useIsMobile();
   const user = userQuery.data;
   const { focusMode } = useContext(FocusModeContext);
+
+  useEffect(() => {
+    // The topbar search button has always shown a "⌘K" hint — this is the
+    // listener that actually makes it work, plus the Dashboard's "Search"
+    // quick-link tile (which lives outside this component tree, so it
+    // reaches this via a custom event rather than a prop).
+    function handleKeydown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setQuickJumpValue(''); setQuickJumpOpen(true); }
+    }
+    function handleOpenSearchEvent() { setQuickJumpValue(''); setQuickJumpOpen(true); }
+    window.addEventListener('keydown', handleKeydown);
+    window.addEventListener(OPEN_SEARCH_EVENT, handleOpenSearchEvent);
+    return () => { window.removeEventListener('keydown', handleKeydown); window.removeEventListener(OPEN_SEARCH_EVENT, handleOpenSearchEvent); };
+  }, []);
 
   useEffect(() => {
     if (userQuery.isLoading) return;
@@ -194,7 +219,7 @@ function Shell({ children }: { children: ReactNode }) {
   // affordance — the full-width real estate goes to the question instead.
   if (focusMode) return <div className="min-h-[100dvh] bg-background"><header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border/70 bg-background/90 px-4 backdrop-blur-md md:px-8"><button onClick={() => setLocation('/')} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold text-muted-foreground hover:bg-muted" data-testid="button-exit-focus-mode"><ArrowLeft size={15} /> Exit</button><span className="text-xs font-bold capitalize text-foreground">{title}</span></header><div className="page-enter px-5 py-6 md:px-10 md:py-8">{children}</div></div>;
 
-  return <div className="flex min-h-[100dvh] bg-background"><div className={cn(menuOpen ? 'block' : 'hidden', 'fixed inset-0 z-30 bg-[#102c37]/40 md:hidden')} onClick={() => setMenuOpen(false)} />{(menuOpen || !isMobile) && <SideNav user={user} onClose={() => setMenuOpen(false)} />}<main className="min-w-0 flex-1"><header className="sticky top-0 z-20 flex h-[72px] items-center justify-between border-b border-border/70 bg-background/90 px-5 backdrop-blur-md md:px-10"><div className="flex items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} data-testid="button-open-menu"><Menu size={20} /></button><div><div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-muted-foreground">{today}</div><h1 className="mt-1 text-[17px] font-bold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="flex items-center gap-2"><Link href="/notifications" className="relative grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted" data-testid="link-notifications"><Bell size={17} /></Link><Link href="/profile" className="ml-1 grid size-9 place-items-center rounded-full bg-[#d7eee4] text-xs font-extrabold text-[#164b4b]" data-testid="link-header-profile">{initials(user.name)}</Link></div></header><div className="page-enter px-5 py-7 md:px-10 md:py-9">{children}</div></main></div>;
+  return <div className="flex min-h-[100dvh] bg-background"><div className={cn(menuOpen ? 'block' : 'hidden', 'fixed inset-0 z-30 bg-[#071e2b]/45 md:hidden')} onClick={() => setMenuOpen(false)} />{(menuOpen || !isMobile) && <SideNav user={user} onClose={() => setMenuOpen(false)} />}<main className="min-w-0 flex-1"><header className="sticky top-0 z-20 flex h-[66px] items-center justify-between border-b border-border/70 bg-background/92 px-4 backdrop-blur-md md:px-8"><div className="flex min-w-0 items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} data-testid="button-open-menu"><Menu size={20} /></button><div className="min-w-0"><div className="font-mono-app text-[9px] uppercase tracking-[.16em] text-muted-foreground">{today}</div><h1 className="mt-1 truncate text-[16px] font-bold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="relative flex items-center gap-2"><button onClick={() => { setQuickJumpOpen((current) => !current); setQuickJumpValue(''); }} className="hidden h-9 w-[220px] items-center gap-2 rounded-lg border border-border bg-card px-3 text-left text-[11px] text-muted-foreground shadow-sm hover:border-primary/50 sm:flex md:w-[340px]" data-testid="button-open-quick-jump"><Search size={14} /><span className="truncate">Search modules, topics, MCQs...</span><span className="ml-auto rounded border border-border px-1 text-[9px]">⌘K</span></button><Link href="/notifications" className="relative grid size-9 place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:bg-muted" data-testid="link-notifications"><Bell size={16} /></Link><Link href="/profile" className="ml-1 grid size-8 place-items-center rounded-full bg-[#cdebf0] text-[10px] font-extrabold text-[#0d5267]" data-testid="link-header-profile">{initials(user.name)}</Link><QuickJump open={quickJumpOpen} value={quickJumpValue} onChange={setQuickJumpValue} onClose={() => setQuickJumpOpen(false)} /></div></header><div className="page-enter px-4 py-6 md:px-8 md:py-8">{children}</div></main></div>;
 }
 
 function SkeletonPage() { return <div className="space-y-5"><div className="skeleton h-8 w-56 rounded-lg" /><div className="grid gap-4 md:grid-cols-3"><div className="skeleton h-32 rounded-2xl" /><div className="skeleton h-32 rounded-2xl" /><div className="skeleton h-32 rounded-2xl" /></div><div className="skeleton h-72 rounded-2xl" /></div>; }
@@ -216,6 +241,13 @@ function Stat({ label, value }: { label: string; value: string | number }) { ret
 // The student-facing half of the same progress-trend data the practice
 // result card uses — so a student can check "am I improving?" any time,
 // not just right after finishing a session.
+function StatTile({ icon: Icon, bg, fg, label, value }: { icon: typeof Clock3; bg: string; fg: string; label: string; value: ReactNode }) {
+  return <div className="rounded-2xl border border-border bg-card p-5" data-testid={`stat-tile-${label.toLowerCase().replaceAll(' ', '-')}`}>
+    <div className="flex items-center gap-3"><span className={cn('grid size-10 shrink-0 place-items-center rounded-xl', bg, fg)}><Icon size={18} /></span><div className="text-xs font-semibold text-muted-foreground">{label}</div></div>
+    <div className="mt-3 font-display text-3xl">{value}</div>
+  </div>;
+}
+
 function ProgressProfileCard() {
   const trend = useQuery({ queryKey: ['progress-trend'], queryFn: analyticsApi.progress });
   const t = trend.data;
@@ -226,8 +258,42 @@ function ProgressProfileCard() {
   return <div className="rounded-2xl border border-border bg-card p-6" data-testid="card-progress-profile">
     <div className="flex flex-wrap items-center justify-between gap-3"><div><div className="flex items-center gap-2"><span className="font-display text-3xl">{t?.recentAverage != null ? `${t.recentAverage}%` : '—'}</span><ProgressBadge tone={verdict.tone} label={verdict.label} /></div><p className="mt-1 text-xs text-muted-foreground">Average score, last 7 days{t?.priorAverage != null ? ` (was ${t.priorAverage}% the week before)` : ''}</p></div><div className="flex gap-5 text-center text-xs"><div><div className="font-display text-xl">{t?.currentStreak ?? 0}</div><div className="text-muted-foreground">day streak</div></div><div><div className="font-display text-xl">{t?.recentSessions ?? 0}</div><div className="text-muted-foreground">sessions/wk</div></div></div></div>
     <p className="mt-4 text-xs leading-5 text-muted-foreground">{verdict.message}</p>
-    {history.length >= 2 ? <div className="mt-5 flex h-16 items-end gap-1.5" data-testid="chart-progress-history">{history.map((h, i) => <div key={i} className="flex-1 rounded-t bg-primary/70" style={{ height: `${Math.max(6, (h.scorePercent / maxScore) * 100)}%` }} title={`${h.scorePercent}%`} />)}</div> : <p className="mt-5 text-[11px] text-muted-foreground">Complete a few more sessions to see your trend line here.</p>}
+    {history.length >= 2 ? <div className="mt-5" data-testid="chart-progress-history">
+      <div className="flex h-16 items-end gap-1.5">{history.map((h, i) => <div key={i} className="flex-1 rounded-t bg-gradient-to-t from-primary to-accent" style={{ height: `${Math.max(6, (h.scorePercent / maxScore) * 100)}%` }} title={`${h.scorePercent}%`} />)}</div>
+      <div className="mt-1.5 flex gap-1.5">{history.map((h, i) => <div key={i} className="flex-1 text-center text-[9px] font-semibold text-muted-foreground">{new Date(h.date).toLocaleDateString(undefined, { weekday: 'narrow' })}</div>)}</div>
+    </div> : <p className="mt-5 text-[11px] text-muted-foreground">Complete a few more sessions to see your trend line here.</p>}
   </div>;
+}
+
+const QUICK_LINK_TILES: Array<{ href: string; label: string; sub: string; icon: typeof LayoutGrid; bg: string; fg: string }> = [
+  { href: '/blocks', label: 'Modules', sub: 'Explore all modules', icon: LayoutGrid, bg: 'bg-[#dceaf1]', fg: 'text-[#2c6a8f]' },
+  { href: '/practice', label: 'Practice MCQs', sub: 'Test your knowledge', icon: Target, bg: 'bg-[#d7eee4]', fg: 'text-[#1f7a5c]' },
+  { href: '/flashcards', label: 'Flashcards', sub: 'Revise smarter', icon: Sparkles, bg: 'bg-[#e6dcf5]', fg: 'text-[#6b3fa0]' },
+  { href: '/past-papers', label: 'Past Papers', sub: 'Previous exam papers', icon: FileStack, bg: 'bg-[#fbdada]', fg: 'text-[#b8493f]' },
+  { href: '/flagged-mcqs', label: 'Bookmarks', sub: 'Saved content', icon: Bookmark, bg: 'bg-[#fff0cb]', fg: 'text-[#94651c]' },
+  { href: '#progress-profile', label: 'My Progress', sub: 'Track your growth', icon: TrendingUp, bg: 'bg-[#dde4f7]', fg: 'text-[#3b4f8f]' },
+  // Special-cased in the render below (href === OPEN_SEARCH_HREF) to open
+  // the QuickJump overlay via a custom event instead of navigating — the
+  // Shell that owns QuickJump's open/close state lives outside Dashboard's
+  // component tree, so a plain <Link> can't reach it directly.
+  { href: '#open-search', label: 'Search', sub: 'Find anything', icon: Search, bg: 'bg-[#dbeafe]', fg: 'text-[#1d4ed8]' },
+];
+const OPEN_SEARCH_HREF = '#open-search';
+const OPEN_SEARCH_EVENT = 'medschoolproffs:open-search';
+
+// Cycling palette for module tiles (Continue Learning / Recommended) so the
+// dashboard reads as multi-subject and colorful rather than one repeated
+// tone, matching the reference design's per-subject icon colors.
+const MODULE_TILE_COLORS = [
+  { bg: 'bg-[#fbdada]', fg: 'text-[#b8493f]' }, { bg: 'bg-[#dceaf1]', fg: 'text-[#2c6a8f]' },
+  { bg: 'bg-[#fff0cb]', fg: 'text-[#94651c]' }, { bg: 'bg-[#e6dcf5]', fg: 'text-[#6b3fa0]' },
+  { bg: 'bg-[#d7eee4]', fg: 'text-[#1f7a5c]' }, { bg: 'bg-[#dde4f7]', fg: 'text-[#3b4f8f]' },
+];
+
+function greetingForHour(hour: number): string {
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
 }
 
 function Dashboard() {
@@ -237,13 +303,86 @@ function Dashboard() {
   const notifications = d?.notifications ?? [];
   const [range, setRange] = useState('7d');
   const analytics = useQuery({ queryKey: ['analytics', range], queryFn: () => analyticsApi.get(range) });
+  // Same ['site-content'] query AppRoutes' useThemeSync/useFaviconSync
+  // already fetch — react-query dedupes by key, so this doesn't add a
+  // second request. The hero photo is optional (Admin -> Site content ->
+  // Design & branding); falls back to the decorative pattern when unset.
+  const siteContent = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get, staleTime: 5 * 60 * 1000 });
+  const heroImageUrl = siteContent.data?.dashboardHeroImageUrl || null;
   const daysRemaining = d?.membershipExpiry ? Math.max(0, Math.ceil((new Date(d.membershipExpiry).getTime() - Date.now()) / 86400000)) : null;
+
+  const inProgress = modules.find((m) => m.progress > 0 && m.progress < 100) ?? modules[0] ?? null;
+  const recommended = modules.filter((m) => !inProgress || m.id !== inProgress.id).slice(0, 3);
+  const modulesCompleted = modules.filter((m) => m.progress >= 100).length;
+  const overallProgress = d?.progress ?? 0;
+  const ringDeg = Math.round(Math.min(100, Math.max(0, overallProgress)) * 3.6);
+
   return <>{q.isLoading ? <SkeletonPage /> : <div className="space-y-9">
-    <section className="grid gap-5 lg:grid-cols-[1.5fr_1fr]"><div className="relative overflow-hidden rounded-3xl bg-[#164b4b] p-7 text-[#eaf2e9] md:p-9"><div className="absolute -right-10 -top-16 size-64 rounded-full border-[28px] border-[#2f6e68]/60" /><div className="absolute -bottom-24 right-20 size-56 rounded-full border-[18px] border-[#e5a952]/25" /><div className="relative"><Badge tone="green">Your study desk</Badge><h2 className="mt-5 max-w-md font-display text-4xl leading-[.98] tracking-[-.04em] md:text-5xl">Make today’s<br /><em className="text-[#e5c476]">progress count.</em></h2><p className="mt-5 max-w-sm text-sm leading-6 text-[#bfd4cb]">You’re building a strong rhythm. A short review now keeps the bigger picture clear.</p>{daysRemaining !== null && <div className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#2f6e68]/60 px-3 py-2 text-[11px] font-bold"><ShieldCheck size={13} /> Active subscription · {daysRemaining} days remaining</div>}<div><Link href="/modules" className="mt-7 inline-flex items-center gap-2 rounded-xl bg-[#e5a952] px-4 py-3 text-xs font-extrabold text-[#183844] transition-transform hover:-translate-y-0.5" data-testid="link-hero-practice">Continue practice <ArrowRight size={15} /></Link></div></div></div><div className="rounded-3xl border border-border bg-card p-7 shadow-sm"><div className="flex items-center justify-between"><div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-muted-foreground">Streak</div><div className="grid size-10 place-items-center rounded-xl bg-[#fff0cb] text-[#987029]"><Flame size={18} /></div></div><div className="mt-7 flex items-end gap-3"><span className="font-display text-6xl leading-none">{analytics.data?.currentStreak ?? 0}</span><span className="mb-1 text-sm text-muted-foreground">day streak</span></div><div className="mt-7 flex justify-between text-xs"><span className="font-bold">Weekly goal</span><span className="font-mono-app text-muted-foreground">{d?.weeklyGoal ?? 0} / 5 sessions</span></div><Progress value={Math.min(100, ((d?.weeklyGoal ?? 0) / 5) * 100)} color="bg-[#e5a952]" /><p className="mt-4 text-xs leading-5 text-muted-foreground">Longest streak: {analytics.data?.longestStreak ?? 0} days.</p></div></section>
-    <section><SectionHeader eyebrow="Track your pace" title="Analytics dashboard" action={<div className="flex gap-1.5">{['7d', '30d', '3m', '1y'].map((r) => <button key={r} onClick={() => setRange(r)} className={cn('rounded-lg px-2.5 py-1.5 text-[11px] font-bold', range === r ? 'bg-primary text-primary-foreground' : 'bg-muted')} data-testid={`button-analytics-range-${r}`}>{r.toUpperCase()}</button>)}</div>} /><div className="grid gap-4 sm:grid-cols-4"><div className="rounded-2xl border border-border bg-card p-5"><div className="text-xs font-semibold text-muted-foreground">Total sessions</div><div className="mt-3 font-display text-3xl">{analytics.data?.totalSessions ?? 0}</div></div><div className="rounded-2xl border border-border bg-card p-5"><div className="text-xs font-semibold text-muted-foreground">Average score</div><div className="mt-3 font-display text-3xl">{analytics.data?.averageScore ?? 0}%</div></div><div className="rounded-2xl border border-border bg-card p-5"><div className="text-xs font-semibold text-muted-foreground">Questions answered</div><div className="mt-3 font-display text-3xl">{analytics.data?.questionsAnswered ?? 0}</div></div><div className="rounded-2xl border border-border bg-card p-5"><div className="text-xs font-semibold text-muted-foreground">Time spent</div><div className="mt-3 font-display text-3xl">{analytics.data?.timeSpentMinutes ?? 0}m</div></div></div></section>
-    <section><SectionHeader eyebrow="Where you stand" title="Progress profile" /><ProgressProfileCard /></section>
-    <section className="grid gap-4 sm:grid-cols-3"><div className="rounded-2xl border border-border bg-card p-5"><div className="text-xs font-semibold text-muted-foreground">Overall progress</div><div className="mt-3 flex items-baseline gap-2"><span className="font-display text-4xl">{d?.progress ?? 0}%</span><TrendingUp size={16} className="text-primary" /></div><Progress value={d?.progress ?? 0} /></div><div className="rounded-2xl border border-border bg-card p-5"><div className="text-xs font-semibold text-muted-foreground">Membership</div><div className="mt-3 flex items-center gap-2"><span className="font-display text-2xl">{d?.membershipStatus || 'Active'}</span><Badge tone="green">verified</Badge></div><p className="mt-2 text-[11px] text-muted-foreground">{daysRemaining !== null ? `${daysRemaining} days remaining` : 'No active membership'}</p></div><div className="rounded-2xl border border-border bg-card p-5"><div className="text-xs font-semibold text-muted-foreground">This week</div><div className="mt-3 flex items-center gap-2"><span className="font-display text-2xl">{analytics.data?.totalSessions ?? 0} sessions</span></div><Link href="/modules" className="mt-2 inline-flex items-center gap-1 text-[11px] font-bold text-primary" data-testid="link-focus-practice">Open practice <ChevronRight size={13} /></Link></div></section>
-    <section className="grid gap-8 lg:grid-cols-[1.4fr_1fr]"><div><SectionHeader eyebrow="Keep moving" title="Your modules" action={<Link href="/modules" className="text-xs font-bold text-primary" data-testid="link-all-modules">View all <ArrowRight size={13} className="ml-1 inline" /></Link>} /><div className="space-y-3">{modules.slice(0, 3).map((m) => <Link href={`/modules/${m.id}`} key={m.id} className="card-lift flex items-center gap-4 rounded-2xl border border-border bg-card p-4" data-testid={`card-module-${m.id}`}><div className="grid size-11 shrink-0 place-items-center rounded-xl bg-[#dceaf1] text-[#32647b]"><BookOpen size={19} /></div><div className="min-w-0 flex-1"><div className="truncate text-sm font-bold">{m.name}</div><div className="mt-1 text-xs text-muted-foreground">{m.subjectCount} subjects · {m.topicCount} topics</div><div className="mt-3 flex items-center gap-3"><Progress value={m.progress} /><span className="font-mono-app text-[10px] text-muted-foreground">{m.progress}%</span></div></div><ChevronRight size={16} className="text-muted-foreground" /></Link>)}{!modules.length && <EmptyState icon={BookOpen} title="No modules yet" body="Your academic team hasn't published any modules yet." />}</div></div><div><SectionHeader eyebrow="In the loop" title="Recent updates" action={<Link href="/notifications" className="text-xs font-bold text-primary" data-testid="link-all-notifications">See all</Link>} /><div className="rounded-2xl border border-border bg-card p-5">{notifications.slice(0, 3).map((n, i) => <div key={n.id} className={cn('flex gap-3 py-3', i > 0 && 'border-t border-border')}><div className={cn('mt-1 size-2 shrink-0 rounded-full', n.read ? 'bg-muted' : 'bg-[#dc815e]')} /><div><div className="text-xs font-bold">{n.title}</div><p className="mt-1 text-[11px] leading-5 text-muted-foreground">{n.body}</p></div></div>)}{!notifications.length && <p className="py-3 text-xs text-muted-foreground">No notifications yet.</p>}</div></div></section>
+    <section className="grid gap-5 lg:grid-cols-[1.5fr_1fr]">
+      <div className="relative overflow-hidden rounded-3xl bg-primary p-7 text-primary-foreground md:p-9" style={heroImageUrl ? { backgroundImage: `url(${heroImageUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}>
+        {heroImageUrl ? <div className="absolute inset-0 bg-gradient-to-r from-primary via-primary/92 to-primary/40" /> : <><div className="absolute -right-10 -top-16 size-64 rounded-full border-[28px] border-white/15" /><div className="absolute -bottom-24 right-20 size-56 rounded-full border-[18px] border-[#e5a952]/25" /></>}
+        <div className="relative"><Badge tone="green">Your study desk</Badge><h2 className="mt-5 max-w-md font-display text-3xl leading-[1.15] tracking-[-.03em] md:text-4xl">{greetingForHour(new Date().getHours())}, {d?.user?.name?.split(' ')[0] || 'there'} <span aria-hidden="true">👋</span></h2><p className="mt-4 max-w-sm text-sm leading-6 text-primary-foreground/75">Continue your preparation and stay on track.</p><p className="mt-3 max-w-sm text-xs italic leading-5 text-primary-foreground/55">"Small steps every day lead to big results."</p>{daysRemaining !== null && <div className="mt-5 inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-[11px] font-bold"><ShieldCheck size={13} /> Active subscription · {daysRemaining} days remaining</div>}</div>
+      </div>
+
+      <div className="rounded-3xl border border-border bg-card p-7 shadow-sm"><div className="flex items-center justify-between"><div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-muted-foreground">Your progress</div><Link href="/leaderboard" className="text-[11px] font-bold text-primary" data-testid="link-progress-view-all">View all</Link></div>
+        <div className="mt-5 flex items-center gap-6">
+          <div className="relative grid size-24 shrink-0 place-items-center rounded-full" style={{ background: `conic-gradient(hsl(var(--accent)) ${ringDeg}deg, hsl(var(--muted)) 0deg)` }}>
+            <div className="grid size-[72px] place-items-center rounded-full bg-card"><span className="font-display text-xl">{overallProgress}%</span></div>
+          </div>
+          <div className="flex-1 space-y-2.5 text-xs">
+            <div className="flex items-center justify-between"><span className="flex items-center gap-1.5 text-muted-foreground"><Target size={13} className="text-primary" /> Questions attempted</span><span className="font-bold">{analytics.data?.questionsAnswered ?? 0}</span></div>
+            <div className="flex items-center justify-between"><span className="flex items-center gap-1.5 text-muted-foreground"><CheckCircle2 size={13} className="text-primary" /> Accuracy</span><span className="font-bold">{analytics.data?.averageScore ?? 0}%</span></div>
+            <div className="flex items-center justify-between"><span className="flex items-center gap-1.5 text-muted-foreground"><BookOpen size={13} className="text-primary" /> Modules completed</span><span className="font-bold">{modulesCompleted}</span></div>
+            <div className="flex items-center justify-between"><span className="flex items-center gap-1.5 text-muted-foreground"><Flame size={13} className="text-[#e5a952]" /> Current streak</span><span className="font-bold">{analytics.data?.currentStreak ?? 0} days</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section><SectionHeader eyebrow="Jump back in" title="Quick links" />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">{QUICK_LINK_TILES.map((tile) => {
+        const content = <><span className={cn('grid size-11 place-items-center rounded-xl', tile.bg, tile.fg)}><tile.icon size={19} /></span><span className="text-xs font-bold leading-tight">{tile.label}</span><span className="text-[10px] leading-tight text-muted-foreground">{tile.sub}</span></>;
+        const testId = `link-quick-${tile.label.toLowerCase().replaceAll(' ', '-')}`;
+        return tile.href === OPEN_SEARCH_HREF
+          ? <button key={tile.label} type="button" onClick={() => window.dispatchEvent(new CustomEvent(OPEN_SEARCH_EVENT))} className="card-lift flex flex-col items-center gap-2 rounded-2xl border border-border bg-card p-4 text-center" data-testid={testId}>{content}</button>
+          : <Link key={tile.label} href={tile.href} className="card-lift flex flex-col items-center gap-2 rounded-2xl border border-border bg-card p-4 text-center" data-testid={testId}>{content}</Link>;
+      })}</div>
+    </section>
+
+    <section className="grid gap-8 lg:grid-cols-[1.4fr_1fr]">
+      <div>
+        <SectionHeader eyebrow="Pick up where you left off" title="Continue learning" action={<Link href="/blocks" className="text-xs font-bold text-primary" data-testid="link-all-modules">View all <ArrowRight size={13} className="ml-1 inline" /></Link>} />
+        {inProgress ? <Link href={`/modules/${inProgress.id}`} className="card-lift flex items-center gap-4 rounded-2xl border border-border bg-card p-5" data-testid={`card-continue-${inProgress.id}`}>
+          <span className={cn('grid size-14 shrink-0 place-items-center rounded-xl', MODULE_TILE_COLORS[0].bg, MODULE_TILE_COLORS[0].fg)}><BookOpen size={24} /></span>
+          <div className="min-w-0 flex-1"><div className="truncate text-sm font-bold">{inProgress.name}</div><div className="mt-1 text-xs text-muted-foreground">{inProgress.subjectCount} subjects · {inProgress.mcqCount} questions</div><div className="mt-3 flex items-center gap-3"><Progress value={inProgress.progress} /><span className="font-mono-app text-[10px] text-muted-foreground">{inProgress.progress}%</span></div></div>
+          <span className="shrink-0 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground">Continue</span>
+        </Link> : <EmptyState icon={BookOpen} title="No modules yet" body="Your academic team hasn't published any modules yet." />}
+
+        <div className="mt-8"><SectionHeader eyebrow="Fresh territory" title="Recommended for you" />
+          <div className="space-y-2.5">{recommended.map((m, i) => {
+            const c = MODULE_TILE_COLORS[(i + 1) % MODULE_TILE_COLORS.length];
+            return <Link href={`/modules/${m.id}`} key={m.id} className="card-lift flex items-center gap-3 rounded-xl border border-border bg-card p-3.5" data-testid={`card-recommended-${m.id}`}>
+              <span className={cn('grid size-9 shrink-0 place-items-center rounded-lg', c.bg, c.fg)}><BookOpen size={16} /></span>
+              <div className="min-w-0 flex-1"><div className="truncate text-xs font-bold">{m.name}</div><div className="text-[10px] text-muted-foreground">{m.mcqCount} MCQs</div></div>
+              <ChevronRight size={15} className="text-muted-foreground" />
+            </Link>;
+          })}{!recommended.length && <p className="text-xs text-muted-foreground">Nothing new to recommend right now — you're through everything published.</p>}</div>
+        </div>
+      </div>
+
+      <div><SectionHeader eyebrow="In the loop" title="Recent activity" action={<Link href="/notifications" className="text-xs font-bold text-primary" data-testid="link-all-notifications">See all</Link>} /><div className="rounded-2xl border border-border bg-card p-5">{notifications.slice(0, 5).map((n, i) => <div key={n.id} className={cn('flex gap-3 py-3', i > 0 && 'border-t border-border')}><div className={cn('mt-1 size-2 shrink-0 rounded-full', n.read ? 'bg-muted' : 'bg-[#dc815e]')} /><div><div className="text-xs font-bold">{n.title}</div><p className="mt-1 text-[11px] leading-5 text-muted-foreground">{n.body}</p></div></div>)}{!notifications.length && <p className="py-3 text-xs text-muted-foreground">No notifications yet.</p>}</div></div>
+    </section>
+
+    <section><SectionHeader eyebrow="Track your pace" title="Analytics dashboard" action={<div className="flex gap-1.5">{['7d', '30d', '3m', '1y'].map((r) => <button key={r} onClick={() => setRange(r)} className={cn('rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition-colors', range === r ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground')} data-testid={`button-analytics-range-${r}`}>{r.toUpperCase()}</button>)}</div>} />
+      <div className="grid gap-4 sm:grid-cols-4">
+        <StatTile icon={Clock3} bg="bg-[#dceaf1]" fg="text-[#2c6a8f]" label="Total sessions" value={analytics.data?.totalSessions ?? 0} />
+        <StatTile icon={Target} bg="bg-[#d7eee4]" fg="text-[#1f7a5c]" label="Average score" value={`${analytics.data?.averageScore ?? 0}%`} />
+        <StatTile icon={CheckCircle2} bg="bg-[#e6dcf5]" fg="text-[#6b3fa0]" label="Questions answered" value={analytics.data?.questionsAnswered ?? 0} />
+        <StatTile icon={Flame} bg="bg-[#fff0cb]" fg="text-[#94651c]" label="Time spent" value={`${analytics.data?.timeSpentMinutes ?? 0}m`} />
+      </div>
+    </section>
+    <section id="progress-profile"><SectionHeader eyebrow="Where you stand" title="Progress profile" /><ProgressProfileCard /></section>
+    <section className="grid gap-4 sm:grid-cols-2"><div className="rounded-2xl border border-border bg-card p-5"><div className="text-xs font-semibold text-muted-foreground">Membership</div><div className="mt-3 flex items-center gap-2"><span className="font-display text-2xl">{d?.membershipStatus || 'Active'}</span><Badge tone="green">verified</Badge></div><p className="mt-2 text-[11px] text-muted-foreground">{daysRemaining !== null ? `${daysRemaining} days remaining` : 'No active membership'}</p></div><div className="rounded-2xl border border-border bg-card p-5"><div className="text-xs font-semibold text-muted-foreground">This week</div><div className="mt-3 flex items-center gap-2"><span className="font-display text-2xl">{analytics.data?.totalSessions ?? 0} sessions</span></div><Link href="/modules" className="mt-2 inline-flex items-center gap-1 text-[11px] font-bold text-primary" data-testid="link-focus-practice">Open practice <ChevronRight size={13} /></Link></div></section>
   </div>}</>;
 }
 
@@ -267,7 +406,8 @@ function ModuleCard({ m, i }: { m: Module; i: number }) {
       </div>
     </Link>;
   }
-  return <Link href={`/modules/${m.id}`} key={m.id} className="card-lift group rounded-2xl border border-border bg-card p-6" data-testid={`card-module-${m.id}`}><div className="flex items-start justify-between"><div className={cn('grid size-11 place-items-center rounded-xl', i % 2 ? 'bg-[#fff0cb] text-[#94651c]' : 'bg-[#d7eee4] text-[#287058]')}><BookOpen size={20} /></div><ChevronRight size={18} className="text-muted-foreground transition-transform group-hover:translate-x-0.5" /></div><h3 className="mt-6 text-lg font-extrabold tracking-[-.03em]">{m.name}</h3><p className="mt-1 text-xs text-muted-foreground">{m.subtitle}</p><div className="mt-7 flex items-center justify-between text-[11px] text-muted-foreground"><span>{m.subjectCount} subject{m.subjectCount === 1 ? '' : 's'} · {m.mcqCount} question{m.mcqCount === 1 ? '' : 's'}</span><span className="font-mono-app text-foreground">{m.progress}%</span></div><div className="mt-2"><Progress value={m.progress} color={i % 2 ? 'bg-[#e5a952]' : 'bg-primary'} /></div><div className="mt-5 flex items-center gap-1 text-xs font-bold text-primary opacity-80 group-hover:opacity-100">Open module <ArrowRight size={14} /></div></Link>;
+  const c = MODULE_TILE_COLORS[i % MODULE_TILE_COLORS.length];
+  return <Link href={`/modules/${m.id}`} key={m.id} className="card-lift group rounded-2xl border border-border bg-card p-6" data-testid={`card-module-${m.id}`}><div className="flex items-start justify-between"><div className={cn('grid size-11 place-items-center rounded-xl', c.bg, c.fg)}><BookOpen size={20} /></div><ChevronRight size={18} className="text-muted-foreground transition-transform group-hover:translate-x-0.5" /></div><h3 className="mt-6 text-lg font-extrabold tracking-[-.03em]">{m.name}</h3><p className="mt-1 text-xs text-muted-foreground">{m.subtitle}</p><div className="mt-7 flex items-center justify-between text-[11px] text-muted-foreground"><span>{m.subjectCount} subject{m.subjectCount === 1 ? '' : 's'} · {m.mcqCount} question{m.mcqCount === 1 ? '' : 's'}</span><span className="font-mono-app text-foreground">{m.progress}%</span></div><div className="mt-2"><Progress value={m.progress} color={i % 2 ? 'bg-[#e5a952]' : 'bg-primary'} /></div><div className="mt-5 flex items-center gap-1 text-xs font-bold text-primary opacity-80 group-hover:opacity-100">Open module <ArrowRight size={14} /></div></Link>;
 }
 
 // Round 3, item 6: Blocks becomes the primary top-level nav item (sidebar
@@ -892,7 +1032,7 @@ function PaymentDestinationCard({ pd }: { pd?: PaymentDetails }) {
   type Destination = { key: string; label: string; icon: 'bank' | 'wallet' | 'cash'; account?: (typeof accounts)[number]; method?: PaymentMethodConfig };
   const destinations: Destination[] = [
     ...accounts.map((a) => ({ key: `bank_${a.id}`, label: a.label || a.bankName || 'Bank account', icon: 'bank' as const, account: a })),
-    ...methods.filter((m) => m.type !== 'bank').map((m) => ({ key: `method_${m.key}`, label: m.label, icon: (m.type === 'wallet' ? 'wallet' : 'cash') as const, method: m })),
+     ...methods.filter((m) => m.type !== 'bank').map((m) => ({ key: `method_${m.key}`, label: m.label, icon: m.type === 'wallet' ? ('wallet' as const) : ('cash' as const), method: m })),
   ];
   const primaryIndex = Math.max(0, destinations.findIndex((d) => d.account?.isPrimary));
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -1005,7 +1145,9 @@ function TeamPhoto({ member }: { member: TeamMember }) {
 
 function Profile() {
   const q = useGetCurrentUser();
-  const u = q.data || { id: 1, name: 'Maya Shah', email: 'maya.shah@example.com', role: 'student', status: 'active', institution: 'Northbridge Medical College', program: 'MBBS' };
+  if (q.isLoading) return <SkeletonPage />;
+  if (!q.data) return <ErrorState retry={() => q.refetch()} />;
+  const u = q.data;
   const [editing, setEditing] = useState(false);
   const update = useMutation({ mutationFn: authApi.updateMe, onSuccess: () => { queryClient.invalidateQueries({ queryKey: getGetCurrentUserQueryKey() }); setEditing(false); } });
   const dashboard = useGetStudentDashboard();
@@ -1056,12 +1198,13 @@ function Footer({ variant = 'compact' }: { variant?: 'compact' | 'full' }) {
   </div>;
 }
 
-function AuthLayout({ children, register = false }: { children: ReactNode; register?: boolean }) { return <div className="grid min-h-[100dvh] bg-background lg:grid-cols-[.9fr_1.1fr]"><div className="flex flex-col p-6 md:p-10"><Logo /><div className="mx-auto flex w-full max-w-sm flex-1 items-center py-10">{children}</div><Footer /></div><div className="relative hidden overflow-hidden bg-[#164b4b] p-14 text-[#eaf2e9] lg:flex lg:flex-col lg:justify-between"><div className="absolute -right-20 top-20 size-96 rounded-full border-[44px] border-[#2f6e68]/50" /><div className="absolute bottom-10 left-10 size-48 rounded-full border-[20px] border-[#e5a952]/25" /><div className="relative"><div className="font-mono-app text-[10px] uppercase tracking-[.18em] text-[#8bcbb8]">Practice &amp; learn — no exam pressure</div><h2 className="mt-8 max-w-lg font-display text-6xl leading-[.93] tracking-[-.04em]">Every MCQ<br /><em className="text-[#e5c476]">you'll need.</em></h2></div><div className="relative max-w-sm"><div className="mb-4 h-px bg-[#52877c]" /><p className="text-sm leading-6 text-[#bfd4cb]">One MCQ bank across every college, subject, and topic for MBBS &amp; BDS students — built for steady daily practice, not timed exams.</p><div className="mt-5 flex items-center gap-2 text-xs font-bold"><span className="grid size-7 place-items-center rounded-full bg-[#d7eee4] text-[#164b4b]"><Check size={14} /></span> Instant explanations on every question</div></div></div></div>; }
+function AuthLayout({ children, register = false }: { children: ReactNode; register?: boolean }) { return <div className="grid min-h-[100dvh] bg-background lg:grid-cols-[.9fr_1.1fr]"><div className="flex flex-col p-6 md:p-10"><Logo /><div className="mx-auto flex w-full max-w-sm flex-1 items-center py-10">{children}</div><Footer /></div><div className="relative hidden overflow-hidden bg-sidebar p-14 text-sidebar-foreground lg:flex lg:flex-col lg:justify-between"><div className="absolute -right-20 top-20 size-96 rounded-full border-[44px] border-sidebar-accent/50" /><div className="absolute bottom-10 left-10 size-48 rounded-full border-[20px] border-sidebar-primary/25" /><div className="relative"><div className="font-mono-app text-[10px] uppercase tracking-[.18em] text-sidebar-foreground/70">Practice &amp; learn — no exam pressure</div><h2 className="mt-8 max-w-lg font-display text-6xl leading-[.93] tracking-[-.04em]">Every MCQ<br /><em className="text-sidebar-primary not-italic">you'll need.</em></h2></div><div className="relative max-w-sm"><div className="mb-4 h-px bg-sidebar-border" /><p className="text-sm leading-6 text-sidebar-foreground/80">One MCQ bank across every college, subject, and topic for MBBS &amp; BDS students — built for steady daily practice, not timed exams.</p><div className="mt-5 flex items-center gap-2 text-xs font-bold"><span className="grid size-7 place-items-center rounded-full bg-sidebar-primary text-sidebar-primary-foreground"><Check size={14} /></span> Instant explanations on every question</div></div></div></div>; }
 function Login() {
   const [, setLocation] = useLocation();
   const [error, setError] = useState<string | null>(null);
   const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
   const [resendDone, setResendDone] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const login = useMutation({
     mutationFn: authApi.login,
     onSuccess: (res) => { queryClient.invalidateQueries(); setLocation('/'); },
@@ -1081,7 +1224,13 @@ function Login() {
     mutationFn: (email: string) => authApi.resendVerification(email),
     onSuccess: () => setResendDone(true),
   });
-  return <AuthLayout><div className="w-full"><div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-primary">Welcome back</div><h1 className="mt-3 font-display text-4xl tracking-[-.04em]">Sign in to your desk.</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">Your next clear step is waiting.</p><form onSubmit={(e) => { e.preventDefault(); setError(null); setUnverifiedEmail(null); const f = new FormData(e.currentTarget); login.mutate({ email: String(f.get('email')), password: String(f.get('password')) }); }} className="mt-8 space-y-4"><label className="block text-xs font-bold">Email<input required name="email" type="email" placeholder="you@college.edu" className="mt-2 h-12 w-full rounded-xl border border-border bg-card px-4 text-sm outline-none focus:ring-2 focus:ring-primary/20" data-testid="input-login-email" /></label><label className="block text-xs font-bold">Password<input required name="password" type="password" placeholder="At least 8 characters" className="mt-2 h-12 w-full rounded-xl border border-border bg-card px-4 text-sm outline-none focus:ring-2 focus:ring-primary/20" data-testid="input-login-password" /></label><div className="flex justify-end"><Link href="/forgot-password" className="text-xs font-bold text-primary" data-testid="button-forgot-password">Forgot password?</Link></div>{error && <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs font-semibold text-destructive" data-testid="text-login-error">{error}{unverifiedEmail && <div className="mt-2">{resendDone ? <span className="font-bold text-primary">Verification email sent — check your inbox.</span> : <button type="button" onClick={() => resend.mutate(unverifiedEmail)} disabled={resend.isPending} className="font-bold text-primary underline disabled:opacity-50" data-testid="button-resend-verification">{resend.isPending ? 'Sending…' : 'Resend verification email'}</button>}</div>}</div>}<button disabled={login.isPending} className="w-full rounded-xl bg-primary py-3.5 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-login-submit">{login.isPending ? 'Signing in…' : 'Sign in'}</button></form><p className="mt-7 text-center text-xs text-muted-foreground">New to the desk? <Link href="/register" className="font-bold text-primary" data-testid="link-register">Create a student account</Link></p></div></AuthLayout>;
+  return <AuthLayout><div className="w-full"><div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-primary">Welcome back</div><h1 className="mt-3 font-display text-4xl tracking-[-.04em]">Sign in to your desk.</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">Your next clear step is waiting.</p><form onSubmit={(e) => { e.preventDefault(); setError(null); setUnverifiedEmail(null); const f = new FormData(e.currentTarget); login.mutate({ email: String(f.get('email')), password: String(f.get('password')) }); }} className="mt-8 space-y-4">
+    <label className="block text-xs font-bold">Email<div className="relative mt-2"><Mail size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><input required name="email" type="email" autoComplete="email" placeholder="you@college.edu" className="h-12 w-full rounded-xl border border-border bg-card pl-10 pr-4 text-sm outline-none transition-shadow focus:border-primary/40 focus:ring-2 focus:ring-primary/20" data-testid="input-login-email" /></div></label>
+    <label className="block text-xs font-bold">Password<div className="relative mt-2"><LockKeyhole size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><input required name="password" type={showPassword ? 'text' : 'password'} autoComplete="current-password" placeholder="At least 8 characters" className="h-12 w-full rounded-xl border border-border bg-card pl-10 pr-11 text-sm outline-none transition-shadow focus:border-primary/40 focus:ring-2 focus:ring-primary/20" data-testid="input-login-password" /><button type="button" tabIndex={-1} onClick={() => setShowPassword((v) => !v)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground" data-testid="button-toggle-login-password">{showPassword ? <EyeOff size={15} /> : <Eye size={15} />}</button></div></label>
+    <div className="flex justify-end"><Link href="/forgot-password" className="text-xs font-bold text-primary hover:underline" data-testid="button-forgot-password">Forgot password?</Link></div>
+    {error && <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs font-semibold text-destructive" data-testid="text-login-error">{error}{unverifiedEmail && <div className="mt-2">{resendDone ? <span className="font-bold text-primary">Verification email sent — check your inbox.</span> : <button type="button" onClick={() => resend.mutate(unverifiedEmail)} disabled={resend.isPending} className="font-bold text-primary underline disabled:opacity-50" data-testid="button-resend-verification">{resend.isPending ? 'Sending…' : 'Resend verification email'}</button>}</div>}</div>}
+    <button disabled={login.isPending} className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-xs font-extrabold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-sm" data-testid="button-login-submit">{login.isPending && <Loader2 size={14} className="animate-spin" />}{login.isPending ? 'Signing in…' : 'Sign in'}</button>
+  </form><p className="mt-7 text-center text-xs text-muted-foreground">New to the desk? <Link href="/register" className="font-bold text-primary hover:underline" data-testid="link-register">Create a student account</Link></p></div></AuthLayout>;
 }
 function Stepper({ step }: { step: 1 | 2 }) {
   const steps = [{ n: 1, label: 'Your details' }, { n: 2, label: 'Membership & payment' }];
@@ -1153,7 +1302,7 @@ function Register() {
     }
   };
 
-  if (done) return <AuthLayout register><div className="w-full text-center"><div className="mx-auto mb-5 grid size-14 place-items-center rounded-full bg-[#d7eee4] text-[#164b4b]"><CheckCircle2 size={26} /></div><h1 className="font-display text-3xl tracking-[-.04em]">Almost there</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">Confirm your email using the link we sent you. Once our team verifies your payment, your account is activated automatically and you can sign in — no exams, just steady practice.</p><Link href="/login" className="mt-7 inline-block rounded-xl bg-primary px-6 py-3 text-xs font-extrabold text-primary-foreground" data-testid="link-login-after-register">Go to sign in</Link></div></AuthLayout>;
+  if (done) return <AuthLayout register><div className="w-full text-center"><div className="mx-auto mb-5 grid size-14 place-items-center rounded-full bg-[#d7eee4] text-[#164b4b]"><CheckCircle2 size={26} /></div><h1 className="font-display text-3xl tracking-[-.04em]">Almost there</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">Confirm your email using the link we sent you. Once our team verifies your payment, your account is activated automatically and you can sign in — no exams, just steady practice.</p><Link href="/login" className="mt-7 inline-block rounded-xl bg-primary px-6 py-3 text-xs font-extrabold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md" data-testid="link-login-after-register">Go to sign in</Link></div></AuthLayout>;
 
   const selectedPlan = (plans.data || []).find((p) => p.id === planId) || null;
   const bestValueId = (plans.data || []).length > 1 ? [...(plans.data || [])].sort((a, b) => (a.price / a.duration) - (b.price / b.duration))[0].id : null;
@@ -1174,10 +1323,10 @@ function Register() {
       });
     }} className="mt-7 space-y-3.5">
       <label className="block text-xs font-bold">Full name<div className="mt-2"><IconField icon={UserIcon} required name="name" placeholder="Your name" data-testid="input-register-name" /></div></label>
-      <label className="block text-xs font-bold">College<div className="relative mt-2"><GraduationCap size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><select required value={institutionId} onChange={(e) => setInstitutionId(e.target.value)} className="h-11 w-full appearance-none rounded-xl border border-border bg-card pl-10 pr-3 text-sm outline-none focus:ring-2 focus:ring-primary/20" data-testid="select-register-institution"><option value="">{institutions.isLoading ? 'Loading…' : 'Select your college'}</option>{(institutions.data || []).map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}</select></div>{!institutions.isLoading && !institutions.data?.length && <p className="mt-1.5 text-[11px] text-muted-foreground">No colleges are set up yet — ask an admin to add one first.</p>}</label>
+      <label className="block text-xs font-bold">College<div className="relative mt-2"><GraduationCap size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><select required value={institutionId} onChange={(e) => setInstitutionId(e.target.value)} className="h-11 w-full appearance-none rounded-xl border border-border bg-card pl-10 pr-9 text-sm outline-none focus:ring-2 focus:ring-primary/20" data-testid="select-register-institution"><option value="">{institutions.isLoading ? 'Loading…' : 'Select your college'}</option>{(institutions.data || []).map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}</select><ChevronRight size={14} className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 rotate-90 text-muted-foreground" /></div>{!institutions.isLoading && !institutions.data?.length && <p className="mt-1.5 text-[11px] text-muted-foreground">No colleges are set up yet — ask an admin to add one first.</p>}</label>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block text-xs font-bold">Program<div className="mt-2 grid grid-cols-2 gap-2">{(['MBBS', 'BDS'] as const).map((p) => <button type="button" key={p} onClick={() => { setProgramKind(p); setYearNumber(''); }} className={cn('h-11 rounded-xl border text-sm font-bold transition-colors', programKind === p ? 'border-primary bg-[#eef7f1] text-primary' : 'border-border bg-card hover:bg-muted')} data-testid={`button-program-${p.toLowerCase()}`}>{p}</button>)}</div></label>
-        <label className="block text-xs font-bold">Academic year<div className="relative mt-2"><CalendarDays size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><select required value={yearNumber} onChange={(e) => setYearNumber(e.target.value)} disabled={!programKind} className="h-11 w-full appearance-none rounded-xl border border-border bg-card pl-10 pr-3 text-sm outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50" data-testid="select-register-year"><option value="">{!programKind ? 'Select program first' : 'Select year'}</option>{programKind && Array.from({ length: programKind === 'MBBS' ? 5 : 4 }, (_, i) => i + 1).map((y) => <option key={y} value={y}>{y}{y === 1 ? 'st' : y === 2 ? 'nd' : y === 3 ? 'rd' : 'th'} Year{y === (programKind === 'MBBS' ? 5 : 4) ? ' (Final)' : ''}</option>)}</select></div></label>
+        <label className="block text-xs font-bold">Academic year<div className="relative mt-2"><CalendarDays size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><select required value={yearNumber} onChange={(e) => setYearNumber(e.target.value)} disabled={!programKind} className="h-11 w-full appearance-none rounded-xl border border-border bg-card pl-10 pr-9 text-sm outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50" data-testid="select-register-year"><option value="">{!programKind ? 'Select program first' : 'Select year'}</option>{programKind && Array.from({ length: programKind === 'MBBS' ? 5 : 4 }, (_, i) => i + 1).map((y) => <option key={y} value={y}>{y}{y === 1 ? 'st' : y === 2 ? 'nd' : y === 3 ? 'rd' : 'th'} Year{y === (programKind === 'MBBS' ? 5 : 4) ? ' (Final)' : ''}</option>)}</select><ChevronRight size={14} className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 rotate-90 text-muted-foreground" /></div></label>
       </div>
       <div className="grid gap-3 sm:grid-cols-2"><label className="block text-xs font-bold">Email<div className="mt-2"><IconField icon={Mail} required type="email" name="email" placeholder="you@college.edu" data-testid="input-register-email" /></div></label><label className="block text-xs font-bold">WhatsApp number<div className="mt-2"><IconField icon={Phone} required name="phone" placeholder="03xx-xxxxxxx" data-testid="input-register-phone" /></div></label></div>
       <label className="block text-xs font-bold">Password<div className="relative mt-2"><LockKeyhole size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><input required minLength={8} type={showPassword ? 'text' : 'password'} name="password" value={passwordValue} onChange={(e) => setPasswordValue(e.target.value)} className="h-11 w-full rounded-xl border border-border bg-card pl-10 pr-10 text-sm outline-none focus:ring-2 focus:ring-primary/20" data-testid="input-register-password" /><button type="button" onClick={() => setShowPassword((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" data-testid="button-toggle-password">{showPassword ? <EyeOff size={15} /> : <Eye size={15} />}</button></div><PasswordStrength value={passwordValue} /></label>
@@ -1199,9 +1348,9 @@ function Register() {
 
       {selectedPlan && <div className="flex items-center gap-2 rounded-xl bg-[#eef7f1] p-3 text-xs font-semibold text-primary"><CheckCircle2 size={14} /> Paying {money(selectedPlan.price, selectedPlan.currency)} for {selectedPlan.name} — your order goes to the admin for approval</div>}
       {error && <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs font-semibold text-destructive" data-testid="text-register-error">{error}</div>}
-      <button disabled={register.isPending || uploading} className="w-full rounded-xl bg-primary py-3.5 text-xs font-extrabold text-primary-foreground transition-transform hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0" data-testid="button-register-submit">{register.isPending ? 'Creating your account…' : 'Create account & submit payment'}</button>
+      <button disabled={register.isPending || uploading} className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-xs font-extrabold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-sm" data-testid="button-register-submit">{register.isPending && <Loader2 size={14} className="animate-spin" />}{register.isPending ? 'Creating your account…' : 'Create account & submit payment'}</button>
     </form>
-    <p className="mt-6 text-center text-xs text-muted-foreground">Already have an account? <Link href="/login" className="font-bold text-primary" data-testid="link-login">Sign in</Link></p>
+    <p className="mt-6 text-center text-xs text-muted-foreground">Already have an account? <Link href="/login" className="font-bold text-primary hover:underline" data-testid="link-login">Sign in</Link></p>
   </div></AuthLayout>;
 }
 
@@ -1538,8 +1687,19 @@ function useFaviconSync() {
   }, [data?.faviconUrl]);
 }
 
+// Applies the admin's saved Design & Branding colors (see lib/theme.ts) as
+// CSS variables on <html>. Shares the same ['site-content'] query as
+// useFaviconSync (react-query dedupes by key, so this doesn't add a second
+// request) and, crucially, runs from AppRoutes rather than inside Shell —
+// so /login, /register, and every other signed-out page are themed too.
+function useThemeSync() {
+  const { data } = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get, staleTime: 5 * 60 * 1000 });
+  useEffect(() => { applyThemeVars(data ?? null); }, [data]);
+}
+
 function AppRoutes() {
  useFaviconSync();
+ useThemeSync();
  return <Switch><Route path="/login" component={Login} /><Route path="/register" component={Register} /><Route path="/forgot-password" component={ForgotPassword} /><Route path="/reset-password" component={ResetPassword} /><Route path="/verify-email" component={VerifyEmail} /><Route path="/"><Shell><Dashboard /></Shell></Route><Route path="/blocks"><Shell><Blocks /></Shell></Route><Route path="/blocks/:id"><Shell><BlockDetail /></Shell></Route><Route path="/modules"><Shell><ModulesRedirect /></Shell></Route><Route path="/modules/:id"><Shell><Subjects /></Shell></Route><Route path="/subjects"><Shell><Subjects /></Shell></Route><Route path="/subjects/:id"><Shell><Subjects topics /></Shell></Route><Route path="/topics"><Shell><Subjects topics /></Shell></Route><Route path="/practice"><Shell><Practice /></Shell></Route><Route path="/exams"><Shell><Exams /></Shell></Route><Route path="/exams/take/:attemptId"><Shell><TakeExam /></Shell></Route><Route path="/exams/result/:attemptId"><Shell><ExamResult /></Shell></Route><Route path="/past-papers"><Shell><PastPapers /></Shell></Route><Route path="/flashcards"><Shell><Flashcards /></Shell></Route><Route path="/ai-visualizer"><Shell><AiVisualizer /></Shell></Route><Route path="/books"><Shell><Books /></Shell></Route><Route path="/resources"><Shell><Resources /></Shell></Route><Route path="/notebook"><Shell><Notebook /></Shell></Route><Route path="/saved-sessions"><Shell><SavedSessions /></Shell></Route><Route path="/flagged-mcqs"><Shell><FlaggedMcqs /></Shell></Route><Route path="/leaderboard"><Shell><Leaderboard /></Shell></Route><Route path="/notifications"><Shell><Notifications /></Shell></Route><Route path="/payments"><Shell><Payments /></Shell></Route><Route path="/feedback"><Shell><Feedback /></Shell></Route><Route path="/profile"><Shell><Profile /></Shell></Route><Route component={NotFound} /></Switch>; }
 function App() {
   const [focusMode, setFocusMode] = useState(false);

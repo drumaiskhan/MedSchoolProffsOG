@@ -1,6 +1,22 @@
 import { eq } from "drizzle-orm";
 import { db, platformSettingsTable } from "@workspace/db";
 
+// Design & Branding — stored as plain hex strings (admin UI uses native
+// <input type="color">), applied client-side as CSS vars (see each
+// frontend's src/lib/theme.ts). These are the shipped defaults so a fresh
+// install already matches the reference design before an admin touches
+// anything; getThemeSettings() below fills in any key that isn't yet saved.
+export const THEME_KEYS = ["THEME_PRIMARY", "THEME_SECONDARY", "THEME_ACCENT", "THEME_BACKGROUND", "THEME_CARD", "THEME_TEXT", "THEME_MODE"] as const;
+export const DEFAULT_THEME: Record<(typeof THEME_KEYS)[number], string> = {
+  THEME_PRIMARY: "#173B57",
+  THEME_SECONDARY: "#315A75",
+  THEME_ACCENT: "#16A6A3",
+  THEME_BACKGROUND: "#F5F8FA",
+  THEME_CARD: "#FFFFFF",
+  THEME_TEXT: "#102443",
+  THEME_MODE: "light",
+};
+
 const cache = new Map<string, { value: string; expiresAt: number }>();
 const CACHE_TTL_MS = 30_000;
 

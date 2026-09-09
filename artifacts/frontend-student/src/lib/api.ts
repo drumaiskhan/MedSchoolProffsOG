@@ -41,7 +41,13 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const isJson = res.headers.get('content-type')?.includes('application/json');
   const data = isJson ? await res.json().catch(() => null) : null;
   if (!res.ok) {
-    throw new ApiRequestError(res.status, (data && (data.error || data.message)) || `Request failed (${res.status})`, data);
+    // A non-JSON error body on a 502/503/504 means the request never made
+    // it to our API at all — it was killed by a proxy/gateway in front of
+    // it (e.g. a slow AI generation call outliving the reverse-proxy
+    // timeout). "Request failed (504)" is technically true but useless to
+    // a student staring at a spinner; this is the actionable version.
+    const gatewayMessage = !isJson && [502, 503, 504].includes(res.status) ? 'This is taking longer than expected. Try again — if it keeps happening, try a shorter or simpler request.' : null;
+    throw new ApiRequestError(res.status, (data && (data.error || data.message)) || gatewayMessage || `Request failed (${res.status})`, data);
   }
   return data as T;
 }
@@ -106,6 +112,11 @@ export interface SiteContent {
   CONTACT_EMAIL: string; CONTACT_LOCATION: string; SUPPORT_HOURS: string; COPYRIGHT_NOTICE: string; SUPPORT_WHATSAPP: string;
   features: string[]; quickLinks: Array<{ label: string; url: string }>; team: TeamMember[];
   faviconUrl: string | null;
+  dashboardHeroImageUrl: string | null;
+  // src/lib/theme.ts. Public (not admin-gated) so signed-out pages like
+  // /login and /register pick up the same brand colors.
+  THEME_PRIMARY: string; THEME_SECONDARY: string; THEME_ACCENT: string;
+  THEME_BACKGROUND: string; THEME_CARD: string; THEME_TEXT: string; THEME_MODE: string;
 }
 
 export const siteContentApi = {

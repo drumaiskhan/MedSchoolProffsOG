@@ -203,14 +203,30 @@ const MAX_PROMPT_LENGTH = 500;
 // 4000 was too low in practice — a genuinely multi-step "cycle" prompt
 // like muscle contraction routinely got cut off mid-array, which broke
 // JSON parsing and surfaced as a 502 ("The AI produced an unusable
-// visualization"). Sized generously enough for a full 20-step
-// process/cycle (the schema's own max) plus per-step elements/highlightIds.
-const VISUALIZATION_MAX_TOKENS = 8000;
-// If a first attempt still truncates (rare once the cap above is
-// generous, but not impossible for an unusually dense prompt), retry once
-// with an even higher budget and an explicit instruction to economize on
-// steps — rather than immediately failing the student's request.
-const VISUALIZATION_RETRY_MAX_TOKENS = 12000;
+// visualization"). NOTE: this app's API is reached through a Netlify
+// redirect proxy in front of the Railway backend (see netlify.toml) —
+// that proxy hop has its own timeout on long-running requests, well
+// under what an 8000-12000 token generation reliably takes. 4000 covers
+// the large majority of process/cycle prompts (most need well under the
+// schema's 20-step ceiling); the retry budget below only kicks in for
+// prompts that actually need more room, and generateVisualization()
+// skips that retry entirely if the first attempt already used up too
+// much of the time budget (see MAX_TOTAL_GENERATION_MS below).
+const VISUALIZATION_MAX_TOKENS = 4000;
+// If a first attempt still truncates, retry once with a higher budget and
+// an explicit instruction to economize on steps — but only when there's
+// realistically enough time left before the proxy would time out anyway
+// (see generateVisualization).
+const VISUALIZATION_RETRY_MAX_TOKENS = 6000;
+// Soft budget for the whole generateVisualization() call (both attempts
+// combined). Calibrated to stay under a typical reverse-proxy timeout
+// (commonly 30s) with headroom for network/DB overhead — if the first
+// attempt alone already ate most of this, a second sequential AI call is
+// almost guaranteed to get killed by the proxy with an opaque 504 instead
+// of ever reaching our error handling, so it's skipped in favor of
+// failing fast with a clear, actionable message instead.
+const MAX_TOTAL_GENERATION_MS = 22_000;
+
 
 /** A cut-off response never closes its outermost brace — a real "not JSON
  * at all" response (extra prose, wrong shape) usually still closes it.
@@ -371,6 +387,7 @@ export async function generateVisualization(userPrompt: string): Promise<Visuali
   const trimmed = userPrompt.trim().slice(0, MAX_PROMPT_LENGTH);
   if (!trimmed) throw new InvalidVisualizationError("Prompt was empty");
 
+  const startedAt = Date.now();
   const first = await attemptGeneration(buildPrompt(trimmed), VISUALIZATION_MAX_TOKENS);
   if (first.spec) return first.spec;
 
@@ -380,6 +397,21 @@ export async function generateVisualization(userPrompt: string): Promise<Visuali
   // Only give up and 502 if this second attempt also fails — a single
   // schema mismatch on an otherwise-complete response shouldn't be a dead
   // end when one corrective round-trip usually fixes it.
+  //
+  // But: if the first attempt already burned most of the total time
+  // budget, a second sequential AI call is very likely to get killed by
+  // the reverse-proxy timeout in front of this API before it ever
+  // finishes — which would surface to the student as a bare, unhelpful
+  // 504 instead of a real error message. Fail fast with a clear message
+  // instead of gambling on a retry that's unlikely to make it back in time.
+  const elapsed = Date.now() - startedAt;
+  if (elapsed > MAX_TOTAL_GENERATION_MS * 0.5) {
+    throw new InvalidVisualizationError(
+      first.truncated ? "Response was too long to complete in time — try a simpler or more specific prompt." : (first.issues ?? "Response was not valid JSON"),
+      first.raw,
+    );
+  }
+
   const retryPrompt = first.truncated
     ? `${buildPrompt(trimmed)}\n\nIMPORTANT: Your previous response was too long and got cut off before it was valid JSON. This time, keep it to at most 10 steps (or fewer elements per step) and be more concise in every "description" field, while still producing complete, valid JSON that fully closes every object and array.`
     : `${buildPrompt(trimmed)}\n\nIMPORTANT: Your previous response had these validation errors: ${first.issues}. Fix them and return complete, valid JSON matching the schema exactly — pay close attention to the SHAPE RULE ("shapeType" must be exactly "circle", "rect", or "ellipse", nothing else).`;

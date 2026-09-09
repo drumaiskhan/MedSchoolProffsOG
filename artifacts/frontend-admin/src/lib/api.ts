@@ -53,7 +53,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     // error handler), so surface that distinction instead of a bare status
     // code that looks like an app bug.
     const fallback = !isJson
-      ? `Can't reach the API (HTTP ${res.status}). Check that VITE_API_BASE_URL is set correctly for this deployment and that the backend is running.`
+      ? ([502, 503, 504].includes(res.status)
+          ? 'This is taking longer than expected. Try again — if it keeps happening, try a shorter or simpler request.'
+          : `Can't reach the API (HTTP ${res.status}). Check that VITE_API_BASE_URL is set correctly for this deployment and that the backend is running.`)
       : `Request failed (${res.status})`;
     throw new ApiRequestError(res.status, (data && (data.error || data.message)) || fallback, data);
   }
@@ -89,6 +91,8 @@ export interface PlatformSettings {
   AI_PROVIDER: string; AI_API_KEY_SET: string; AI_API_KEY_MASKED: string; AI_API_KEY: string;
   CLOUDINARY_CLOUD_NAME: string; CLOUDINARY_API_KEY: string; CLOUDINARY_API_SECRET: string; CLOUDINARY_API_SECRET_SET: string; CLOUDINARY_API_SECRET_MASKED: string;
   CLOUDINARY_CONFIGURED: string;
+  THEME_PRIMARY: string; THEME_SECONDARY: string; THEME_ACCENT: string;
+  THEME_BACKGROUND: string; THEME_CARD: string; THEME_TEXT: string; THEME_MODE: string;
 }
 
 export interface BankAccount { id: string; label: string; accountHolder: string; bankName: string; accountNumber: string; ifsc: string; branch: string; isPrimary: boolean }
@@ -124,6 +128,8 @@ export interface SiteContent {
   CONTACT_EMAIL: string; CONTACT_LOCATION: string; SUPPORT_HOURS: string; COPYRIGHT_NOTICE: string;
   features: string[]; quickLinks: Array<{ label: string; url: string }>; team: TeamMember[];
   faviconUrl: string | null;
+  THEME_PRIMARY: string; THEME_SECONDARY: string; THEME_ACCENT: string;
+  THEME_BACKGROUND: string; THEME_CARD: string; THEME_TEXT: string; THEME_MODE: string;
 }
 
 export const siteContentApi = {

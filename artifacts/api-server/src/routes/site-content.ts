@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, teamMembersTable, auditLogsTable } from "@workspace/db";
 import { requireAdmin, isAdminRole } from "../middlewares/auth";
-import { getAllSettings } from "../lib/settings";
+import { getAllSettings, THEME_KEYS, DEFAULT_THEME } from "../lib/settings";
 import { resolveFileUrl } from "../lib/storage";
 
 const router: IRouter = Router();
@@ -24,6 +24,15 @@ const SITE_CONTENT_KEYS = [
   "FEATURES_LIST",
   "QUICK_LINKS",
   "SITE_FAVICON_PATH",
+  // Optional decorative photo for the student Dashboard's greeting card —
+  // public (not admin-gated) since students need to see it, resolved to
+  // dashboardHeroImageUrl below the same way SITE_FAVICON_PATH resolves to
+  // faviconUrl.
+  "DASHBOARD_HERO_IMAGE_PATH",
+  // Design & Branding — public on purpose (see lib/settings.ts) so /login,
+  // /register, and any other signed-out page render with the saved colors
+  // instead of falling back to the shipped defaults only.
+  ...THEME_KEYS,
 ] as const;
 
 function teamView(member: typeof teamMembersTable.$inferSelect) {
@@ -35,7 +44,7 @@ router.get("/site-content", async (req, res): Promise<void> => {
   const isAdmin = req.user && (isAdminRole(req.user.role));
   const settings = await getAllSettings();
   const content: Record<string, string> = {};
-  for (const key of SITE_CONTENT_KEYS) content[key] = settings[key] ?? "";
+  for (const key of SITE_CONTENT_KEYS) content[key] = settings[key] || ((THEME_KEYS as readonly string[]).includes(key) ? DEFAULT_THEME[key as keyof typeof DEFAULT_THEME] : "");
 
   let features: string[] = [];
   let quickLinks: Array<{ label: string; url: string }> = [];
@@ -45,7 +54,8 @@ router.get("/site-content", async (req, res): Promise<void> => {
   const team = await db.select().from(teamMembersTable).where(isAdmin ? undefined : eq(teamMembersTable.active, true)).orderBy(teamMembersTable.displayOrder);
 
   const faviconUrl = resolveFileUrl(content.SITE_FAVICON_PATH) ?? null;
-  res.json({ ...content, features, quickLinks, team: team.map(teamView), faviconUrl });
+  const dashboardHeroImageUrl = resolveFileUrl(content.DASHBOARD_HERO_IMAGE_PATH) ?? null;
+  res.json({ ...content, features, quickLinks, team: team.map(teamView), faviconUrl, dashboardHeroImageUrl });
 });
 
 // ---------------------------------------------------------------------------

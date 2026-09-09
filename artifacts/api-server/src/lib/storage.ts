@@ -91,23 +91,35 @@ async function uploadToCloudinary(buffer: Buffer, safeName: string): Promise<{ p
   try {
     const { v2: cloudinary } = await import("cloudinary");
     cloudinary.config({ cloud_name: config.cloudName, api_key: config.apiKey, api_secret: config.apiSecret });
-    // The extension is kept as part of the public_id (not stripped) —
-    // Cloudinary only auto-appends a format for resource_type "image"/
-    // "video" when you use its own URL-building helpers. Raw uploads
-    // (docx/txt/csv/zip, and PDFs on some accounts) are delivered by an
-    // exact public_id match with no automatic extension, so a stripped
-    // public_id like "books/171-abc" 404s while "books/171-abc.pdf"
-    // works — this was why previously-uploaded books "succeeded" on
-    // upload but wouldn't open from a resolved link.
+    // The extension is kept as part of the public_id (not stripped) so it
+    // stays human-readable in the Cloudinary dashboard. IMPORTANT: this does
+    // NOT mean the delivery URL is just "{publicId}" — for resource_type
+    // "image"/"video" (which is what "auto" resolves PDFs and images to),
+    // Cloudinary's actual delivery URL is ALWAYS "{publicId}.{format}",
+    // appended by Cloudinary itself regardless of whether publicId already
+    // *looks* like it has an extension. A public_id of "books/171-abc.pdf"
+    // uploaded as an image resource is really served from
+    // ".../upload/books/171-abc.pdf.pdf" — the previous fix here assumed the
+    // existing extension was enough and only fixed the (rarer) case of a
+    // public_id with NO extension at all, which is why PDFs kept 404ing.
+    // Capturing `format` from the actual upload response and re-appending it
+    // in resolveFileUrl() (below) is the only reliable way to build a link
+    // that matches what Cloudinary will actually serve — see resolveFileUrl.
     const publicId = safeName;
-    const result = await new Promise<{ public_id: string; resource_type: string }>((resolve, reject) => {
+    const result = await new Promise<{ public_id: string; resource_type: string; format?: string }>((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream({ public_id: publicId, resource_type: "auto" }, (err, res) => {
         if (err || !res) { reject(err ?? new Error("Cloudinary upload returned no result")); return; }
-        resolve({ public_id: res.public_id, resource_type: res.resource_type });
+        resolve({ public_id: res.public_id, resource_type: res.resource_type, format: res.format });
       });
       stream.end(buffer);
     });
-    return { path: `cloudinary:${result.resource_type}/${result.public_id}` };
+    // Encoded as "cloudinary:{resourceType}/{publicId}|{format}" — the "|"
+    // suffix is never a valid Cloudinary public_id character, so it's safe
+    // to split on. Format is omitted (no "|") when Cloudinary didn't return
+    // one (shouldn't normally happen, but resolveFileUrl handles it either
+    // way by falling back to the old no-format behavior for that path).
+    const encoded = result.format ? `${result.public_id}|${result.format}` : result.public_id;
+    return { path: `cloudinary:${result.resource_type}/${encoded}` };
   } catch (err) {
     logger.error({ err }, "Cloudinary upload failed");
     return { error: `Cloudinary: ${err instanceof Error ? err.message : "upload failed"}` };
@@ -165,15 +177,24 @@ export async function testCloudinaryConnection(): Promise<{ ok: boolean; error?:
 }
 
 /**
- * One-time backward-compat helper for rows saved before the "keep the
- * extension in public_id" fix (see the comment in uploadToCloudinary above).
- * Those rows are stored as "cloudinary:{resourceType}/{publicId}" with NO
- * extension on publicId, which resolves to a URL Cloudinary can't serve
- * (ERR_INVALID_RESPONSE for PDFs, a 404 for other raw files). This looks the
- * asset up by its existing public_id via Cloudinary's Admin API, reads back
- * the real delivered `format`, and returns a corrected storage path with the
- * extension appended — or null if it's not a legacy path, Cloudinary isn't
- * configured, or the asset can't be found (e.g. already deleted).
+ * Backward-compat repair for rows saved before format was captured
+ * explicitly (see the comment in uploadToCloudinary above). Two distinct
+ * legacy shapes exist, both broken the same way (Cloudinary can't serve
+ * the URL resolveFileUrl builds from them):
+ *   1. "cloudinary:{type}/{publicId}" with NO extension at all.
+ *   2. "cloudinary:{type}/{publicId}" where publicId already *looks* like
+ *      it has an extension (e.g. "books/171-abc.pdf") — this one is the
+ *      trickier bug: for image/video resources Cloudinary still requires
+ *      the format appended AGAIN ("...171-abc.pdf.pdf"), so an existing
+ *      extension does NOT mean the row is fine. An earlier version of this
+ *      function assumed it did and skipped these, which is why some
+ *      previously-uploaded books kept 404ing even after a "fix".
+ * Both are repaired the same way: look the asset up by its stored
+ * public_id via Cloudinary's Admin API, read back the real `format`, and
+ * return a corrected path in the new "{publicId}|{format}" encoding that
+ * resolveFileUrl understands. Already-correct new-style paths (containing
+ * "|") are left alone. Returns null if there's nothing to fix, Cloudinary
+ * isn't configured, or the asset can't be found (e.g. already deleted).
  */
 export async function reresolveLegacyCloudinaryPath(storagePath: string): Promise<string | null> {
   if (!storagePath.startsWith("cloudinary:")) return null;
@@ -182,18 +203,19 @@ export async function reresolveLegacyCloudinaryPath(storagePath: string): Promis
   if (slash < 0) return null;
   const resourceType = rest.slice(0, slash) || "auto";
   const publicId = rest.slice(slash + 1);
-  // Already has an extension (post-fix upload) — nothing to do.
-  if (/\.[^./]+$/.test(publicId)) return null;
+  // Already in the new "{publicId}|{format}" encoding — nothing to do.
+  if (publicId.includes("|")) return null;
 
   const config = await resolveCloudinaryConfig();
   if (!config) return null;
   try {
     const { v2: cloudinary } = await import("cloudinary");
     cloudinary.config({ cloud_name: config.cloudName, api_key: config.apiKey, api_secret: config.apiSecret });
-    const resource = await cloudinary.api.resource(publicId, { resource_type: resourceType === "auto" ? "image" : resourceType });
+    const lookupResourceType = resourceType === "auto" ? "image" : resourceType;
+    const resource = await cloudinary.api.resource(publicId, { resource_type: lookupResourceType });
     const format = resource?.format;
     if (!format) return null;
-    return `cloudinary:${resourceType}/${publicId}.${format}`;
+    return `cloudinary:${resourceType === "auto" ? lookupResourceType : resourceType}/${publicId}|${format}`;
   } catch (err) {
     logger.error({ err, publicId }, "Could not re-resolve legacy Cloudinary path");
     return null;
@@ -222,10 +244,25 @@ export function resolveFileUrl(storagePath: string | null | undefined, opts?: { 
     const rest = storagePath.slice("cloudinary:".length);
     const slash = rest.indexOf("/");
     const resourceType = rest.slice(0, slash) || "auto";
-    const publicId = rest.slice(slash + 1);
+    const idAndFormat = rest.slice(slash + 1);
+    // New-style paths carry the real Cloudinary format after a "|" (see
+    // uploadToCloudinary). Old rows saved before this fix have no "|" —
+    // resolved as before (works for raw resources like docx/zip; still
+    // broken for pre-existing image/video rows like PDFs and thumbnails
+    // until re-uploaded, or for books, re-resolved via the "Backfill links"
+    // admin action which now handles this case too — see
+    // reresolveLegacyCloudinaryPath below).
+    const pipeIdx = idAndFormat.indexOf("|");
+    const publicId = pipeIdx < 0 ? idAndFormat : idAndFormat.slice(0, pipeIdx);
+    const format = pipeIdx < 0 ? null : idAndFormat.slice(pipeIdx + 1);
     if (!cachedCloudinaryCloudName) return null;
     const transformSegment = opts?.transform && resourceType === "image" ? `${opts.transform}/` : "";
-    return `https://res.cloudinary.com/${cachedCloudinaryCloudName}/${resourceType}/upload/${transformSegment}${publicId}`;
+    // The part that actually fixes the "PDF/thumbnail 404s" bug: Cloudinary
+    // always serves image/video resources at "{publicId}.{format}", even
+    // when publicId already visually ends in an extension.
+    const needsFormatSuffix = format && (resourceType === "image" || resourceType === "video");
+    const deliveredId = needsFormatSuffix ? `${publicId}.${format}` : publicId;
+    return `https://res.cloudinary.com/${cachedCloudinaryCloudName}/${resourceType}/upload/${transformSegment}${deliveredId}`;
   }
   if (storagePath.startsWith("local:")) {
     // Legacy rows from before local-disk storage was removed. These no
@@ -260,7 +297,9 @@ export async function deleteFromCloudinary(storagePath: string | null | undefine
   const slash = rest.indexOf("/");
   if (slash < 0) return { ok: true, skipped: true };
   const resourceType = rest.slice(0, slash) || "auto";
-  const publicId = rest.slice(slash + 1);
+  const idAndFormat = rest.slice(slash + 1);
+  const pipeIdx = idAndFormat.indexOf("|");
+  const publicId = pipeIdx < 0 ? idAndFormat : idAndFormat.slice(0, pipeIdx);
 
   const config = await resolveCloudinaryConfig();
   if (!config) return { ok: false, error: "Cloudinary is not configured — could not delete the remote file (the local record was still removed)." };

@@ -9,8 +9,9 @@ import {
   TrendingUp, Users, X, Zap, Bell, SlidersHorizontal, FileStack, NotebookPen, Bookmark,
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
   GraduationCap, CalendarDays, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
-  RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Wand2
+  RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Wand2, Loader2, Activity
 } from 'lucide-react';
+import { applyThemeVars, DEFAULT_THEME, readableForegroundHsl } from '@/lib/theme';
 import {
   getListMembershipPlansQueryKey, getListPaymentsQueryKey, getListMcqsQueryKey, getListModulesQueryKey, getListStudentsQueryKey, getListNotificationsQueryKey, getGetCurrentUserQueryKey, getListFlashcardsQueryKey,
   useApprovePayment, useCreateMembershipPlan, useCreateMcq, useCreateModule, useGetAdminDashboard, getGetAdminDashboardQueryKey,
@@ -29,7 +30,7 @@ import { toast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
-import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, analyticsApi, mcqImportApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, subjectAdminApi, topicAdminApi, flashcardsAdminApi, flashcardsAiApi, booksAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blockAdminApi, examsAdminApi, examsApi, explanationsApi, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type StudentDetail, type SiteContent, type TeamMember, type AdminModule, type AdminBlock, type AdminSubject, type AdminTopic, type AdminFlashcard, type GeneratedFlashcard, type AdminMcqRow, type AdminBook, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type BankAccount, type PaymentMethodConfig, aiVisualizerAdminApi, type AiVisualizerLogEntry } from '@/lib/api';
+import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, analyticsApi, mcqImportApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, subjectAdminApi, topicAdminApi, flashcardsAdminApi, flashcardsAiApi, booksAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blockAdminApi, examsAdminApi, examsApi, explanationsApi, auditApi, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type StudentDetail, type SiteContent, type TeamMember, type AdminModule, type AdminBlock, type AdminSubject, type AdminTopic, type AdminFlashcard, type GeneratedFlashcard, type AdminMcqRow, type AdminBook, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type BankAccount, type PaymentMethodConfig, aiVisualizerAdminApi, type AiVisualizerLogEntry } from '@/lib/api';
 import './index.css';
 
 // Round 3, item 10 (performance) — same over-fetching fix as the student
@@ -67,7 +68,7 @@ async function renderPdfFirstPageThumbnail(file: File): Promise<Blob | null> {
   }
 }
 
-const cn = (...parts: Array<string | false | undefined>) => parts.filter(Boolean).join(' ');
+const cn = (...parts: Array<string | false | undefined | null>) => parts.filter(Boolean).join(' ');
 const initials = (name = 'MedschoolProffs') => name.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase();
 const money = (amount: number, currency = 'PKR') => new Intl.NumberFormat('en-PK', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount);
 // Payment status codes stored in the DB are uppercase (PAYMENT_PENDING_REVIEW,
@@ -86,9 +87,9 @@ function ConfirmDialog({ title, body, confirmLabel = 'Delete', onConfirm, onCanc
 }
 
 function Logo({ dark = false }: { dark?: boolean }) {
-  return <Link href="/" className="flex items-center gap-3" data-testid="link-logo">
-    <span className={cn('grid size-9 place-items-center rounded-xl', dark ? 'bg-[#8bcbb8] text-[#102c37]' : 'bg-[#164b4b] text-[#d7eee4]')}><Stethoscope size={19} strokeWidth={2.4} /></span>
-    <span className={cn('text-[15px] font-extrabold tracking-[-.03em]', dark ? 'text-[#f3f1e9]' : 'text-[#164b4b]')}>medschool<span className="text-[#e5a952]">proffs</span></span>
+  return <Link href="/" className="flex items-center gap-2" data-testid="link-logo">
+    <Activity size={20} strokeWidth={2.4} className={dark ? 'text-sidebar-primary' : 'text-primary'} aria-hidden="true" />
+    <span className={cn('text-[15px] font-extrabold tracking-[-.03em]', dark ? 'text-sidebar-foreground' : 'text-primary')}>MedschoolProffs</span>
   </Link>;
 }
 
@@ -128,14 +129,13 @@ function SideNav({ user, onClose }: { user: User; onClose: () => void }) {
   const notifQ = useListNotifications();
   const unreadCount = (notifQ.data ?? []).filter((n) => !n.read).length;
   const logout = useMutation({ mutationFn: authApi.logout, onSuccess: () => { queryClient.clear(); window.location.href = '/login'; } });
-  return <aside className="fixed inset-y-0 left-0 z-40 flex w-[252px] flex-col overflow-y-auto bg-sidebar px-4 py-5 text-sidebar-foreground shadow-xl md:sticky md:top-0 md:h-[100dvh] md:shadow-none">
+  return <aside className="admin-sidebar fixed inset-y-0 left-0 z-40 flex w-[256px] flex-col overflow-y-auto bg-sidebar px-4 py-5 text-sidebar-foreground shadow-xl md:sticky md:top-0 md:h-[100dvh] md:shadow-none">
     <div className="mb-8 flex items-center justify-between px-2"><Logo dark /><button className="rounded-lg p-2 text-sidebar-foreground/60 hover:bg-sidebar-accent md:hidden" onClick={onClose} data-testid="button-close-menu"><X size={18} /></button></div>
-    <div className="mb-2 px-3 font-mono-app text-[10px] uppercase tracking-[.18em] text-sidebar-foreground/45">Command center</div>
-    <nav className="space-y-4">
-      {groups.map((group) => <div key={group.label}><div className="mb-1 px-3 text-[10px] font-bold uppercase tracking-[.1em] text-sidebar-foreground/35">{group.label}</div><div className="space-y-1">{group.items.map(([href, label, Icon]) => <Link key={href} href={href} onClick={onClose} className={cn('group flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-semibold transition-colors', location === href ? 'bg-sidebar-primary text-sidebar-primary-foreground' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground')} data-testid={`link-nav-${label.toLowerCase().replaceAll(' ', '-')}`}><Icon size={17} strokeWidth={location === href ? 2.4 : 1.8} /><span>{label}</span>{label === 'Notifications' && unreadCount > 0 && <span className="ml-auto grid size-5 place-items-center rounded-full bg-[#e5a952] text-[10px] font-bold text-[#183844]">{unreadCount > 9 ? '9+' : unreadCount}</span>}</Link>)}</div></div>)}
+    <nav className="space-y-5">
+      {groups.map((group) => <div key={group.label}><div className="mb-1.5 px-3.5 font-mono-app text-[9px] font-bold uppercase tracking-[.14em] text-sidebar-foreground/40">{group.label}</div><div className="space-y-1">{group.items.map(([href, label, Icon]) => <Link key={href} href={href} onClick={onClose} className={cn('group flex items-center gap-3 rounded-xl px-3.5 py-3 text-[13px] font-semibold transition-colors', location === href ? 'bg-white text-sidebar shadow-sm' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground')} data-testid={`link-nav-${label.toLowerCase().replaceAll(' ', '-')}`}><Icon size={18} strokeWidth={location === href ? 2.2 : 1.8} /><span>{label}</span>{label === 'Notifications' && unreadCount > 0 && <span className="ml-auto grid size-5 place-items-center rounded-full bg-[#e5a952] text-[10px] font-bold text-[#183844]">{unreadCount > 9 ? '9+' : unreadCount}</span>}</Link>)}</div></div>)}
     </nav>
-    <div className="mt-auto pt-4">
-      <div className="flex items-center gap-3 rounded-xl px-2 py-2"><div className="grid size-8 place-items-center rounded-full bg-[#d7eee4] text-xs font-extrabold text-[#164b4b]">{initials(user.name)}</div><div className="min-w-0 flex-1"><div className="truncate text-xs font-bold text-sidebar-foreground">{user.name}</div><div className="truncate text-[10px] text-sidebar-foreground/45">'Academic team'</div></div><button onClick={() => logout.mutate()} disabled={logout.isPending} className="text-sidebar-foreground/50 hover:text-sidebar-foreground disabled:opacity-50" data-testid="button-signout" title="Sign out"><LogOut size={15} /></button></div>
+    <div className="mt-auto pt-5">
+      <div className="flex items-center gap-3 rounded-xl px-2.5 py-2.5"><div className="grid size-9 shrink-0 place-items-center rounded-full bg-sidebar-primary text-xs font-extrabold text-sidebar-primary-foreground">{initials(user.name)}</div><div className="min-w-0 flex-1"><div className="truncate text-xs font-bold text-sidebar-foreground">{user.name}</div><div className="truncate text-[10px] text-sidebar-foreground/45">Academic team</div></div><button onClick={() => logout.mutate()} disabled={logout.isPending} className="text-sidebar-foreground/50 hover:text-sidebar-foreground disabled:opacity-50" data-testid="button-signout" title="Sign out"><LogOut size={15} /></button></div>
     </div>
   </aside>;
 }
@@ -148,7 +148,7 @@ function Shell({ children }: { children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   // retry: false — a failed/unusable current-user response should send the
   // user to /login promptly, not spend several silent retries first.
-  const userQuery = useGetCurrentUser({ query: { retry: false } });
+  const userQuery = useGetCurrentUser({ query: { retry: false, queryKey: getGetCurrentUserQueryKey() } });
   const [location, setLocation] = useLocation();
   const isMobile = useIsMobile();
   const user = userQuery.data;
@@ -173,7 +173,7 @@ function Shell({ children }: { children: ReactNode }) {
   if (userQuery.isLoading || !user || user.role !== 'admin') return <div className="grid min-h-[100dvh] place-items-center bg-background"><SkeletonPage /></div>;
 
   const title = location.slice(1).split('/').map((part) => part.replaceAll('-', ' ')).join(' / ') || 'Overview';
-  return <div className="flex min-h-[100dvh] bg-background"><div className={cn(menuOpen ? 'block' : 'hidden', 'fixed inset-0 z-30 bg-[#102c37]/40 md:hidden')} onClick={() => setMenuOpen(false)} />{(menuOpen || !isMobile) && <SideNav user={user} onClose={() => setMenuOpen(false)} />}<main className="min-w-0 flex-1"><header className="sticky top-0 z-20 flex h-[72px] items-center justify-between border-b border-border/70 bg-background/90 px-5 backdrop-blur-md md:px-10"><div className="flex items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} data-testid="button-open-menu"><Menu size={20} /></button><div><div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-muted-foreground">MedschoolProffs / Admin</div><h1 className="mt-1 text-[17px] font-bold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="flex items-center gap-2"><Link href="/notifications" className="relative grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted" data-testid="link-notifications"><Bell size={17} /></Link><Link href="/profile" className="ml-1 grid size-9 place-items-center rounded-full bg-[#d7eee4] text-xs font-extrabold text-[#164b4b]" data-testid="link-header-profile">{initials(user.name)}</Link></div></header><div className="page-enter px-5 py-7 md:px-10 md:py-9">{children}</div></main></div>;
+  return <div className="admin-shell flex min-h-[100dvh] bg-background"><div className={cn(menuOpen ? 'block' : 'hidden', 'fixed inset-0 z-30 bg-[#102c37]/40 md:hidden')} onClick={() => setMenuOpen(false)} />{(menuOpen || !isMobile) && <SideNav user={user} onClose={() => setMenuOpen(false)} />}<main className="admin-main min-w-0 flex-1"><header className="admin-header sticky top-0 z-20 flex h-[72px] items-center justify-between border-b border-border/70 bg-background/90 px-5 backdrop-blur-md md:px-10"><div className="flex items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} data-testid="button-open-menu"><Menu size={20} /></button><div><div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-muted-foreground">MedschoolProffs / Admin</div><h1 className="mt-1 text-[17px] font-bold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="flex items-center gap-2"><span className="hidden items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-[10px] font-semibold text-muted-foreground sm:inline-flex"><span className="size-1.5 rounded-full bg-primary" />Workspace live</span><Link href="/notifications" className="relative grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted" data-testid="link-notifications"><Bell size={17} /></Link><Link href="/profile" className="ml-1 grid size-9 place-items-center rounded-full bg-[#d7eee4] text-xs font-extrabold text-[#164b4b]" data-testid="link-header-profile">{initials(user.name)}</Link></div></header><div className="admin-content page-enter px-5 py-7 md:px-10 md:py-9">{children}</div></main></div>;
 }
 
 function SkeletonPage() { return <div className="space-y-5"><div className="skeleton h-8 w-56 rounded-lg" /><div className="grid gap-4 md:grid-cols-3"><div className="skeleton h-32 rounded-2xl" /><div className="skeleton h-32 rounded-2xl" /><div className="skeleton h-32 rounded-2xl" /></div><div className="skeleton h-72 rounded-2xl" /></div>; }
@@ -215,7 +215,9 @@ function Notifications() {
 
 function Profile() {
   const q = useGetCurrentUser();
-  const u = q.data || { id: 1, name: 'Maya Shah', email: 'maya.shah@example.com', role: 'student', status: 'active', institution: 'Northbridge Medical College', program: 'MBBS' };
+  if (q.isLoading) return <SkeletonPage />;
+  if (!q.data) return <ErrorState retry={() => q.refetch()} />;
+  const u = q.data;
   const [editing, setEditing] = useState(false);
   const update = useMutation({ mutationFn: authApi.updateMe, onSuccess: () => { queryClient.invalidateQueries({ queryKey: getGetCurrentUserQueryKey() }); setEditing(false); } });
   const dashboard = useGetStudentDashboard();
@@ -239,9 +241,28 @@ function TeamSection() {
   return <div className="mt-9"><SectionHeader eyebrow="Behind the platform" title="Our Academic Team" /><div className="grid gap-4 sm:grid-cols-2">{team.map((m) => <div key={m.id} className="rounded-2xl border border-border bg-card p-5" data-testid={`card-team-${m.id}`}><div className="flex items-center gap-3">{m.photoPath ? <img src={resolveUploadUrl(m.photoPath)!} alt={m.name} className="size-14 rounded-full border border-border object-cover" /> : <div className="grid size-14 place-items-center rounded-full bg-[#d7eee4] text-sm font-extrabold text-[#164b4b]">{initials(m.name)}</div>}<div><div className="text-sm font-bold">{m.name}</div><div className="text-xs text-primary">{m.role}</div></div></div>{m.achievementBadge && <span className="mt-3 inline-flex items-center gap-1 rounded-full bg-[#fdeecb] px-2.5 py-1 text-[10px] font-bold text-[#8a5a12]"><Trophy size={11} /> {m.achievementBadge}</span>}{m.bio && <p className="mt-3 text-xs leading-5 text-muted-foreground">{m.bio}</p>}{(m.linkedinUrl || m.instagramUrl || m.email) && <div className="mt-3 flex gap-2">{m.linkedinUrl && <a href={m.linkedinUrl} target="_blank" rel="noreferrer" className="grid size-7 place-items-center rounded-full bg-muted text-[10px] font-bold hover:bg-primary/10 hover:text-primary">in</a>}{m.instagramUrl && <a href={m.instagramUrl} target="_blank" rel="noreferrer" className="grid size-7 place-items-center rounded-full bg-muted text-[10px] font-bold hover:bg-primary/10 hover:text-primary">ig</a>}{m.email && <a href={`mailto:${m.email}`} className="grid size-7 place-items-center rounded-full bg-muted hover:bg-primary/10 hover:text-primary"><Mail size={12} /></a>}</div>}</div>)}</div></div>;
 }
 
+// Audit log actions are consistent SCREAMING_SNAKE_CASE codes (MCQ_CREATED,
+// BLOCK_ARCHIVED, ...) — humanized generically rather than via a hardcoded
+// per-action lookup table, so it stays correct for every action the backend
+// logs today or adds later without needing updates here.
+function humanizeAuditAction(action: string): string {
+  const s = action.toLowerCase().replaceAll('_', ' ');
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+function timeAgo(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 function AdminOverview() {
   const q = useGetAdminDashboard({ query: { refetchInterval: 15000, queryKey: getGetAdminDashboardQueryKey() } });
   const d = q.data;
+  const activity = useQuery({ queryKey: ['audit-logs', 'overview'], queryFn: () => auditApi.list(6), refetchInterval: 15000 });
   if (q.isLoading || !d) return <SkeletonPage />;
   const stats: Array<[string, string | number, typeof Users, string, string | null]> = [['Students', d.totalStudents, Users, 'bg-[#dceaf1] text-[#32647b]', '/admin/students'], ['Subscribed students', d.activeMembers, ShieldCheck, 'bg-[#d7eee4] text-[#287058]', '/admin/students?status=ACTIVE'], ['Pending payments', d.pendingPayments, Clock3, 'bg-[#fff0cb] text-[#94651c]', '/admin/payments'], ['This month\'s revenue', money(d.monthlyRevenue), TrendingUp, 'bg-[#f0e3ef] text-[#815276]', null]];
   // Donut gradient stops derived from real studentsByStatus counts — this
@@ -261,7 +282,11 @@ function AdminOverview() {
       return `${donutColors[i % donutColors.length]} ${start}% ${end}%`;
     }).join(', ')
     : '#dceaf1 0% 100%';
-  return <div><SectionHeader eyebrow="Command center" title="Good morning, academic team" action={<span className="inline-flex items-center gap-1.5 rounded-full bg-[#d7eee4] px-3 py-1.5 text-[10px] font-bold text-[#164b4b]" data-testid="text-live-indicator"><span className="size-1.5 rounded-full bg-[#287058]" /> Live · refreshes every 15s</span>} /><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{stats.map(([label, value, Icon, color, href], i) => { const card = <div className={cn('rounded-2xl border border-border bg-card p-5', href && 'card-lift cursor-pointer transition hover:border-primary/40')}><div className="flex items-center justify-between"><span className="text-xs font-semibold text-muted-foreground">{label}</span><div className={cn('grid size-9 place-items-center rounded-xl', color)}><Icon size={17} /></div></div><div className="mt-5 font-display text-4xl">{String(value)}</div><div className="mt-2 text-[11px] text-muted-foreground">{i === 2 ? 'Needs review today' : i === 3 ? 'Across active memberships' : 'Registered on the platform'}</div></div>; return href ? <Link key={String(label)} href={href} data-testid={`link-stat-${label.toLowerCase().replace(/[^a-z]+/g, '-')}`}>{card}</Link> : <div key={String(label)}>{card}</div>; })}</div><div className="mt-8 grid gap-6 lg:grid-cols-[1.5fr_1fr]"><div><SectionHeader eyebrow="Needs attention" title="Recent payments" action={<Link href="/admin/payments" className="text-xs font-bold text-primary" data-testid="link-admin-payments">View queue <ArrowRight size={13} className="ml-1 inline" /></Link>} />{d.recentPayments.length ? <div className="overflow-x-auto rounded-2xl border border-border bg-card"><table className="w-full min-w-[580px] text-left text-xs"><thead className="bg-muted text-[10px] uppercase tracking-[.12em] text-muted-foreground"><tr><th className="px-5 py-3">Student</th><th className="px-5 py-3">Plan</th><th className="px-5 py-3">Amount</th><th className="px-5 py-3">Status</th></tr></thead><tbody>{d.recentPayments.slice(0, 4).map((p) => <tr key={p.id} className="border-t border-border" data-testid={`row-admin-payment-${p.id}`}><td className="px-5 py-4 font-bold">{p.studentName}</td><td className="px-5 py-4 text-muted-foreground">{p.planName}</td><td className="px-5 py-4 font-mono-app text-[11px]">{money(p.amount, p.currency)}</td><td className="px-5 py-4"><Badge tone={paymentStatusTone(p.status)}>{paymentStatusLabel(p.status)}</Badge></td></tr>)}</tbody></table></div> : <EmptyState icon={ReceiptText} title="No payments yet" body="Payment submissions will show up here as students pay." />}</div><div><SectionHeader eyebrow="Membership health" title="Student status" /><div className="rounded-2xl border border-border bg-card p-6"><div className="flex items-center justify-center"><div className="relative grid size-44 place-items-center rounded-full" style={{ background: `conic-gradient(${gradientStops})` }}><div className="grid size-32 place-items-center rounded-full bg-card"><span className="font-display text-4xl">{d.activeMembers}</span><span className="text-[10px] text-muted-foreground">active</span></div></div></div><div className="mt-5 space-y-3">{statusEntries.map(([status, count], i) => <Link key={status} href={`/admin/students?status=${encodeURIComponent(status)}`} className="flex items-center justify-between text-xs transition hover:opacity-70" data-testid={`link-status-${status.toLowerCase()}`}><span className="flex items-center gap-2 capitalize"><span className="size-2 rounded-full" style={{ background: donutColors[i % donutColors.length] }} />{status}</span><span className="font-mono-app">{count}</span></Link>)}</div></div></div></div></div>;
+  return <div><SectionHeader eyebrow="Command center" title="Good morning, academic team" action={<span className="inline-flex items-center gap-1.5 rounded-full bg-[#d7eee4] px-3 py-1.5 text-[10px] font-bold text-[#164b4b]" data-testid="text-live-indicator"><span className="size-1.5 rounded-full bg-[#287058]" /> Live · refreshes every 15s</span>} /><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{stats.map(([label, value, Icon, color, href], i) => { const card = <div className={cn('rounded-2xl border border-border bg-card p-5', href && 'card-lift cursor-pointer transition hover:border-primary/40')}><div className="flex items-center justify-between"><span className="text-xs font-semibold text-muted-foreground">{label}</span><div className={cn('grid size-9 place-items-center rounded-xl', color)}><Icon size={17} /></div></div><div className="mt-5 font-display text-4xl">{String(value)}</div><div className="mt-2 text-[11px] text-muted-foreground">{i === 2 ? 'Needs review today' : i === 3 ? 'Across active memberships' : 'Registered on the platform'}</div></div>; return href ? <Link key={String(label)} href={href} data-testid={`link-stat-${label.toLowerCase().replace(/[^a-z]+/g, '-')}`}>{card}</Link> : <div key={String(label)}>{card}</div>; })}</div><div className="mt-8 grid gap-6 lg:grid-cols-[1.5fr_1fr]"><div><SectionHeader eyebrow="Needs attention" title="Recent payments" action={<Link href="/admin/payments" className="text-xs font-bold text-primary" data-testid="link-admin-payments">View queue <ArrowRight size={13} className="ml-1 inline" /></Link>} />{d.recentPayments.length ? <div className="overflow-x-auto rounded-2xl border border-border bg-card"><table className="w-full min-w-[580px] text-left text-xs"><thead className="bg-muted text-[10px] uppercase tracking-[.12em] text-muted-foreground"><tr><th className="px-5 py-3">Student</th><th className="px-5 py-3">Plan</th><th className="px-5 py-3">Amount</th><th className="px-5 py-3">Status</th></tr></thead><tbody>{d.recentPayments.slice(0, 4).map((p) => <tr key={p.id} className="border-t border-border" data-testid={`row-admin-payment-${p.id}`}><td className="px-5 py-4 font-bold">{p.studentName}</td><td className="px-5 py-4 text-muted-foreground">{p.planName}</td><td className="px-5 py-4 font-mono-app text-[11px]">{money(p.amount, p.currency)}</td><td className="px-5 py-4"><Badge tone={paymentStatusTone(p.status)}>{paymentStatusLabel(p.status)}</Badge></td></tr>)}</tbody></table></div> : <EmptyState icon={ReceiptText} title="No payments yet" body="Payment submissions will show up here as students pay." />}</div><div><SectionHeader eyebrow="Membership health" title="Student status" /><div className="rounded-2xl border border-border bg-card p-6"><div className="flex items-center justify-center"><div className="relative grid size-44 place-items-center rounded-full" style={{ background: `conic-gradient(${gradientStops})` }}><div className="grid size-32 place-items-center rounded-full bg-card"><span className="font-display text-4xl">{d.activeMembers}</span><span className="text-[10px] text-muted-foreground">active</span></div></div></div><div className="mt-5 space-y-3">{statusEntries.map(([status, count], i) => <Link key={status} href={`/admin/students?status=${encodeURIComponent(status)}`} className="flex items-center justify-between text-xs transition hover:opacity-70" data-testid={`link-status-${status.toLowerCase()}`}><span className="flex items-center gap-2 capitalize"><span className="size-2 rounded-full" style={{ background: donutColors[i % donutColors.length] }} />{status}</span><span className="font-mono-app">{count}</span></Link>)}</div></div></div></div>
+    <div className="mt-8"><SectionHeader eyebrow="What's happened lately" title="Recent activity" action={<Link href="/admin/team" className="text-xs font-bold text-primary" data-testid="link-admin-audit">Full history <ArrowRight size={13} className="ml-1 inline" /></Link>} />
+      <div className="rounded-2xl border border-border bg-card p-2">{activity.isLoading ? <div className="p-4 text-xs text-muted-foreground">Loading…</div> : activity.data?.length ? activity.data.map((entry, i) => <div key={entry.id} className={cn('flex items-center gap-3 px-4 py-3', i > 0 && 'border-t border-border')} data-testid={`row-activity-${entry.id}`}><span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[#dceaf1] text-[#2c6a8f]"><ClipboardCheck size={14} /></span><div className="min-w-0 flex-1"><div className="truncate text-xs font-bold">{humanizeAuditAction(entry.action)}</div><div className="truncate text-[11px] text-muted-foreground">{entry.actorName}{entry.entity ? ` · ${entry.entity}${entry.entityId ? ` #${entry.entityId}` : ''}` : ''}</div></div><span className="shrink-0 text-[10px] text-muted-foreground">{timeAgo(entry.createdAt)}</span></div>) : <div className="p-4 text-xs text-muted-foreground">No activity recorded yet.</div>}</div>
+    </div>
+  </div>;
 }
 
 function StudentDrawer({ id, onClose }: { id: number; onClose: () => void }) {
@@ -331,7 +356,8 @@ function PaymentProofsTab() {
 
 function AdminPlans() {
   const q = useListMembershipPlans();
-  const plans = q.data ?? [];
+  type MembershipPlanWithPricing = MembershipPlan & { originalPrice?: number | null; discountLabel?: string | null };
+  const plans = (q.data ?? []) as MembershipPlanWithPricing[];
   const create = useCreateMembershipPlan();
   const update = useUpdateMembershipPlan();
   const [editing, setEditing] = useState<number | null>(null);
@@ -1233,16 +1259,23 @@ function Footer({ variant = 'compact' }: { variant?: 'compact' | 'full' }) {
   </div>;
 }
 
-function AuthLayout({ children }: { children: ReactNode }) { return <div className="grid min-h-[100dvh] bg-background lg:grid-cols-[.9fr_1.1fr]"><div className="flex flex-col p-6 md:p-10"><Logo /><div className="mx-auto flex w-full max-w-sm flex-1 items-center py-10">{children}</div><Footer /></div><div className="relative hidden overflow-hidden bg-[#164b4b] p-14 text-[#eaf2e9] lg:flex lg:flex-col lg:justify-between"><div className="absolute -right-20 top-20 size-96 rounded-full border-[44px] border-[#2f6e68]/50" /><div className="absolute bottom-10 left-10 size-48 rounded-full border-[20px] border-[#e5a952]/25" /><div className="relative"><div className="font-mono-app text-[10px] uppercase tracking-[.18em] text-[#8bcbb8]">Command center</div><h2 className="mt-8 max-w-lg font-display text-6xl leading-[.93] tracking-[-.04em]">Run the<br /><em className="text-[#e5c476]">whole desk.</em></h2></div><div className="relative max-w-sm"><div className="mb-4 h-px bg-[#52877c]" /><p className="text-sm leading-6 text-[#bfd4cb]">Students, payments, curriculum, and exams — everything the academic team manages, in one dashboard.</p><div className="mt-5 flex items-center gap-2 text-xs font-bold"><span className="grid size-7 place-items-center rounded-full bg-[#d7eee4] text-[#164b4b]"><ShieldCheck size={14} /></span> Restricted to invited admin accounts</div></div></div></div>; }
+function AuthLayout({ children }: { children: ReactNode }) { return <div className="grid min-h-[100dvh] bg-background lg:grid-cols-[.9fr_1.1fr]"><div className="flex flex-col p-6 md:p-10"><Logo /><div className="mx-auto flex w-full max-w-sm flex-1 items-center py-10">{children}</div><Footer /></div><div className="relative hidden overflow-hidden bg-sidebar p-14 text-sidebar-foreground lg:flex lg:flex-col lg:justify-between"><div className="absolute -right-20 top-20 size-96 rounded-full border-[44px] border-sidebar-accent/50" /><div className="absolute bottom-10 left-10 size-48 rounded-full border-[20px] border-sidebar-primary/25" /><div className="relative"><div className="font-mono-app text-[10px] uppercase tracking-[.18em] text-sidebar-foreground/70">Command center</div><h2 className="mt-8 max-w-lg font-display text-6xl leading-[.93] tracking-[-.04em]">Run the<br /><em className="text-sidebar-primary not-italic">whole desk.</em></h2></div><div className="relative max-w-sm"><div className="mb-4 h-px bg-sidebar-border" /><p className="text-sm leading-6 text-sidebar-foreground/80">Students, payments, curriculum, and exams — everything the academic team manages, in one dashboard.</p><div className="mt-5 flex items-center gap-2 text-xs font-bold"><span className="grid size-7 place-items-center rounded-full bg-sidebar-primary text-sidebar-primary-foreground"><ShieldCheck size={14} /></span> Restricted to invited admin accounts</div></div></div></div>; }
 function Login() {
   const [, setLocation] = useLocation();
   const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
   const login = useMutation({
     mutationFn: authApi.login,
     onSuccess: (res) => { queryClient.invalidateQueries(); setLocation(res.user.role === 'admin' ? '/admin' : '/'); },
     onError: (err: unknown) => setError(err instanceof ApiRequestError ? err.message : 'Something went wrong. Please try again.'),
   });
-  return <AuthLayout><div className="w-full"><div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-primary">Welcome back</div><h1 className="mt-3 font-display text-4xl tracking-[-.04em]">Sign in to the admin desk.</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">For the academic team only.</p><form onSubmit={(e) => { e.preventDefault(); setError(null); const f = new FormData(e.currentTarget); login.mutate({ email: String(f.get('email')), password: String(f.get('password')) }); }} className="mt-8 space-y-4"><label className="block text-xs font-bold">Email<input required name="email" type="email" placeholder="you@college.edu" className="mt-2 h-12 w-full rounded-xl border border-border bg-card px-4 text-sm outline-none focus:ring-2 focus:ring-primary/20" data-testid="input-login-email" /></label><label className="block text-xs font-bold">Password<input required name="password" type="password" placeholder="At least 8 characters" className="mt-2 h-12 w-full rounded-xl border border-border bg-card px-4 text-sm outline-none focus:ring-2 focus:ring-primary/20" data-testid="input-login-password" /></label><div className="flex justify-end"><Link href="/forgot-password" className="text-xs font-bold text-primary" data-testid="button-forgot-password">Forgot password?</Link></div>{error && <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs font-semibold text-destructive" data-testid="text-login-error">{error}</div>}<button disabled={login.isPending} className="w-full rounded-xl bg-primary py-3.5 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-login-submit">{login.isPending ? 'Signing in…' : 'Sign in'}</button></form><p className="mt-7 text-center text-xs text-muted-foreground">Admin accounts are invite-only.</p></div></AuthLayout>;
+  return <AuthLayout><div className="w-full"><div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-primary">Welcome back</div><h1 className="mt-3 font-display text-4xl tracking-[-.04em]">Sign in to the admin desk.</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">For the academic team only.</p><form onSubmit={(e) => { e.preventDefault(); setError(null); const f = new FormData(e.currentTarget); login.mutate({ email: String(f.get('email')), password: String(f.get('password')) }); }} className="mt-8 space-y-4">
+    <label className="block text-xs font-bold">Email<div className="relative mt-2"><Mail size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><input required name="email" type="email" autoComplete="email" placeholder="you@college.edu" className="h-12 w-full rounded-xl border border-border bg-card pl-10 pr-4 text-sm outline-none transition-shadow focus:border-primary/40 focus:ring-2 focus:ring-primary/20" data-testid="input-login-email" /></div></label>
+    <label className="block text-xs font-bold">Password<div className="relative mt-2"><LockKeyhole size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><input required name="password" type={showPassword ? 'text' : 'password'} autoComplete="current-password" placeholder="At least 8 characters" className="h-12 w-full rounded-xl border border-border bg-card pl-10 pr-11 text-sm outline-none transition-shadow focus:border-primary/40 focus:ring-2 focus:ring-primary/20" data-testid="input-login-password" /><button type="button" tabIndex={-1} onClick={() => setShowPassword((v) => !v)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground" data-testid="button-toggle-login-password">{showPassword ? <EyeOff size={15} /> : <Eye size={15} />}</button></div></label>
+    <div className="flex justify-end"><Link href="/forgot-password" className="text-xs font-bold text-primary hover:underline" data-testid="button-forgot-password">Forgot password?</Link></div>
+    {error && <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs font-semibold text-destructive" data-testid="text-login-error">{error}</div>}
+    <button disabled={login.isPending} className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-xs font-extrabold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-sm" data-testid="button-login-submit">{login.isPending && <Loader2 size={14} className="animate-spin" />}{login.isPending ? 'Signing in…' : 'Sign in'}</button>
+  </form><p className="mt-7 text-center text-xs text-muted-foreground">Admin accounts are invite-only.</p></div></AuthLayout>;
 }
 function Stepper({ step }: { step: 1 | 2 }) {
   const steps = [{ n: 1, label: 'Your details' }, { n: 2, label: 'Membership & payment' }];
@@ -1282,12 +1315,20 @@ function AdminSignup() {
   const search = useSearch();
   const codeFromUrl = new URLSearchParams(search).get('code') || '';
   const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
   const register = useMutation({
     mutationFn: authApi.adminRegister,
     onSuccess: () => { queryClient.invalidateQueries(); setLocation('/admin'); },
     onError: (err: unknown) => setError(err instanceof ApiRequestError ? err.message : 'Something went wrong. Please try again.'),
   });
-  return <AuthLayout><div className="w-full"><div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-primary">Restricted</div><h1 className="mt-3 font-display text-4xl tracking-[-.04em]">Create an admin account.</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">You'll need the invite code from an existing admin (Admin → Platform settings).</p><form onSubmit={(e) => { e.preventDefault(); setError(null); const f = new FormData(e.currentTarget); register.mutate({ name: String(f.get('name')), email: String(f.get('email')), password: String(f.get('password')), inviteCode: String(f.get('inviteCode')) }); }} className="mt-7 space-y-3"><label className="block text-xs font-bold">Full name<input required name="name" className="mt-2 h-11 w-full rounded-xl border border-border bg-card px-3 text-sm" data-testid="input-admin-signup-name" /></label><label className="block text-xs font-bold">Email<input required type="email" name="email" className="mt-2 h-11 w-full rounded-xl border border-border bg-card px-3 text-sm" data-testid="input-admin-signup-email" /></label><label className="block text-xs font-bold">Password<input required minLength={10} type="password" name="password" className="mt-2 h-11 w-full rounded-xl border border-border bg-card px-3 text-sm" data-testid="input-admin-signup-password" /></label><label className="block text-xs font-bold">Invite code<input required name="inviteCode" defaultValue={codeFromUrl} className="mt-2 h-11 w-full rounded-xl border border-border bg-card px-3 text-sm font-mono-app tracking-wider" data-testid="input-admin-signup-code" /></label>{error && <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs font-semibold text-destructive" data-testid="text-admin-signup-error">{error}</div>}<button disabled={register.isPending} className="mt-3 w-full rounded-xl bg-primary py-3.5 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-admin-signup-submit">{register.isPending ? 'Creating account…' : 'Create admin account'}</button></form></div></AuthLayout>;
+  return <AuthLayout><div className="w-full"><div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-primary">Restricted</div><h1 className="mt-3 font-display text-4xl tracking-[-.04em]">Create an admin account.</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">You'll need the invite code from an existing admin (Admin → Platform settings).</p><form onSubmit={(e) => { e.preventDefault(); setError(null); const f = new FormData(e.currentTarget); register.mutate({ name: String(f.get('name')), email: String(f.get('email')), password: String(f.get('password')), inviteCode: String(f.get('inviteCode')) }); }} className="mt-7 space-y-3">
+    <label className="block text-xs font-bold">Full name<div className="relative mt-2"><UserIcon size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><input required name="name" className="h-11 w-full rounded-xl border border-border bg-card pl-10 pr-3 text-sm outline-none transition-shadow focus:border-primary/40 focus:ring-2 focus:ring-primary/20" data-testid="input-admin-signup-name" /></div></label>
+    <label className="block text-xs font-bold">Email<div className="relative mt-2"><Mail size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><input required type="email" name="email" className="h-11 w-full rounded-xl border border-border bg-card pl-10 pr-3 text-sm outline-none transition-shadow focus:border-primary/40 focus:ring-2 focus:ring-primary/20" data-testid="input-admin-signup-email" /></div></label>
+    <label className="block text-xs font-bold">Password<div className="relative mt-2"><LockKeyhole size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><input required minLength={10} type={showPassword ? 'text' : 'password'} name="password" className="h-11 w-full rounded-xl border border-border bg-card pl-10 pr-11 text-sm outline-none transition-shadow focus:border-primary/40 focus:ring-2 focus:ring-primary/20" data-testid="input-admin-signup-password" /><button type="button" tabIndex={-1} onClick={() => setShowPassword((v) => !v)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground" data-testid="button-toggle-admin-signup-password">{showPassword ? <EyeOff size={15} /> : <Eye size={15} />}</button></div></label>
+    <label className="block text-xs font-bold">Invite code<div className="relative mt-2"><ShieldCheck size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><input required name="inviteCode" defaultValue={codeFromUrl} className="h-11 w-full rounded-xl border border-border bg-card pl-10 pr-3 text-sm font-mono-app tracking-wider outline-none transition-shadow focus:border-primary/40 focus:ring-2 focus:ring-primary/20" data-testid="input-admin-signup-code" /></div></label>
+    {error && <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs font-semibold text-destructive" data-testid="text-admin-signup-error">{error}</div>}
+    <button disabled={register.isPending} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-xs font-extrabold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-sm" data-testid="button-admin-signup-submit">{register.isPending && <Loader2 size={14} className="animate-spin" />}{register.isPending ? 'Creating account…' : 'Create admin account'}</button>
+  </form></div></AuthLayout>;
 }
 
 function ForgotPassword() {
@@ -1571,7 +1612,7 @@ function PastPaperUploader({ pastPaperId, onImported }: { pastPaperId: number; o
 
 function AdminFlashcards() {
   const modulesQ = useListModules();
-  const allModules = modulesQ.data ?? [];
+  const allModules = (modulesQ.data ?? []) as unknown as AdminModule[];
   // Round 3, item 9 — Block filter ahead of Module, same cascading pattern
   // as Module -> Subject -> Topic: picking a Block narrows the Module
   // dropdown to that block's modules. Purely a filter — flashcards
@@ -1586,7 +1627,7 @@ function AdminFlashcards() {
   const topicsQ = useListTopics(subjectId ? { subjectId: Number(subjectId) } : undefined);
   const [topicId, setTopicId] = useState('');
   const cardsQ = useListFlashcards();
-  const cards = (cardsQ.data ?? []) as AdminFlashcard[];
+  const cards = (cardsQ.data ?? []) as unknown as AdminFlashcard[];
   const [open, setOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const invalidate = () => queryClient.invalidateQueries({ queryKey: getListFlashcardsQueryKey() });
@@ -1809,6 +1850,21 @@ function AdminAiVisualizerLogs() {
   </div>;
 }
 
+// Native <input type="color"> layered under a visible hex swatch/text pair —
+// keeps the picker fully accessible (real OS color UI) while matching the
+// reference design's "swatch + hex code" look.
+function ColorField({ label, value, onChange, testId }: { label: string; value: string; onChange: (value: string) => void; testId: string }) {
+  const safe = /^#[0-9a-fA-F]{6}$/.test(value) ? value : '#ffffff';
+  return <label className="block text-xs font-bold">{label}
+    <div className="mt-2 flex items-center gap-2">
+      <span className="relative grid size-10 shrink-0 place-items-center overflow-hidden rounded-lg border border-border" style={{ backgroundColor: safe }}>
+        <input type="color" value={safe} onChange={(e) => onChange(e.target.value)} className="absolute inset-0 size-full cursor-pointer opacity-0" data-testid={`input-color-picker-${testId}`} />
+      </span>
+      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder="#000000" maxLength={7} className="h-10 w-28 rounded-lg border border-border bg-background px-2 font-mono-app text-xs uppercase outline-none focus:ring-2 focus:ring-primary/20" data-testid={`input-color-hex-${testId}`} />
+    </div>
+  </label>;
+}
+
 function AdminSiteContent() {
   const settingsQuery = useQuery({ queryKey: ['admin-settings'], queryFn: settingsApi.get });
   const [form, setForm] = useState<Record<string, string> | null>(null);
@@ -1825,8 +1881,62 @@ function AdminSiteContent() {
   try { quickLinks = JSON.parse(values.QUICK_LINKS || '[]'); } catch { quickLinks = []; }
   const setQuickLinks = (list: Array<{ label: string; url: string }>) => set('QUICK_LINKS', JSON.stringify(list));
 
+  const theme = {
+    primary: values.THEME_PRIMARY || DEFAULT_THEME.THEME_PRIMARY,
+    secondary: values.THEME_SECONDARY || DEFAULT_THEME.THEME_SECONDARY,
+    accent: values.THEME_ACCENT || DEFAULT_THEME.THEME_ACCENT,
+    background: values.THEME_BACKGROUND || DEFAULT_THEME.THEME_BACKGROUND,
+    card: values.THEME_CARD || DEFAULT_THEME.THEME_CARD,
+    text: values.THEME_TEXT || DEFAULT_THEME.THEME_TEXT,
+    mode: values.THEME_MODE || DEFAULT_THEME.THEME_MODE,
+  };
+
   return <div className="max-w-3xl"><SectionHeader eyebrow="Site content" title="Footer & public content" action={<span className="text-[10px] text-muted-foreground">Shown across the sign-in pages and student profile</span>} />
     <div className="space-y-4">
+      <div className="rounded-2xl border border-border bg-card p-6">
+        <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold">Design &amp; branding</h3><span className="text-[10px] text-muted-foreground">Applies across the student and admin apps, including sign-in pages</span></div>
+        <div className="mt-5 grid gap-6 lg:grid-cols-[1fr_260px]">
+          <div>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <ColorField label="Primary" value={theme.primary} onChange={(v) => set('THEME_PRIMARY', v)} testId="theme-primary" />
+              <ColorField label="Secondary" value={theme.secondary} onChange={(v) => set('THEME_SECONDARY', v)} testId="theme-secondary" />
+              <ColorField label="Accent" value={theme.accent} onChange={(v) => set('THEME_ACCENT', v)} testId="theme-accent" />
+              <ColorField label="Background" value={theme.background} onChange={(v) => set('THEME_BACKGROUND', v)} testId="theme-background" />
+              <ColorField label="Card" value={theme.card} onChange={(v) => set('THEME_CARD', v)} testId="theme-card" />
+              <ColorField label="Text" value={theme.text} onChange={(v) => set('THEME_TEXT', v)} testId="theme-text" />
+            </div>
+            <div className="mt-5">
+              <div className="text-xs font-bold">Theme mode</div>
+              <div className="mt-2 inline-flex rounded-xl border border-border bg-background p-1">
+                <button type="button" onClick={() => set('THEME_MODE', 'light')} className={cn('flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-bold transition-colors', theme.mode === 'light' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')} data-testid="button-theme-mode-light">Light</button>
+                <button type="button" onClick={() => set('THEME_MODE', 'dark')} className={cn('flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-bold transition-colors', theme.mode === 'dark' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')} data-testid="button-theme-mode-dark">Dark</button>
+              </div>
+            </div>
+            <div className="mt-5">
+              <div className="text-xs font-bold">Dashboard greeting photo</div>
+              <div className="mt-2"><AdminImageUpload currentUrl={values.DASHBOARD_HERO_IMAGE_URL || ''} kind="resource" accept="image/png,image/jpeg,image/webp" hint="Optional — shown behind the student Dashboard's greeting card (e.g. a stethoscope photo). PNG, JPEG, or WEBP. Falls back to a plain pattern when unset." testId="input-dashboard-hero-upload" onUploaded={(storagePath) => set('DASHBOARD_HERO_IMAGE_PATH', storagePath)} /></div>
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Theme preview</div>
+            <div className="mt-2 overflow-hidden rounded-xl border border-border" style={{ backgroundColor: theme.background }} data-testid="panel-theme-preview">
+              <div className="m-3 overflow-hidden rounded-lg shadow-sm" style={{ backgroundColor: theme.card }}>
+                <div className="flex items-center gap-2 px-3 py-2.5" style={{ backgroundColor: theme.primary }}>
+                  <span className="grid size-5 place-items-center rounded-md" style={{ backgroundColor: theme.accent }}><Stethoscope size={11} color="#fff" /></span>
+                  <span className="text-[10px] font-extrabold" style={{ color: readableForegroundHsl(theme.primary) === '0 0% 100%' ? '#fff' : theme.text }}>Dashboard</span>
+                </div>
+                <div className="space-y-2 p-3">
+                  <div className="h-2 w-3/4 rounded-full" style={{ backgroundColor: theme.secondary, opacity: 0.4 }} />
+                  <div className="h-2 w-1/2 rounded-full" style={{ backgroundColor: theme.secondary, opacity: 0.25 }} />
+                  <button type="button" className="mt-2 rounded-md px-3 py-1.5 text-[10px] font-extrabold text-white" style={{ backgroundColor: theme.primary }}>Continue</button>
+                  <span className="ml-2 inline-block rounded-md px-3 py-1.5 text-[10px] font-extrabold" style={{ backgroundColor: theme.accent, color: '#fff' }}>68%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">About</h3><label className="mt-4 block text-xs font-bold">Platform description<textarea value={values.PLATFORM_DESCRIPTION || ''} onChange={(e) => set('PLATFORM_DESCRIPTION', e.target.value)} className="mt-2 min-h-20 w-full rounded-xl border border-border bg-background p-3 text-xs" data-testid="input-platform-description" /></label></div>
 
       <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">Social links</h3><div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -2116,8 +2226,17 @@ function useFaviconSync() {
   }, [data?.faviconUrl]);
 }
 
+// See frontend-student's useThemeSync for the full rationale — same
+// ['site-content'] query as useFaviconSync above (deduped by react-query),
+// applied from AppRoutes so signed-out /login and /admin/login match too.
+function useThemeSync() {
+  const { data } = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get, staleTime: 5 * 60 * 1000 });
+  useEffect(() => { applyThemeVars(data ?? null); }, [data]);
+}
+
 function AppRoutes() {
  useFaviconSync();
+ useThemeSync();
  return <Switch><Route path="/login" component={Login} /><Route path="/admin/login" component={Login} /><Route path="/admin-signup/1" component={AdminSignup} /><Route path="/forgot-password" component={ForgotPassword} /><Route path="/reset-password" component={ResetPassword} /><Route path="/verify-email" component={VerifyEmail} /><Route path="/notifications"><Shell><Notifications /></Shell></Route><Route path="/profile"><Shell><Profile /></Shell></Route><Route path="/"><Shell><AdminOverview /></Shell></Route><Route path="/admin"><Shell><AdminOverview /></Shell></Route><Route path="/admin/students"><Shell><AdminStudents /></Shell></Route><Route path="/admin/payments"><Shell><AdminPaymentsHub initialTab="Proof Review" /></Shell></Route><Route path="/admin/plans"><Shell><AdminPlans /></Shell></Route><Route path="/admin/payment-details"><Shell><AdminPaymentsHub initialTab="Collection Details" /></Shell></Route><Route path="/admin/academic-structure"><Shell><AdminAcademicStructure /></Shell></Route><Route path="/admin/content"><Shell><AdminContent /></Shell></Route><Route path="/admin/mcqs"><Shell><AdminMcqs /></Shell></Route><Route path="/admin/flashcards"><Shell><AdminFlashcards /></Shell></Route><Route path="/admin/books"><Shell><AdminBooks /></Shell></Route><Route path="/admin/past-papers"><Shell><AdminPastPapers /></Shell></Route><Route path="/admin/exams"><Shell><AdminExams /></Shell></Route><Route path="/admin/feedback"><Shell><AdminFeedback /></Shell></Route><Route path="/admin/ai-visualizer-logs"><Shell><AdminAiVisualizerLogs /></Shell></Route><Route path="/admin/site-content"><Shell><AdminSiteContent /></Shell></Route><Route path="/admin/team"><Shell><AdminTeam /></Shell></Route><Route path="/admin/settings"><Shell><AdminSettings /></Shell></Route><Route component={NotFound} /></Switch>; }
 function App() { return <QueryClientProvider client={queryClient}><TooltipProvider><WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}><ErrorBoundary><AppRoutes /></ErrorBoundary></WouterRouter><Toaster /></TooltipProvider></QueryClientProvider>; }
 export default App;

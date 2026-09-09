@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod";
 import { auditLogsTable, db } from "@workspace/db";
-import { getAllSettings, setSetting } from "../lib/settings";
+import { getAllSettings, setSetting, THEME_KEYS, DEFAULT_THEME } from "../lib/settings";
 import { requireAdmin } from "../middlewares/auth";
 import { resolveFileUrl, testCloudinaryConnection, setCachedCloudinaryCloudName } from "../lib/storage";
 
@@ -23,6 +23,10 @@ const EDITABLE_KEYS = [
   "PAYMENT_INSTRUCTIONS",
   "ANNOUNCEMENT_BANNER",
   "REGISTRATION_ENABLED",
+  // Optional decorative photo for the student Dashboard's greeting card
+  // (see frontend-student's Dashboard component) — falls back to a plain
+  // decorative pattern when unset.
+  "DASHBOARD_HERO_IMAGE_PATH",
   // Payment collection details — shown to students when they submit payment
   "PAYMENT_ACCOUNT_HOLDER",
   "PAYMENT_ACCOUNT_NUMBER",
@@ -83,6 +87,11 @@ const EDITABLE_KEYS = [
   "CLOUDINARY_CLOUD_NAME",
   "CLOUDINARY_API_KEY",
   "CLOUDINARY_API_SECRET",
+  // Design & Branding — see lib/settings.ts THEME_KEYS/DEFAULT_THEME. Also
+  // mirrored into site-content.ts's SITE_CONTENT_KEYS since these need to be
+  // public (signed-out pages like /login are themed too), unlike the rest
+  // of this admin-only list.
+  ...THEME_KEYS,
 ] as const;
 
 // Subset visible to students at signup — everything else in admin settings
@@ -112,8 +121,17 @@ const PUBLIC_PAYMENT_KEYS = [
 // storage-backend logic on the client. These extra keys aren't in
 // EDITABLE_KEYS, so the PATCH schema below silently ignores them if ever
 // posted back.
+// THEME_* keys fall back to DEFAULT_THEME (not "") so a fresh install's
+// admin panel already shows the reference palette instead of blank color
+// pickers, and so PATCH-ing an unrelated setting doesn't blank them out.
+function withThemeDefaults(view: Record<string, string>): Record<string, string> {
+  const out = { ...view };
+  for (const key of THEME_KEYS) if (!out[key]) out[key] = DEFAULT_THEME[key];
+  return out;
+}
+
 function withResolvedMedia(view: Record<string, string>): Record<string, string> {
-  return { ...view, SITE_FAVICON_URL: resolveFileUrl(view.SITE_FAVICON_PATH) ?? "", PAYMENT_QR_CODE_URL: resolveFileUrl(view.PAYMENT_QR_CODE_PATH) ?? "" };
+  return { ...view, SITE_FAVICON_URL: resolveFileUrl(view.SITE_FAVICON_PATH) ?? "", PAYMENT_QR_CODE_URL: resolveFileUrl(view.PAYMENT_QR_CODE_PATH) ?? "", DASHBOARD_HERO_IMAGE_URL: resolveFileUrl(view.DASHBOARD_HERO_IMAGE_PATH) ?? "" };
 }
 
 // Secrets — never sent back down in full once saved. The admin UI shows a
@@ -175,7 +193,7 @@ router.get("/admin/settings", requireAdmin, async (_req, res): Promise<void> => 
   // set. Checks the DB-backed settings first (the ones the admin can set
   // right here) before falling back to env vars.
   const cloudinaryConfigured = !!((view.CLOUDINARY_CLOUD_NAME && view.CLOUDINARY_API_KEY && view.CLOUDINARY_API_SECRET) || (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET));
-  res.json({ ...withSecretsMasked(withResolvedMedia(view)), CLOUDINARY_CONFIGURED: String(cloudinaryConfigured) });
+  res.json({ ...withSecretsMasked(withResolvedMedia(withThemeDefaults(view))), CLOUDINARY_CONFIGURED: String(cloudinaryConfigured) });
 });
 
 const SettingsBody = z.object(Object.fromEntries(EDITABLE_KEYS.map((key) => [key, z.string().max(4000).optional()])) as Record<(typeof EDITABLE_KEYS)[number], z.ZodOptional<z.ZodString>>);
@@ -198,7 +216,7 @@ router.patch("/admin/settings", requireAdmin, async (req, res): Promise<void> =>
   }
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "SETTINGS_UPDATED", entity: "platform_settings", metadata: JSON.stringify(Object.keys(parsed.data)) });
   const settings = await getAllSettings();
-  res.json(withSecretsMasked(withResolvedMedia(Object.fromEntries(EDITABLE_KEYS.map((key) => [key, settings[key] ?? ""])))));
+  res.json(withSecretsMasked(withResolvedMedia(withThemeDefaults(Object.fromEntries(EDITABLE_KEYS.map((key) => [key, settings[key] ?? ""]))))));
 });
 
 router.post("/admin/settings/rotate-admin-code", requireAdmin, async (req, res): Promise<void> => {
