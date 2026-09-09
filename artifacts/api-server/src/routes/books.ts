@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, booksTable, auditLogsTable } from "@workspace/db";
 import { requireAuth, requireAdmin, requireActiveMembership, isAdminRole } from "../middlewares/auth";
-import { resolveFileUrl, reresolveLegacyCloudinaryPath } from "../lib/storage";
+import { resolveFileUrl, reresolveLegacyCloudinaryPath, deleteFromCloudinary, THUMBNAIL_TRANSFORM } from "../lib/storage";
 import { getStudentTargeting, getVisibleModuleIds } from "../lib/contentVisibility";
 
 const router: IRouter = Router();
@@ -26,7 +26,11 @@ function serializeBook(row: typeof booksTable.$inferSelect) {
     // (e.g. Cloudinary not configured), and the frontend already handles
     // that as a disabled/missing link.
     storagePath: resolveFileUrl(row.storagePath),
-    coverImagePath: row.coverImagePath ? resolveFileUrl(row.coverImagePath) : null,
+    // Round 3, item 10 (perf) — the cover thumbnail gets a delivery
+    // transform (resized + auto format/quality); the actual book file
+    // (storagePath) deliberately does NOT, since it's a raw/PDF resource,
+    // not an image, and transformations don't apply the same way there.
+    coverImagePath: row.coverImagePath ? resolveFileUrl(row.coverImagePath, { transform: THUMBNAIL_TRANSFORM }) : null,
     active: row.active,
   };
 }
@@ -87,14 +91,35 @@ router.delete("/books/:id", requireAdmin, async (req, res): Promise<void> => {
 // Permanent delete — the admin "Delete this book?" dialog wires to this (not
 // the soft-archive route above), since the request is for the book to be
 // gone, not archived. Mirrors the past-papers permanent-delete pattern.
+//
+// New in round 3: also deletes the underlying Cloudinary asset(s) (the
+// book's file, plus its cover image if one was set), not just the DB row.
+// Previously this only removed `med_books`, leaving the actual PDF/file
+// orphaned on Cloudinary forever (silently consuming storage quota with no
+// way to find/clean it up from the admin UI). The DB row is still deleted
+// even if the Cloudinary delete fails or the asset was already gone
+// (deleteFromCloudinary never throws) — a failed remote cleanup shouldn't
+// block the admin from removing the book, but is reported back so it's not
+// silently swallowed.
 router.delete("/admin/books/:id/permanent", requireAdmin, async (req, res): Promise<void> => {
   const id = Number(req.params.id);
   if (Number.isNaN(id)) { res.status(400).json({ error: "Invalid book id" }); return; }
   const [row] = await db.select().from(booksTable).where(eq(booksTable.id, id));
   if (!row) { res.status(404).json({ error: "Book not found" }); return; }
+
+  const [fileResult, coverResult] = await Promise.all([
+    deleteFromCloudinary(row.storagePath),
+    deleteFromCloudinary(row.coverImagePath),
+  ]);
+
   await db.delete(booksTable).where(eq(booksTable.id, id));
-  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "BOOK_PERMANENTLY_DELETED", entity: "book", entityId: id });
-  res.json({ ok: true });
+  await db.insert(auditLogsTable).values({
+    actorId: req.user!.id, action: "BOOK_PERMANENTLY_DELETED", entity: "book", entityId: id,
+    metadata: JSON.stringify({ cloudinaryFileDeleted: fileResult.ok && !fileResult.skipped, cloudinaryCoverDeleted: coverResult.ok && !coverResult.skipped }),
+  });
+  const cloudinaryWarning = !fileResult.ok || !coverResult.ok
+    ? "Book removed, but the file on Cloudinary could not be deleted — it may need manual cleanup." : undefined;
+  res.json({ ok: true, ...(cloudinaryWarning ? { warning: cloudinaryWarning } : {}) });
 });
 
 // One-time backward-compat fix for books uploaded before the "keep the

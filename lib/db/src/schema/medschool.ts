@@ -232,6 +232,12 @@ export const modulesTable = pgTable("med_modules", {
   // Nullable — modules with no block show up under "Unassigned modules"
   // until an admin assigns them to a Block.
   blockId: integer("block_id"),
+  // Optional module-level thumbnail (round 3, item 7) — same Cloudinary
+  // storage-path convention as med_blocks.iconPath, resolved to a URL by
+  // resolveFileUrl() the same way. Nullable: most existing modules have no
+  // thumbnail yet, and it stays optional going forward (falls back to the
+  // plain icon+label card style when absent).
+  iconPath: text("icon_path"),
   // Content targeting — null means visible to everyone. Set programTargetKind
   // to restrict to students whose program.kind matches (e.g. "MBBS"), and/or
   // yearTargetNumber to restrict to a specific academic year (1-5). Subjects,
@@ -280,6 +286,12 @@ export const mcqsTable = pgTable("med_mcqs", {
   // option has no specific explanation yet, and the UI falls back to the
   // single `explanation` field above for the correct option.
   optionExplanations: text("option_explanations").array(),
+  // A short nudge shown to a student who's stuck, before they see the full
+  // explanation/correct answer (round 3, item 4b) — separate from
+  // `explanation` (which reveals the reasoning/answer) since a hint is
+  // meant to be usable mid-attempt without spoiling the question. Nullable:
+  // most existing MCQs have no hint yet, and it's optional going forward.
+  hint: text("hint"),
   // PENDING (no explanation yet, or needs work) | AI_GENERATED (drafted by
   // AI, awaiting review) | REVIEWED (admin edited/checked it) | APPROVED
   // (final). Existing/imported explanations default to APPROVED at

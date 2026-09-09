@@ -10,6 +10,13 @@ export interface ParsedMcqCandidate {
   reference: string | null;
   needsReview: boolean;
   rawBlock?: string;
+  // Round 3, item 5 — the file-import pipeline never had a difficulty
+  // field at all (unlike the AI-drafted-MCQ and manual/bulk-add forms,
+  // which already did per the earlier difficulty fix). The parser has no
+  // reliable signal for this from raw file text, so every candidate starts
+  // at "moderate" and the admin adjusts it per-question in the review UI
+  // before committing — same default the DB column itself uses.
+  difficulty: "easy" | "moderate" | "hard";
 }
 
 export interface ImportPatternSet {
@@ -200,7 +207,7 @@ export function extractMcqsFromText(rawText: string, patterns: ImportPatternSet 
     const correctOptionExplanation = answerOption ? optionExplanationTexts[sortedOptions.indexOf(answerOption)] : null;
     const explanation = blockExplanation || correctOptionExplanation;
     const needsReview = !question || options.length < 2 || !correctAnswer;
-    return { question, options, correctAnswer, explanation, optionExplanations: hasAnyOptionExplanation ? optionExplanationTexts : null, reference: null, needsReview, rawBlock: block.raw.join("\n") };
+    return { question, options, correctAnswer, explanation, optionExplanations: hasAnyOptionExplanation ? optionExplanationTexts : null, reference: null, needsReview, rawBlock: block.raw.join("\n"), difficulty: "moderate" as const };
   }).filter((c) => c.question.length > 0);
 }
 
@@ -282,7 +289,7 @@ export function extractMcqsFromRows(rows: string[][]): ParsedMcqCandidate[] | nu
       : null;
     const explanation = explanationCol >= 0 ? String(row[explanationCol] ?? "").trim() || null : (optionExplanations && correctIndex >= 0 ? optionExplanations[correctIndex] : null);
     const reference = referenceCol >= 0 ? String(row[referenceCol] ?? "").trim() || null : null;
-    candidates.push({ question, options, correctAnswer, explanation, optionExplanations: optionExplanations && optionExplanations.some((e) => e != null) ? optionExplanations : null, reference, needsReview: options.length < 2 || !correctAnswer });
+    candidates.push({ question, options, correctAnswer, explanation, optionExplanations: optionExplanations && optionExplanations.some((e) => e != null) ? optionExplanations : null, reference, needsReview: options.length < 2 || !correctAnswer, difficulty: "moderate" });
   }
   return candidates;
 }

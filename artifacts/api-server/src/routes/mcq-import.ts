@@ -7,6 +7,9 @@ import { requireAdmin } from "../middlewares/auth";
 import { extractFileContent } from "../lib/fileExtraction";
 import { extractMcqsFromText, extractMcqsFromRows, DEFAULT_IMPORT_PATTERNS, type ImportPatternSet } from "../lib/mcqParser";
 import { dbErrorMessage } from "../lib/dbErrors";
+import { getSetting } from "../lib/settings";
+import { generateExplanation, generateHint } from "../lib/aiExplain";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -122,11 +125,59 @@ const CommitBody = z.object({
     explanation: z.string().nullable().optional(),
     optionExplanations: z.array(z.string().nullable()).nullable().optional(),
     reference: z.string().nullable().optional(),
+    // Round 3, item 5 — the file-import commit path never accepted a
+    // difficulty at all (unlike AI-drafted MCQs and the manual/bulk-add
+    // forms), so even an admin who set it per-candidate in the review UI
+    // had it silently dropped here. Optional + defaulted so old clients
+    // that don't send it yet still work.
+    difficulty: z.enum(["easy", "moderate", "hard"]).optional(),
   })).min(1).max(2000),
 }).refine(
   (data) => !!data.pastPaperId || !!data.examId || (!!data.moduleId && !!data.subjectId && !!data.topicId),
   { message: "Provide a pastPaperId, an examId, or a full moduleId/subjectId/topicId, to place these questions somewhere" },
 );
+
+const TRUTHY = new Set(["true", "1", "on", "yes"]);
+
+/**
+ * Round 3, item 4b — auto-generates an explanation + hint for every
+ * imported question that doesn't already have one, when the admin has
+ * turned on AI_AUTO_EXPLAIN_ON_IMPORT. Deliberately NOT awaited by the
+ * caller (see the `void queueAutoExplain(...)` call site below) so a bulk
+ * import of hundreds of MCQs doesn't hang the HTTP response waiting on
+ * hundreds of sequential AI calls — the commit response returns as soon as
+ * the DB insert is done, and this keeps working in the background.
+ * Sequential (not Promise.all) on purpose, for the same reason: a few
+ * hundred simultaneous requests to the configured AI provider would very
+ * likely hit its rate limit and fail most of them, whereas one-at-a-time
+ * finishes reliably even if it takes longer in wall-clock time.
+ *
+ * Lands as AI_GENERATED (awaiting admin review), matching exactly how the
+ * existing on-demand "Ask AI to explain" flow (explanations.ts) marks a
+ * freshly-generated explanation — never silently APPROVED.
+ */
+async function queueAutoExplain(items: Array<{ id: number; question: string; options: string[]; correctAnswer: string | null; reference: string | null; hasExplanationAlready: boolean }>): Promise<void> {
+  const autoEnabledRaw = await getSetting("AI_AUTO_EXPLAIN_ON_IMPORT", null);
+  if (!autoEnabledRaw || !TRUTHY.has(autoEnabledRaw.toLowerCase())) return;
+  const modelOverride = (await getSetting("AI_AUTO_EXPLAIN_MODEL", null)) || undefined;
+
+  for (const item of items) {
+    if (item.hasExplanationAlready) continue; // don't overwrite an explanation the import file already provided
+    try {
+      const request = { question: item.question, options: item.options, correctAnswer: item.correctAnswer, reference: item.reference };
+      const [explanation, hint] = await Promise.all([
+        generateExplanation(request, modelOverride),
+        generateHint(request, modelOverride),
+      ]);
+      await db.update(mcqsTable).set({ explanation, hint, explanationStatus: "AI_GENERATED" }).where(eq(mcqsTable.id, item.id));
+    } catch (err) {
+      // One question's generation failing (rate limit, provider hiccup,
+      // AI not configured) must not stop the rest of the queue — it stays
+      // PENDING and can still be explained on-demand or manually later.
+      logger.error({ err, mcqId: item.id }, "[mcq-import] auto-explain-on-import generation failed for this question");
+    }
+  }
+}
 
 router.post("/admin/mcq-import/commit", requireAdmin, async (req, res): Promise<void> => {
   const parsed = CommitBody.safeParse(req.body);
@@ -143,6 +194,7 @@ router.post("/admin/mcq-import/commit", requireAdmin, async (req, res): Promise<
         optionExplanations: mcq.optionExplanations ?? null,
         explanationStatus: mcq.explanation?.trim() ? "APPROVED" as const : "PENDING" as const,
         reference: mcq.reference ?? null,
+        difficulty: mcq.difficulty ?? "moderate",
         status: data.status,
         source: "import" as const,
         moduleId: data.moduleId ?? null,
@@ -163,6 +215,19 @@ router.post("/admin/mcq-import/commit", requireAdmin, async (req, res): Promise<
     }
 
     await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MCQS_BULK_IMPORTED", entity: "mcq", metadata: JSON.stringify({ count: rows.length, moduleId: data.moduleId ?? null, pastPaperId: data.pastPaperId ?? null, examId: data.examId ?? null }) });
+
+    // Fire-and-forget (see queueAutoExplain's own comment) — every imported
+    // question across this batch, regardless of which module/subject/topic
+    // or exam/past-paper it's homed under, is eligible; this isn't scoped
+    // to one section.
+    void queueAutoExplain(rows.map((r, i) => ({
+      id: r.id,
+      question: data.mcqs[i].question,
+      options: data.mcqs[i].options,
+      correctAnswer: data.mcqs[i].correctAnswer ?? null,
+      reference: data.mcqs[i].reference ?? null,
+      hasExplanationAlready: !!data.mcqs[i].explanation?.trim(),
+    })));
 
     res.status(201).json({ imported: rows.length, ids: rows.map((r) => r.id) });
   } catch (err) {

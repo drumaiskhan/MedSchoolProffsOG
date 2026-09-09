@@ -585,6 +585,8 @@ ALTER TABLE med_mcqs ALTER COLUMN subject_id DROP NOT NULL;
 ALTER TABLE med_mcqs ALTER COLUMN topic_id DROP NOT NULL;
 ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS option_explanations TEXT[];
 ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS explanation_status TEXT NOT NULL DEFAULT 'PENDING';
+-- Round 3, item 4b: short student-facing hint field (see ensureSchema.ts).
+ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS hint TEXT;
 ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS exam_id INTEGER;
 
 ALTER TABLE med_ai_visualizer_logs ADD COLUMN IF NOT EXISTS raw_response TEXT;
@@ -595,5 +597,7 @@ ALTER TABLE med_membership_plans ADD COLUMN IF NOT EXISTS original_price NUMERIC
 ALTER TABLE med_membership_plans ADD COLUMN IF NOT EXISTS discount_label TEXT;
 
 ALTER TABLE med_modules ADD COLUMN IF NOT EXISTS block_id INTEGER;
+-- Round 3, item 7: optional module thumbnail (see schema/medschool.ts).
+ALTER TABLE med_modules ADD COLUMN IF NOT EXISTS icon_path TEXT;
 
 COMMIT;

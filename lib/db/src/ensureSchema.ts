@@ -593,6 +593,10 @@ ALTER TABLE med_mcqs ALTER COLUMN topic_id DROP NOT NULL;
 -- option_explanations ones.
 ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS option_explanations TEXT[];
 ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS explanation_status TEXT NOT NULL DEFAULT 'PENDING';
+-- Round 3, item 4b: short student-facing hint, separate from the
+-- answer-revealing `explanation` field. Nullable/optional, same
+-- idempotent-ALTER pattern as the two columns above.
+ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS hint TEXT;
 -- med_mcqs: MCQs can now attach directly to an exam (exam_id) the same
 -- way they already attach to a past paper (past_paper_id) — imported
 -- exam questions no longer need a module/subject/topic home either.
@@ -615,6 +619,8 @@ ALTER TABLE med_membership_plans ADD COLUMN IF NOT EXISTS discount_label TEXT;
 -- CREATE TABLE ran in production) — nullable so existing modules keep
 -- working ungrouped ("Unassigned modules") until an admin assigns one.
 ALTER TABLE med_modules ADD COLUMN IF NOT EXISTS block_id INTEGER;
+-- Round 3, item 7: optional module thumbnail (see schema/medschool.ts).
+ALTER TABLE med_modules ADD COLUMN IF NOT EXISTS icon_path TEXT;
 
 COMMIT;
 `;

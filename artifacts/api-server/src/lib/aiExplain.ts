@@ -401,8 +401,18 @@ const DEFAULT_MODELS: Record<AiProvider, string> = {
   custom: "openai/gpt-4o-mini",
 };
 
-/** DB setting takes precedence over the env var of the same provider. */
-async function resolveProvider(): Promise<{ provider: AiProvider; apiKey: string; model: string; baseUrl?: string } | null> {
+/**
+ * DB setting takes precedence over the env var of the same provider.
+ *
+ * `modelOverride` (round 3, item 4b) lets the MCQ-import auto-explain
+ * pipeline use a cheaper/faster model for bulk generation
+ * (AI_AUTO_EXPLAIN_MODEL) without needing a whole separate
+ * provider/key/base-URL config — same provider and API key, just a
+ * different model string. Falls back to the normal AI_MODEL/default when
+ * not set, so every other caller (on-demand "Ask AI to explain", flashcard/
+ * MCQ generation) is unaffected.
+ */
+async function resolveProvider(modelOverride?: string): Promise<{ provider: AiProvider; apiKey: string; model: string; baseUrl?: string } | null> {
   const dbProvider = await getSetting("AI_PROVIDER", null);
   const dbKey = await getSetting("AI_API_KEY", null);
   const dbModel = await getSetting("AI_MODEL", null);
@@ -410,19 +420,19 @@ async function resolveProvider(): Promise<{ provider: AiProvider; apiKey: string
   if ((dbKey || dbProvider === "custom") && dbProvider && (AI_PROVIDERS as readonly string[]).includes(dbProvider)) {
     const provider = dbProvider as AiProvider;
     if (provider === "custom" && !dbBaseUrl) return null; // custom needs a base URL to mean anything
-    return { provider, apiKey: dbKey ?? "", model: dbModel || DEFAULT_MODELS[provider], baseUrl: dbBaseUrl ?? undefined };
+    return { provider, apiKey: dbKey ?? "", model: modelOverride || dbModel || DEFAULT_MODELS[provider], baseUrl: dbBaseUrl ?? undefined };
   }
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
-  if (anthropicKey) return { provider: "anthropic", apiKey: anthropicKey, model: DEFAULT_MODELS.anthropic };
+  if (anthropicKey) return { provider: "anthropic", apiKey: anthropicKey, model: modelOverride || DEFAULT_MODELS.anthropic };
   const openAiKey = process.env.OPENAI_API_KEY;
-  if (openAiKey) return { provider: "openai", apiKey: openAiKey, model: DEFAULT_MODELS.openai };
+  if (openAiKey) return { provider: "openai", apiKey: openAiKey, model: modelOverride || DEFAULT_MODELS.openai };
   const geminiKey = process.env.GEMINI_API_KEY;
-  if (geminiKey) return { provider: "gemini", apiKey: geminiKey, model: DEFAULT_MODELS.gemini };
+  if (geminiKey) return { provider: "gemini", apiKey: geminiKey, model: modelOverride || DEFAULT_MODELS.gemini };
   return null;
 }
 
-export async function runPrompt(prompt: string, maxTokens = 400, jsonMode: JsonMode = false): Promise<string> {
-  const resolved = await resolveProvider();
+export async function runPrompt(prompt: string, maxTokens = 400, jsonMode: JsonMode = false, modelOverride?: string): Promise<string> {
+  const resolved = await resolveProvider(modelOverride);
   if (!resolved) throw new AiNotConfiguredError();
   switch (resolved.provider) {
     case "anthropic": return generateWithAnthropic(resolved.apiKey, resolved.model, prompt, maxTokens, jsonMode);
@@ -432,8 +442,27 @@ export async function runPrompt(prompt: string, maxTokens = 400, jsonMode: JsonM
   }
 }
 
-export async function generateExplanation(request: ExplanationRequest): Promise<string> {
-  return runPrompt(buildPrompt(request));
+export async function generateExplanation(request: ExplanationRequest, modelOverride?: string): Promise<string> {
+  return runPrompt(buildPrompt(request), 400, false, modelOverride);
+}
+
+function buildHintPrompt({ question, options, reference }: ExplanationRequest): string {
+  return [
+    "You are writing a short study HINT for a medical school MCQ (MBBS/BDS level) — this is shown to a student who is stuck WHILE still attempting the question, so it must nudge their reasoning without revealing or pointing directly at the correct option.",
+    "Under 30 words. No markdown. Do not name or rule out any specific option letter/answer.",
+    "",
+    `Question: ${question}`,
+    `Options:\n${options.map((opt, i) => `${String.fromCharCode(65 + i)}. ${opt}`).join("\n")}`,
+    reference ? `Reference material to ground the hint in: ${reference}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+/** Round 3, item 4b — generates the short pre-answer hint for `med_mcqs.hint`,
+ * used by the MCQ-import auto-explain pipeline. Separate prompt from
+ * generateExplanation() since a hint must NOT reveal the answer the way an
+ * explanation deliberately does. */
+export async function generateHint(request: ExplanationRequest, modelOverride?: string): Promise<string> {
+  return runPrompt(buildHintPrompt(request), 100, false, modelOverride);
 }
 
 export async function generateFlashcardExplanation(request: FlashcardExplanationRequest): Promise<string> {

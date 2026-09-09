@@ -3,7 +3,7 @@ import { z } from "zod";
 import { auditLogsTable, db } from "@workspace/db";
 import { getAllSettings, setSetting } from "../lib/settings";
 import { requireAdmin } from "../middlewares/auth";
-import { resolveFileUrl, testCloudinaryConnection } from "../lib/storage";
+import { resolveFileUrl, testCloudinaryConnection, setCachedCloudinaryCloudName } from "../lib/storage";
 
 const router: IRouter = Router();
 
@@ -66,6 +66,15 @@ const EDITABLE_KEYS = [
   "AI_API_KEY",
   "AI_MODEL", // optional override; each provider has a sensible default if left blank
   "AI_BASE_URL", // required only when AI_PROVIDER = "custom" — an OpenAI-compatible /chat/completions base URL
+  // Round 3, item 4b: auto-generate explanations (+ hints) at MCQ-import
+  // time instead of only on-demand via "Ask AI to explain". Boolean-ish
+  // string, same "on"/"off"-by-presence pattern as REGISTRATION_ENABLED —
+  // parsed with the same truthy check (see mcq-import.ts). Reuses
+  // AI_PROVIDER/AI_API_KEY above; AI_AUTO_EXPLAIN_MODEL is an OPTIONAL
+  // override so a cheaper/faster model can be used for bulk generation
+  // without configuring a whole second provider/key.
+  "AI_AUTO_EXPLAIN_ON_IMPORT",
+  "AI_AUTO_EXPLAIN_MODEL",
   // Persistent file storage — Cloudinary is the only upload backend (see
   // lib/storage.ts; Supabase is used for this app's Postgres database only,
   // not for storage). Same "configurable from the admin panel, no server
@@ -180,6 +189,12 @@ router.patch("/admin/settings", requireAdmin, async (req, res): Promise<void> =>
     // "the admin didn't touch this field," not "clear the key."
     if ((SECRET_KEYS as readonly string[]).includes(key) && value === "") continue;
     await setSetting(key, value);
+    // Root-cause fix (round 3, items 2/6/8): push a new cloud name into
+    // storage.ts's synchronous resolveFileUrl() cache immediately, instead
+    // of waiting for its 15s lazy-refresh window. Without this, an admin
+    // saving Cloudinary settings and then immediately testing an upload
+    // could still see "isn't loading back" for up to 15 seconds.
+    if (key === "CLOUDINARY_CLOUD_NAME" && value) setCachedCloudinaryCloudName(value);
   }
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "SETTINGS_UPDATED", entity: "platform_settings", metadata: JSON.stringify(Object.keys(parsed.data)) });
   const settings = await getAllSettings();

@@ -133,6 +133,14 @@ MEDICAL ACCURACY RULES (do not violate these):
 
 SHAPE RULE (applies to every "shape" element, in every type below): "shapeType" must be EXACTLY one of "circle", "rect", or "ellipse" — never "line", "polygon", "triangle", "path", "square", "oval", "diamond", "star", or any other value. There is no fourth option. To represent a line, dendrite, axon, vessel, membrane, or any other elongated structure, use a thin "rect" (small height, longer width) instead of inventing a new shape type.
 
+LAYOUT RULE (round 3 — applies to every "shape"/"label" element on the 0-100 canvas, in every type below): elements must NOT overlap or stack on top of each other.
+- Never give two different elements the same (x, y), or coordinates closer than about 12 units apart on this 0-100 canvas, unless one is a small "label" element deliberately placed just outside the edge of the shape it names (e.g. a label at y = shape's y minus (shape's radius/height + 4), not centered on the shape itself).
+- Size every shape to comfortably fit its own label text — a wide/long label needs a wider "rect", not a shape sized independently of what's written on or next to it.
+- Spread elements to use the full 0-100 canvas rather than clustering everything near the center — plan rough (x, y) positions for every element in a step BEFORE writing them out, as if sketching a real, legible diagram, not a pile of shapes at one point.
+- For a multi-step "process"/"cycle", keep each recurring structure's (x, y) position CONSISTENT across steps (reuse the same id and position) so the diagram doesn't visually jump around step to step — only the highlighted/active elements and particles should change.
+
+TYPE CHOICE RULE (round 3): if the student's request is for an interactive DIAGRAM of an anatomical or physiological system (e.g. "heart and body fluids, interactive", "interactive nephron diagram") — as opposed to a request for a specific numeric calculation or formula — choose "anatomy", "process", or "cycle" (all of which contain real shape/label/arrow diagram elements), NOT "equation". "equation" produces only a formula and a slider calculator with no diagram at all, which is the wrong output for a request asking to see/visualize a structure. Only choose "equation" when the request is explicitly about computing or exploring a numeric formula (e.g. "cardiac output equation", "Fick's principle calculator", "show me how stroke volume affects cardiac output"). A slider/variable IS allowed as a labeled element inside an "anatomy"/"process" diagram's own elements (e.g. a small equation readout alongside the real diagram) — it just cannot be the entire response when a diagram was asked for.
+
 CHOOSE ONE TYPE AND FOLLOW ITS EXACT JSON SHAPE:
 
 1. "process" or "cycle" — a multi-step mechanism (cycle loops back to step 1; process has a clear end):
@@ -265,21 +273,73 @@ function normalizeElementsArray(elements: unknown): unknown {
   return elements.map(normalizeElement);
 }
 
+// Defense-in-depth for the LAYOUT RULE prompt instruction (round 3, item
+// 4a — the "completely overlapping labels and shapes stacked on top of
+// each other" bug). The prompt asks the model to space things out, but
+// models still sometimes default everything to the same coordinate (most
+// often 50,50, or all labels defaulting to their shape's exact center).
+// This is a purely mechanical nudge, not a redesign: any two positioned
+// elements (shape or label) within MIN_DISTANCE of each other get the
+// later one pushed outward along the line between them, repeated a few
+// passes so a cluster of 3+ colliding elements fans out instead of two
+// merely swapping places. Never invents new elements/ids, never changes
+// anything except x/y, and always stays inside the 0-100 canvas.
+const MIN_DISTANCE = 10;
+const LAYOUT_PASSES = 4;
+
+function hasXY(el: unknown): el is { x: number; y: number; kind: string } {
+  return !!el && typeof el === "object" && typeof (el as Record<string, unknown>).x === "number" && typeof (el as Record<string, unknown>).y === "number";
+}
+
+function declutterPositions(elements: unknown[]): unknown[] {
+  const positioned = elements.filter(hasXY) as Array<{ x: number; y: number; kind: string } & Record<string, unknown>>;
+  if (positioned.length < 2) return elements;
+  for (let pass = 0; pass < LAYOUT_PASSES; pass++) {
+    let movedAny = false;
+    for (let i = 0; i < positioned.length; i++) {
+      for (let j = i + 1; j < positioned.length; j++) {
+        const a = positioned[i], b = positioned[j];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist >= MIN_DISTANCE) continue;
+        movedAny = true;
+        // Push the two apart symmetrically along their connecting line
+        // (or an arbitrary diagonal if they're exactly coincident, so
+        // dx/dy=0 doesn't produce a NaN direction).
+        const angle = dist > 0.01 ? Math.atan2(dy, dx) : (i * 47 + j * 13) % 360 * (Math.PI / 180);
+        const push = (MIN_DISTANCE - dist) / 2 + 1;
+        b.x = Math.min(100, Math.max(0, b.x + Math.cos(angle) * push));
+        b.y = Math.min(100, Math.max(0, b.y + Math.sin(angle) * push));
+        a.x = Math.min(100, Math.max(0, a.x - Math.cos(angle) * push));
+        a.y = Math.min(100, Math.max(0, a.y - Math.sin(angle) * push));
+      }
+    }
+    if (!movedAny) break;
+  }
+  return elements;
+}
+
+function declutterElementsArray(elements: unknown): unknown {
+  if (!Array.isArray(elements)) return elements;
+  return declutterPositions(elements);
+}
+
 /** Walks the parsed-but-not-yet-validated spec and normalizes every
- * shapeType it can find, whichever of the "elements" (anatomy/process's
- * top level) or "steps[].elements" (process/cycle) shapes it turns out to
- * be — cheaper and safer than trying to guess the type before validation. */
+ * shapeType AND declutters overlapping positions it can find, whichever of
+ * the "elements" (anatomy/process's top level) or "steps[].elements"
+ * (process/cycle) shapes it turns out to be — cheaper and safer than
+ * trying to guess the type before validation. */
 function normalizeShapeTypes(parsed: unknown): unknown {
   if (!parsed || typeof parsed !== "object") return parsed;
   const rec = { ...(parsed as Record<string, unknown>) };
   if (Array.isArray(rec.elements)) {
-    rec.elements = normalizeElementsArray(rec.elements);
+    rec.elements = declutterElementsArray(normalizeElementsArray(rec.elements));
   }
   if (Array.isArray(rec.steps)) {
     rec.steps = rec.steps.map((step) => {
       if (!step || typeof step !== "object") return step;
       const stepRec = { ...(step as Record<string, unknown>) };
-      if (Array.isArray(stepRec.elements)) stepRec.elements = normalizeElementsArray(stepRec.elements);
+      if (Array.isArray(stepRec.elements)) stepRec.elements = declutterElementsArray(normalizeElementsArray(stepRec.elements));
       return stepRec;
     });
   }

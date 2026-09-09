@@ -51,6 +51,40 @@ function refreshConfigCacheIfStale(): void {
   void getSetting("CLOUDINARY_CLOUD_NAME", null).then((name) => { if (name) cachedCloudinaryCloudName = name; }).catch(() => {});
 }
 
+/**
+ * Root-cause fix (round 3, items 2/6/8): the cache above used to be
+ * populated ONLY by the fire-and-forget refresh in refreshConfigCacheIfStale,
+ * which is async but resolveFileUrl() is synchronous — so on a cold boot
+ * where CLOUDINARY_CLOUD_NAME lives only in the DB (not an env var, i.e. the
+ * "Admin -> Settings" configuration path this whole feature exists for),
+ * cachedCloudinaryCloudName stayed null for the entire first burst of
+ * requests (every list/serializer call that resolves a URL before that first
+ * background promise resolves), which is exactly the "Uploaded, but the file
+ * isn't loading back" warning AdminImageUpload was surfacing right after a
+ * save/restart. Two fixes:
+ *
+ * 1. warmStorageConfigCache() — awaited once at server boot (see index.ts),
+ *    before the app starts accepting requests, so the cache is never empty
+ *    for a DB-configured cloud name in the first place.
+ * 2. setCachedCloudinaryCloudName() — called synchronously from the
+ *    settings route the moment an admin saves a new CLOUDINARY_CLOUD_NAME,
+ *    so a save takes effect immediately instead of waiting for the next
+ *    15-second refresh window.
+ */
+export async function warmStorageConfigCache(): Promise<void> {
+  try {
+    const name = await getSetting("CLOUDINARY_CLOUD_NAME", null);
+    if (name) cachedCloudinaryCloudName = name;
+    lastConfigRefresh = Date.now();
+  } catch (err) {
+    logger.error({ err }, "[storage] Could not warm Cloudinary config cache at boot — falling back to env var / lazy refresh.");
+  }
+}
+
+export function setCachedCloudinaryCloudName(name: string | null): void {
+  if (name) cachedCloudinaryCloudName = name;
+}
+
 async function uploadToCloudinary(buffer: Buffer, safeName: string): Promise<{ path: string } | { error: string }> {
   const config = await resolveCloudinaryConfig();
   if (!config) return { error: "Cloudinary is not configured (missing cloud name, API key, or API secret)." };
@@ -166,8 +200,16 @@ export async function reresolveLegacyCloudinaryPath(storagePath: string): Promis
   }
 }
 
-/** Resolves a stored path (from uploadFile) into a URL the frontend can fetch. */
-export function resolveFileUrl(storagePath: string | null | undefined): string | null {
+/**
+ * Resolves a stored path (from uploadFile) into a URL the frontend can
+ * fetch. `opts.transform` (item 10 — perf) injects Cloudinary delivery
+ * transformation params (e.g. "w_400,q_auto,f_auto") right after
+ * `/upload/` for *image* resources only — raw/video/auto resources (books,
+ * PDFs) are left untouched since transformations don't apply the same way
+ * and could interfere with exact-public_id delivery. Callers that don't
+ * pass `transform` get the exact same URL as before (no behavior change).
+ */
+export function resolveFileUrl(storagePath: string | null | undefined, opts?: { transform?: string }): string | null {
   if (!storagePath) return null;
   refreshConfigCacheIfStale();
   if (storagePath.startsWith("supabase:")) {
@@ -182,7 +224,8 @@ export function resolveFileUrl(storagePath: string | null | undefined): string |
     const resourceType = rest.slice(0, slash) || "auto";
     const publicId = rest.slice(slash + 1);
     if (!cachedCloudinaryCloudName) return null;
-    return `https://res.cloudinary.com/${cachedCloudinaryCloudName}/${resourceType}/upload/${publicId}`;
+    const transformSegment = opts?.transform && resourceType === "image" ? `${opts.transform}/` : "";
+    return `https://res.cloudinary.com/${cachedCloudinaryCloudName}/${resourceType}/upload/${transformSegment}${publicId}`;
   }
   if (storagePath.startsWith("local:")) {
     // Legacy rows from before local-disk storage was removed. These no
@@ -192,4 +235,48 @@ export function resolveFileUrl(storagePath: string | null | undefined): string |
     return null;
   }
   return storagePath;
+}
+
+/** Default "don't ship full-resolution originals" transform for thumbnails
+ * and cover images (item 10) — resizes to a sane max width, auto-picks
+ * format (WebP/AVIF where supported) and quality. Deliberately conservative
+ * (no crop) since these get applied to arbitrary admin-uploaded images of
+ * unknown aspect ratio. */
+export const THUMBNAIL_TRANSFORM = "w_600,q_auto,f_auto";
+
+/**
+ * Deletes the underlying Cloudinary asset for a storage path (item 8's
+ * follow-up: "when I delete a book, delete it on Cloudinary too"). Safe to
+ * call on non-Cloudinary paths (supabase:/local:/plain URLs) — those are
+ * silently skipped, since there's nothing this function is responsible for
+ * cleaning up there. Never throws: a failed Cloudinary delete (asset
+ * already gone, bad credentials, network blip) is logged and swallowed so
+ * it can't block the DB row from being deleted — the row going away is the
+ * part the user is actually waiting on.
+ */
+export async function deleteFromCloudinary(storagePath: string | null | undefined): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
+  if (!storagePath || !storagePath.startsWith("cloudinary:")) return { ok: true, skipped: true };
+  const rest = storagePath.slice("cloudinary:".length);
+  const slash = rest.indexOf("/");
+  if (slash < 0) return { ok: true, skipped: true };
+  const resourceType = rest.slice(0, slash) || "auto";
+  const publicId = rest.slice(slash + 1);
+
+  const config = await resolveCloudinaryConfig();
+  if (!config) return { ok: false, error: "Cloudinary is not configured — could not delete the remote file (the local record was still removed)." };
+  try {
+    const { v2: cloudinary } = await import("cloudinary");
+    cloudinary.config({ cloud_name: config.cloudName, api_key: config.apiKey, api_secret: config.apiSecret });
+    // resource_type "auto" isn't valid for the destroy API (only for
+    // upload) — Cloudinary's own uploader.upload_stream call above always
+    // stores the *real* resolved resource_type (image/video/raw) once the
+    // upload completes, so "auto" here would only happen for a pre-fix
+    // legacy row; fall back to "image" like reresolveLegacyCloudinaryPath
+    // does for the same reason.
+    await cloudinary.uploader.destroy(publicId, { resource_type: resourceType === "auto" ? "image" : resourceType, invalidate: true });
+    return { ok: true };
+  } catch (err) {
+    logger.error({ err, publicId }, "Could not delete Cloudinary asset");
+    return { ok: false, error: err instanceof Error ? err.message : "Cloudinary delete failed" };
+  }
 }

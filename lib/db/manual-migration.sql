@@ -84,6 +84,8 @@ CREATE TABLE IF NOT EXISTS med_feedback_replies (
 -- ---------------------------------------------------------------------
 ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS option_explanations TEXT[];
 ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS explanation_status TEXT NOT NULL DEFAULT 'PENDING';
+-- Round 3, item 4b: short student-facing hint field (see ensureSchema.ts).
+ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS hint TEXT;
 
 -- MCQs can now attach directly to an exam (exam_id), the same way they
 -- already attach to a past paper (past_paper_id) — imported exam
@@ -119,5 +121,7 @@ CREATE TABLE IF NOT EXISTS med_blocks (
 -- Nullable — existing modules keep working ungrouped ("Unassigned
 -- modules") until an admin assigns them to a block.
 ALTER TABLE med_modules ADD COLUMN IF NOT EXISTS block_id INTEGER;
+-- Round 3, item 7: optional module thumbnail (see schema/medschool.ts).
+ALTER TABLE med_modules ADD COLUMN IF NOT EXISTS icon_path TEXT;
 
 COMMIT;

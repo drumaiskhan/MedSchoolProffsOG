@@ -9,6 +9,7 @@ import { logger } from "./lib/logger";
 import { seedDefaultAdmin } from "./lib/seedAdmin";
 import { normalizeLegacyRoles } from "./lib/normalizeLegacyRoles";
 import { ensureSchema } from "@workspace/db";
+import { warmStorageConfigCache } from "./lib/storage";
 
 // Most hosts (Railway, Render, Fly, Replit) inject PORT automatically. For
 // local dev without a .env, default to 3001 instead of hard-failing.
@@ -40,6 +41,19 @@ async function main(): Promise<void> {
     await seedDefaultAdmin();
   } catch (err) {
     logger.error({ err }, "[seed] Failed to seed default admin — the app will still start, but you may need to create an admin manually via /admin-signup/1.");
+  }
+
+  // Root-cause fix (round 3, items 2/6/8): warm storage.ts's in-memory
+  // Cloudinary cloud-name cache BEFORE the server starts accepting
+  // requests. Previously this cache only filled in lazily, async, on the
+  // first resolveFileUrl() call — which meant every request in the window
+  // between boot and that background fetch resolving got `null` URLs (the
+  // "Uploaded, but the file isn't loading back" symptom), on any deployment
+  // where the Cloudinary cloud name is DB-configured rather than an env var.
+  try {
+    await warmStorageConfigCache();
+  } catch (err) {
+    logger.error({ err }, "[storage] Failed to warm Cloudinary config cache — falling back to lazy refresh.");
   }
 
   app.listen(port, (err) => {

@@ -71,7 +71,7 @@ import {
 } from "@workspace/db";
 import { requireAuth, requireAdmin, requireActiveMembership, isAdminRole } from "../middlewares/auth";
 import { getStudentTargeting, getVisibleModuleIds, describeModuleTargeting } from "../lib/contentVisibility";
-import { resolveFileUrl } from "../lib/storage";
+import { resolveFileUrl, THUMBNAIL_TRANSFORM } from "../lib/storage";
 import { dbErrorMessage } from "../lib/dbErrors";
 import { sendEmail, membershipActivatedEmailHtml } from "../lib/email";
 
@@ -431,7 +431,7 @@ router.get("/blocks", requireAuth, async (req, res): Promise<void> => {
     id: row.id,
     name: row.name,
     subtitle: row.subtitle,
-    iconUrl: resolveFileUrl(row.iconPath),
+    iconUrl: resolveFileUrl(row.iconPath, { transform: THUMBNAIL_TRANSFORM }),
     displayOrder: row.displayOrder,
     active: row.active,
     ...(isAdmin ? { programTargetKind: row.programTargetKind, yearTargetNumber: row.yearTargetNumber, targetingLabel: describeModuleTargeting(row.programTargetKind, row.yearTargetNumber) } : {}),
@@ -462,7 +462,7 @@ router.post("/blocks", requireAdmin, async (req, res): Promise<void> => {
     yearTargetNumber: parsed.data.yearTargetNumber ?? null,
   }).returning();
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "BLOCK_CREATED", entity: "block", entityId: block.id });
-  res.status(201).json({ id: block.id, name: block.name, subtitle: block.subtitle, iconUrl: resolveFileUrl(block.iconPath), displayOrder: block.displayOrder, active: block.active });
+  res.status(201).json({ id: block.id, name: block.name, subtitle: block.subtitle, iconUrl: resolveFileUrl(block.iconPath, { transform: THUMBNAIL_TRANSFORM }), displayOrder: block.displayOrder, active: block.active });
 });
 
 router.patch("/blocks/:id", requireAdmin, async (req, res): Promise<void> => {
@@ -477,7 +477,7 @@ router.patch("/blocks/:id", requireAdmin, async (req, res): Promise<void> => {
   }).where(eq(blocksTable.id, id)).returning();
   if (!block) { res.status(404).json({ error: "Block not found" }); return; }
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "BLOCK_UPDATED", entity: "block", entityId: block.id });
-  res.json({ id: block.id, name: block.name, subtitle: block.subtitle, iconUrl: resolveFileUrl(block.iconPath), displayOrder: block.displayOrder, active: block.active, programTargetKind: block.programTargetKind, yearTargetNumber: block.yearTargetNumber, targetingLabel: describeModuleTargeting(block.programTargetKind, block.yearTargetNumber) });
+  res.json({ id: block.id, name: block.name, subtitle: block.subtitle, iconUrl: resolveFileUrl(block.iconPath, { transform: THUMBNAIL_TRANSFORM }), displayOrder: block.displayOrder, active: block.active, programTargetKind: block.programTargetKind, yearTargetNumber: block.yearTargetNumber, targetingLabel: describeModuleTargeting(block.programTargetKind, block.yearTargetNumber) });
 });
 
 router.delete("/blocks/:id", requireAdmin, async (req, res): Promise<void> => {
@@ -546,6 +546,9 @@ router.get("/modules", requireAuth, async (req, res): Promise<void> => {
       id: row.id, name: row.name, subtitle: row.subtitle, subjectCount: counts.subjectCount, topicCount: counts.topicCount, mcqCount: counts.mcqCount, progress, active: row.active,
       blockId: row.blockId, blockName: row.blockId != null ? (blockNameById.get(row.blockId) ?? null) : null,
       displayOrder: row.displayOrder,
+      // Round 3, item 7 — optional module-level thumbnail, same
+      // resolveFileUrl() convention as med_blocks.iconPath.
+      iconUrl: resolveFileUrl(row.iconPath),
       ...(isAdmin ? { programTargetKind: row.programTargetKind, yearTargetNumber: row.yearTargetNumber, targetingLabel: describeModuleTargeting(row.programTargetKind, row.yearTargetNumber) } : {}),
     };
   }));
@@ -557,6 +560,9 @@ const ModuleTargetingFields = {
   yearTargetNumber: z.number().int().min(1).max(5).nullable().optional(),
   blockId: z.number().int().positive().nullable().optional(),
   displayOrder: z.number().int().optional(),
+  // Round 3, item 7 — optional module thumbnail, storage path from the
+  // uploads endpoint (mirrors how blocks' iconPath is accepted).
+  iconPath: z.string().nullable().optional(),
 };
 
 router.post("/modules", requireAdmin, async (req, res): Promise<void> => {
@@ -564,14 +570,15 @@ router.post("/modules", requireAdmin, async (req, res): Promise<void> => {
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
   const [maxRow] = await db.select({ max: sql<number>`coalesce(max(${modulesTable.displayOrder}), -1)` }).from(modulesTable);
   const [module] = await db.insert(modulesTable).values({
-    name: parsed.data.name, subtitle: parsed.data.subtitle, active: parsed.data.active ?? true,
+    name: parsed.data.name, subtitle: parsed.data.subtitle ?? "", active: parsed.data.active ?? true,
     blockId: parsed.data.blockId ?? null,
+    iconPath: parsed.data.iconPath ?? null,
     displayOrder: parsed.data.displayOrder ?? Number(maxRow?.max ?? -1) + 1,
     programTargetKind: parsed.data.programTargetKind ? parsed.data.programTargetKind.trim().toUpperCase() : null,
     yearTargetNumber: parsed.data.yearTargetNumber ?? null,
   }).returning();
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MODULE_CREATED", entity: "module", entityId: module.id });
-  res.status(201).json({ ...CreateModuleResponse.parse({ id: module.id, name: module.name, subtitle: module.subtitle, subjectCount: 0, topicCount: 0, progress: 0, active: module.active }), blockId: module.blockId, displayOrder: module.displayOrder }); // genuinely 0/0 — brand-new module has no subjects/topics yet
+  res.status(201).json({ ...CreateModuleResponse.parse({ id: module.id, name: module.name, subtitle: module.subtitle, subjectCount: 0, topicCount: 0, progress: 0, active: module.active }), blockId: module.blockId, displayOrder: module.displayOrder, iconUrl: resolveFileUrl(module.iconPath, { transform: THUMBNAIL_TRANSFORM }) }); // genuinely 0/0 — brand-new module has no subjects/topics yet
 });
 
 router.patch("/modules/:id", requireAdmin, async (req, res): Promise<void> => {
@@ -587,7 +594,7 @@ router.patch("/modules/:id", requireAdmin, async (req, res): Promise<void> => {
   if (!module) { res.status(404).json({ error: "Module not found" }); return; }
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MODULE_UPDATED", entity: "module", entityId: module.id });
   const moduleCounts = await getModuleCounts(module.id);
-  res.json({ id: module.id, name: module.name, subtitle: module.subtitle, subjectCount: moduleCounts.subjectCount, topicCount: moduleCounts.topicCount, progress: 0, active: module.active, blockId: module.blockId, displayOrder: module.displayOrder, programTargetKind: module.programTargetKind, yearTargetNumber: module.yearTargetNumber, targetingLabel: describeModuleTargeting(module.programTargetKind, module.yearTargetNumber) });
+  res.json({ id: module.id, name: module.name, subtitle: module.subtitle, subjectCount: moduleCounts.subjectCount, topicCount: moduleCounts.topicCount, progress: 0, active: module.active, blockId: module.blockId, displayOrder: module.displayOrder, iconUrl: resolveFileUrl(module.iconPath, { transform: THUMBNAIL_TRANSFORM }), programTargetKind: module.programTargetKind, yearTargetNumber: module.yearTargetNumber, targetingLabel: describeModuleTargeting(module.programTargetKind, module.yearTargetNumber) });
 });
 
 router.delete("/modules/:id", requireAdmin, async (req, res): Promise<void> => {

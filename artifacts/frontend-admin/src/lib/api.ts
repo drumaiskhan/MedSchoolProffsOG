@@ -107,7 +107,7 @@ export interface PaymentRow { id: number; studentName: string; institution: stri
 export const STUDENT_STATUSES = ['UNVERIFIED', 'VERIFIED', 'PAYMENT_PENDING_REVIEW', 'ACTIVE', 'EXPIRED', 'SUSPENDED', 'REJECTED', 'DELETED'] as const;
 
 export interface McqImportProfile { id: number; name: string; questionPattern: string; optionPattern: string; answerPattern: string; explanationPattern: string; isDefault: boolean }
-export interface McqCandidate { question: string; options: string[]; correctAnswer: string | null; explanation: string | null; optionExplanations: (string | null)[] | null; reference: string | null; needsReview: boolean; rawBlock?: string }
+export interface McqCandidate { question: string; options: string[]; correctAnswer: string | null; explanation: string | null; optionExplanations: (string | null)[] | null; reference: string | null; needsReview: boolean; rawBlock?: string; difficulty: 'easy' | 'moderate' | 'hard' }
 export interface McqParseResult { fileName: string; totalFound: number; needsReviewCount: number; candidates: McqCandidate[] }
 
 export const DEFAULT_IMPORT_PATTERNS = {
@@ -138,13 +138,13 @@ export const teamApi = {
   removePermanent: (id: number) => request<{ ok: true }>(`/admin/team-members/${id}/permanent`, { method: 'DELETE' }),
 };
 
-export interface AdminModule { id: number; name: string; subtitle: string; subjectCount: number; topicCount: number; progress: number; active: boolean; blockId?: number | null; blockName?: string | null; displayOrder?: number; programTargetKind?: string | null; yearTargetNumber?: number | null; targetingLabel?: string }
+export interface AdminModule { id: number; name: string; subtitle: string; subjectCount: number; topicCount: number; progress: number; active: boolean; blockId?: number | null; blockName?: string | null; displayOrder?: number; iconUrl?: string | null; programTargetKind?: string | null; yearTargetNumber?: number | null; targetingLabel?: string }
 
 export const moduleAdminApi = {
   listAll: () => request<AdminModule[]>('/modules'),
-  create: (body: { name: string; subtitle: string; active?: boolean; blockId?: number | null; displayOrder?: number; programTargetKind?: string | null; yearTargetNumber?: number | null }) =>
+  create: (body: { name: string; subtitle: string; active?: boolean; blockId?: number | null; iconPath?: string | null; displayOrder?: number; programTargetKind?: string | null; yearTargetNumber?: number | null }) =>
     request<AdminModule>('/modules', { method: 'POST', body: JSON.stringify(body) }),
-  update: (id: number, body: Partial<{ name: string; subtitle: string; active: boolean; blockId: number | null; displayOrder: number; programTargetKind: string | null; yearTargetNumber: number | null }>) =>
+  update: (id: number, body: Partial<{ name: string; subtitle: string; active: boolean; blockId: number | null; iconPath: string | null; displayOrder: number; programTargetKind: string | null; yearTargetNumber: number | null }>) =>
     request<AdminModule>(`/modules/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   remove: (id: number) => request<{ ok: true }>(`/modules/${id}`, { method: 'DELETE' }),
   removePermanent: (id: number) => request<{ ok: true }>(`/modules/${id}/permanent`, { method: 'DELETE' }),
@@ -202,7 +202,11 @@ export const examsAdminApi = {
   create: (body: Partial<Exam>) => request<Exam>('/admin/exams', { method: 'POST', body: JSON.stringify(body) }),
   update: (id: number, body: Partial<Exam>) => request<Exam>(`/admin/exams/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   archive: (id: number) => request<{ ok: true }>(`/admin/exams/${id}`, { method: 'DELETE' }),
-  removePermanent: (id: number) => request<{ ok: true }>(`/admin/exams/${id}/permanent`, { method: 'DELETE' }),
+  // `force` re-sends the delete after the backend's first refusal (an exam
+  // with recorded attempts) to also wipe those attempts/results — see
+  // AdminExams' two-step confirm dialog, which only sends force=true once
+  // the admin has seen and accepted that extra warning.
+  removePermanent: (id: number, force?: boolean) => request<{ ok: true }>(`/admin/exams/${id}/permanent${force ? '?force=true' : ''}`, { method: 'DELETE' }),
   setQuestions: (id: number, mcqIds: number[]) => request<{ ok: true; count: number }>(`/admin/exams/${id}/questions`, { method: 'POST', body: JSON.stringify({ mcqIds }) }),
   getQuestions: (id: number) => request<Array<{ id: number; question: string; options: string[]; correctAnswer: string | null; module: string; subject: string; topic: string }>>(`/admin/exams/${id}/questions`),
   attempts: (id: number) => request<ExamAttemptRow[]>(`/admin/exams/${id}/attempts`),
@@ -393,7 +397,7 @@ export const booksAdminApi = {
   list: () => request<AdminBook[]>('/admin/books'),
   create: (body: { title: string; author?: string; moduleId?: number; subjectId?: number; topicId?: number; storagePath: string; coverImagePath?: string }) => request<AdminBook>('/books', { method: 'POST', body: JSON.stringify(body) }),
   remove: (id: number) => request<{ ok: true }>(`/books/${id}`, { method: 'DELETE' }),
-  removePermanent: (id: number) => request<{ ok: true }>(`/admin/books/${id}/permanent`, { method: 'DELETE' }),
+  removePermanent: (id: number) => request<{ ok: true; warning?: string }>(`/admin/books/${id}/permanent`, { method: 'DELETE' }),
   backfillLinks: () => request<{ fixed: number; skipped: number; failed: number }>('/admin/books/backfill-links', { method: 'POST' }),
 };
 

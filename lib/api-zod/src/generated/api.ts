@@ -405,7 +405,12 @@ export const ListModulesResponse = zod.array(ListModulesResponseItem)
  */
 export const CreateModuleBody = zod.object({
   "name": zod.string(),
-  "subtitle": zod.string(),
+  // Round 3, item 7: the "Subtitle" field was removed from the admin
+  // create forms (name + thumbnail only), so this can no longer be a hard
+  // requirement — optional, defaulting to "" server-side (see medschool.ts)
+  // so existing rows/clients that DO send a subtitle keep working exactly
+  // as before.
+  "subtitle": zod.string().optional(),
   "active": zod.boolean().optional()
 })
 

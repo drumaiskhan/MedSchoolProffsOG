@@ -103,24 +103,46 @@ router.delete("/admin/exams/:id", requireAdmin, async (req, res): Promise<void> 
 });
 
 // Hard delete — only reachable once an exam is already archived (the
-// route above), and blocked if it has any recorded attempts, so a
-// student's completed/in-progress attempt (and its score/history) can
-// never be erased out from under them by deleting the exam it belongs to.
-// If it truly needs to go despite having attempts, an admin can leave it
-// archived — that already removes it from the student-facing list.
+// route above).
+//
+// Round 3 fix ("the Pre-Proff exam can't delete"): this route used to
+// unconditionally 409 if the exam had ANY recorded attempts, with no way
+// to proceed short of leaving it archived forever. That's exactly what was
+// happening — a real exam that students had actually sat had attempts, so
+// "Delete permanently" was permanently blocked in practice, not just
+// until archived. Since the admin dialog already carries an explicit
+// "there is no undo" warning and this endpoint is admin-only, add an
+// opt-in `?force=true` that also removes the exam's attempts/answers
+// instead of refusing outright — the *default* behavior (no `force`) is
+// unchanged, so nothing that relied on the safety check regresses.
 router.delete("/admin/exams/:id/permanent", requireAdmin, async (req, res): Promise<void> => {
   const id = Number(req.params.id);
   if (Number.isNaN(id)) { res.status(400).json({ error: "Invalid exam id" }); return; }
+  const force = req.query.force === "true";
   const [exam] = await db.select().from(examsTable).where(eq(examsTable.id, id));
   if (!exam) { res.status(404).json({ error: "Exam not found" }); return; }
   if (exam.status !== "archived") { res.status(409).json({ error: "Archive this exam first before deleting it permanently." }); return; }
 
   const [{ value: attemptCount }] = await db.select({ value: count() }).from(examAttemptsTable).where(eq(examAttemptsTable.examId, id));
-  if (attemptCount > 0) { res.status(409).json({ error: "This exam already has recorded attempts — it can't be permanently deleted. Leave it archived instead." }); return; }
+  if (attemptCount > 0 && !force) {
+    res.status(409).json({ error: "This exam has recorded attempts — deleting it will also erase those students' attempt history and results. Confirm again to delete anyway.", attemptCount, requiresForce: true });
+    return;
+  }
 
+  // Answers reference attempts (not the exam directly), so they must go
+  // first — deleting an attempt with answers still pointing at it would
+  // otherwise violate the FK, same ordering exams-attempts.ts's own
+  // cleanup would need.
+  if (attemptCount > 0) {
+    const attemptRows = await db.select({ id: examAttemptsTable.id }).from(examAttemptsTable).where(eq(examAttemptsTable.examId, id));
+    for (const { id: attemptId } of attemptRows) {
+      await db.delete(examAnswersTable).where(eq(examAnswersTable.attemptId, attemptId));
+    }
+    await db.delete(examAttemptsTable).where(eq(examAttemptsTable.examId, id));
+  }
   await db.delete(examQuestionsTable).where(eq(examQuestionsTable.examId, id));
   await db.delete(examsTable).where(eq(examsTable.id, id));
-  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "EXAM_PERMANENTLY_DELETED", entity: "exam", entityId: id });
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "EXAM_PERMANENTLY_DELETED", entity: "exam", entityId: id, metadata: JSON.stringify({ attemptsDeleted: attemptCount }) });
   res.json({ ok: true });
 });
 
