@@ -2,7 +2,7 @@ import { pool } from "./index";
 
 // See ../ensure-schema.sql for the full explanation of *why* this exists —
 // short version: nothing in this deploy pipeline ever ran
-// `drizzle-kit push` against a fresh database, so on a brand-new Postgres
+// drizzle-kit push against a fresh database, so on a brand-new Postgres
 // (a fresh Railway Postgres plugin, for example) every table is missing on
 // first boot. This runs a hand-written copy of the schema (CREATE
 // TABLE/INDEX IF NOT EXISTS, plus a small additive-migrations block of
@@ -15,14 +15,14 @@ import { pool } from "./index";
 // The SQL is inlined here (rather than read from ensure-schema.sql at
 // runtime) because api-server's build bundles @workspace/db straight into
 // a single dist/index.mjs — a relative readFileSync from this file would
-// resolve against the *bundled* file's location, not this source file's,
+// resolve against the bundled file's location, not this source file's,
 // and silently fail to find the .sql file after a build. Keep this in sync
 // with ensure-schema.sql (which stays as the human-readable/manually
-// runnable copy — e.g. to run by hand via `psql` — and is not itself read
+// runnable copy — e.g. to run by hand via psql — and is not itself read
 // by any code path).
 //
 // Safe to run on every boot — every statement here is a no-op once already
-// applied. Does not replace `pnpm run db:push` / manual-migration.sql for
+// applied. Does not replace pnpm run db:push / manual-migration.sql for
 // schema changes in general — only the specific columns the
 // additive-migrations block below names are covered automatically; a truly
 // new column still needs to be added to that block by hand.
@@ -98,7 +98,9 @@ CREATE TABLE IF NOT EXISTS med_users (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS med_users_email_idx ON med_users (email);
+
+CREATE UNIQUE INDEX IF NOT EXISTS med_users_email_idx
+  ON med_users (email);
 
 CREATE TABLE IF NOT EXISTS med_email_verification_tokens (
   id SERIAL PRIMARY KEY,
@@ -197,7 +199,9 @@ CREATE TABLE IF NOT EXISTS med_payment_webhook_events (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS med_webhook_event_idx ON med_payment_webhook_events (provider, event_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS med_webhook_event_idx
+  ON med_payment_webhook_events (provider, event_id);
 
 CREATE TABLE IF NOT EXISTS med_blocks (
   id SERIAL PRIMARY KEY,
@@ -360,7 +364,9 @@ CREATE TABLE IF NOT EXISTS med_student_progress (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS med_progress_user_module_idx ON med_student_progress (user_id, module_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS med_progress_user_module_idx
+  ON med_student_progress (user_id, module_id);
 
 CREATE TABLE IF NOT EXISTS med_past_papers (
   id SERIAL PRIMARY KEY,
@@ -424,7 +430,9 @@ CREATE TABLE IF NOT EXISTS med_exam_questions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS med_exam_questions_exam_mcq_idx ON med_exam_questions (exam_id, mcq_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS med_exam_questions_exam_mcq_idx
+  ON med_exam_questions (exam_id, mcq_id);
 
 CREATE TABLE IF NOT EXISTS med_exam_attempts (
   id SERIAL PRIMARY KEY,
@@ -455,7 +463,9 @@ CREATE TABLE IF NOT EXISTS med_exam_answers (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS med_exam_answers_attempt_mcq_idx ON med_exam_answers (attempt_id, mcq_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS med_exam_answers_attempt_mcq_idx
+  ON med_exam_answers (attempt_id, mcq_id);
 
 CREATE TABLE IF NOT EXISTS med_mcq_import_profiles (
   id SERIAL PRIMARY KEY,
@@ -509,7 +519,9 @@ CREATE TABLE IF NOT EXISTS med_flagged_mcqs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS med_flagged_user_mcq_idx ON med_flagged_mcqs (user_id, mcq_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS med_flagged_user_mcq_idx
+  ON med_flagged_mcqs (user_id, mcq_id);
 
 CREATE TABLE IF NOT EXISTS med_feedback (
   id SERIAL PRIMARY KEY,
@@ -589,14 +601,16 @@ ALTER TABLE med_mcqs ALTER COLUMN topic_id DROP NOT NULL;
 -- option_explanations ever got its ADD COLUMN statement here, so
 -- explanation_status was still missing on any database whose med_mcqs
 -- table predated this change — hence the "column \"explanation_status\" of
--- relation \"med_mcqs\" does not exist" import failures alongside the
+-- relation "med_mcqs" does not exist" import failures alongside the
 -- option_explanations ones.
 ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS option_explanations TEXT[];
 ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS explanation_status TEXT NOT NULL DEFAULT 'PENDING';
+
 -- Round 3, item 4b: short student-facing hint, separate from the
--- answer-revealing `explanation` field. Nullable/optional, same
+-- answer-revealing explanation field. Nullable/optional, same
 -- idempotent-ALTER pattern as the two columns above.
 ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS hint TEXT;
+
 -- med_mcqs: MCQs can now attach directly to an exam (exam_id) the same
 -- way they already attach to a past paper (past_paper_id) — imported
 -- exam questions no longer need a module/subject/topic home either.
@@ -619,6 +633,7 @@ ALTER TABLE med_membership_plans ADD COLUMN IF NOT EXISTS discount_label TEXT;
 -- CREATE TABLE ran in production) — nullable so existing modules keep
 -- working ungrouped ("Unassigned modules") until an admin assigns one.
 ALTER TABLE med_modules ADD COLUMN IF NOT EXISTS block_id INTEGER;
+
 -- Round 3, item 7: optional module thumbnail (see schema/medschool.ts).
 ALTER TABLE med_modules ADD COLUMN IF NOT EXISTS icon_path TEXT;
 
@@ -627,9 +642,9 @@ COMMIT;
 
 // Tracks whether the most recent ensureSchema() call succeeded. api-server's
 // /healthz reads this (see routes/health.ts) so a broken DB connection at
-// boot — e.g. the Supabase `28P01` auth failure this was written for —
+// boot — e.g. the Supabase 28P01 auth failure this was written for —
 // can't silently report itself as "healthy" while every schema-dependent
-// request fails behind it. Starts `false` (not yet run) rather than `true`,
+// request fails behind it. Starts false (not yet run) rather than true,
 // so a host that checks health before main()'s ensureSchema() call
 // resolves doesn't get a false "ok" either.
 let lastEnsureSchemaSucceeded = false;
