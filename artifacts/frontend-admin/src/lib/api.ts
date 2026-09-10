@@ -110,8 +110,8 @@ export interface StudentDetail {
 export interface PaymentRow { id: number; studentName: string; institution: string; program: string; academicYear: string; batch: string; rollNumber: string; planName: string; amount: number; currency: string; method: string; reference: string; paymentDate: string; proofPath: string | null; status: string; submittedAt: string }
 export const STUDENT_STATUSES = ['UNVERIFIED', 'VERIFIED', 'PAYMENT_PENDING_REVIEW', 'ACTIVE', 'EXPIRED', 'SUSPENDED', 'REJECTED', 'DELETED'] as const;
 
-export interface McqImportProfile { id: number; name: string; questionPattern: string; optionPattern: string; answerPattern: string; explanationPattern: string; isDefault: boolean }
-export interface McqCandidate { question: string; options: string[]; correctAnswer: string | null; explanation: string | null; optionExplanations: (string | null)[] | null; reference: string | null; needsReview: boolean; rawBlock?: string; difficulty: 'easy' | 'moderate' | 'hard' }
+export interface McqImportProfile { id: number; name: string; questionPattern: string; optionPattern: string; answerPattern: string; explanationPattern: string; hintPattern?: string | null; referencePattern?: string | null; isDefault: boolean }
+export interface McqCandidate { question: string; options: string[]; correctAnswer: string | null; explanation: string | null; optionExplanations: (string | null)[] | null; reference: string | null; hint: string | null; needsReview: boolean; rawBlock?: string; difficulty: 'easy' | 'moderate' | 'hard' }
 export interface McqParseResult { fileName: string; totalFound: number; needsReviewCount: number; candidates: McqCandidate[] }
 
 export const DEFAULT_IMPORT_PATTERNS = {
@@ -119,6 +119,8 @@ export const DEFAULT_IMPORT_PATTERNS = {
   optionPattern: "^\\s*\\(?([A-Da-d])\\)?[\\.\\):]\\s+(.+)$",
   answerPattern: "^\\s*(?:Answer|Ans|Correct\\s*Answer|Key)\\s*[:\\-]\\s*\\(?([A-Da-d])\\)?",
   explanationPattern: "^\\s*(?:Explanation|Rationale|Explain)\\s*[:\\-]\\s*(.+)$",
+  hintPattern: "^\\s*(?:Hint|Tip|Clue)\\s*[:\\-]\\s*(.+)$",
+  referencePattern: "^\\s*(?:Reference|Ref|Source|Citation)\\s*[:\\-]\\s*(.+)$",
 };
 
 export interface TeamMember { id: number; name: string; role: string; bio: string; achievementBadge: string; photoPath: string | null; linkedinUrl: string; instagramUrl: string; email: string; active: boolean; displayOrder: number }

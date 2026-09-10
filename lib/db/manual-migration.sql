@@ -87,6 +87,12 @@ ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS explanation_status TEXT NOT NULL D
 -- Round 3, item 4b: short student-facing hint field (see ensureSchema.ts).
 ALTER TABLE med_mcqs ADD COLUMN IF NOT EXISTS hint TEXT;
 
+-- Hint/Reference line parsing for text-pattern MCQ imports (see mcqParser.ts) —
+-- nullable so existing saved import profiles fall back to
+-- DEFAULT_IMPORT_PATTERNS' own hintPattern/referencePattern.
+ALTER TABLE med_mcq_import_profiles ADD COLUMN IF NOT EXISTS hint_pattern TEXT;
+ALTER TABLE med_mcq_import_profiles ADD COLUMN IF NOT EXISTS reference_pattern TEXT;
+
 -- MCQs can now attach directly to an exam (exam_id), the same way they
 -- already attach to a past paper (past_paper_id) — imported exam
 -- questions no longer need a module/subject/topic home either.

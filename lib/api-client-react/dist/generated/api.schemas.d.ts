@@ -145,6 +145,8 @@ export interface Mcq {
     explanation?: string | null;
     /** @nullable */
     reference?: string | null;
+    /** @nullable */
+    hint?: string | null;
     difficulty: string;
     status: string;
     module: string;
@@ -157,6 +159,7 @@ export interface McqInput {
     correctAnswer?: string;
     explanation?: string;
     reference?: string;
+    hint?: string;
     difficulty: string;
     moduleId: number;
     subjectId: number;

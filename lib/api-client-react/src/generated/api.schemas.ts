@@ -187,6 +187,12 @@ export interface Mcq {
   optionExplanations?: (string | null)[] | null;
   /** @nullable */
   reference?: string | null;
+  /**
+   * Short pre-answer nudge shown while a student is still attempting the
+   * question — distinct from `explanation`, which reveals the answer.
+   * @nullable
+   */
+  hint?: string | null;
   difficulty: string;
   status: string;
   module: string;
@@ -200,6 +206,7 @@ export interface McqInput {
   correctAnswer?: string;
   explanation?: string;
   reference?: string;
+  hint?: string;
   difficulty: string;
   moduleId: number;
   subjectId: number;

@@ -105,12 +105,25 @@ export interface GeneratedMcq {
   difficulty: string;
 }
 
+// Appended to every prompt below. Reasoning-tuned models reached through a
+// custom/OpenAI-compatible endpoint sometimes narrate their chain-of-thought
+// straight into the visible response ("Wait, let me reconsider...") instead
+// of keeping it in a separate channel. That narration both (a) shows up in
+// front of students where a clean answer should be, and (b) eats into the
+// max_tokens budget the real answer needed — which is what actually caused
+// "AI did not return valid flashcard JSON": the model's own visible
+// reasoning ran the response out of tokens before the JSON array closed.
+// Telling it explicitly not to do this is the most reliable fix (stripReasoningArtifacts
+// below is the fallback for models that ignore this and wrap it in tags anyway).
+const NO_REASONING_INSTRUCTION = "Output the final answer only — no chain-of-thought, no narrating your reasoning process (e.g. \"Wait, let me reconsider\"), no draft attempts, nothing before or after it.";
+
 function buildPrompt({ question, options, correctAnswer, reference }: ExplanationRequest): string {
   const optionList = options.map((opt, i) => `${String.fromCharCode(65 + i)}. ${opt}`).join("\n");
   return [
     "You are writing a concise study explanation for a medical school MCQ (MBBS/BDS level).",
     "Explain why the correct answer is right and briefly note why the other options are wrong.",
     "Keep it factual, exam-focused, and under 150 words. Do not use markdown headers.",
+    NO_REASONING_INSTRUCTION,
     "",
     `Question: ${question}`,
     `Options:\n${optionList}`,
@@ -124,6 +137,7 @@ function buildFlashcardPrompt({ front, back }: FlashcardExplanationRequest): str
     "You are helping a medical student (MBBS/BDS level) understand a flashcard they're stuck on.",
     "Explain the answer below in a different way than a one-line definition — use an analogy, a mechanism walkthrough, or a clinical example, whichever helps it stick.",
     "Keep it factual and under 130 words. Do not use markdown headers.",
+    NO_REASONING_INSTRUCTION,
     "",
     `Flashcard prompt: ${front}`,
     `Flashcard answer: ${back}`,
@@ -142,40 +156,104 @@ function buildFlashcardGenerationPrompt({ sourceText, mcqs, topicLabel, count }:
     "",
     "Respond with ONLY a valid JSON array, no prose before or after, no code fences, no introductory sentence like \"Here are the flashcards\", no closing remarks — the response must start with [ and end with ] and contain nothing else, in this exact shape:",
     '[{"front": "...", "back": "..."}]',
+    NO_REASONING_INSTRUCTION + " Do not narrate progress between cards (e.g. \"card 15:\") — every card is just another array entry.",
     "",
     "Source material:",
     source || "(no source material provided — use general high-yield facts for this topic)",
   ].join("\n");
 }
 
+// Some providers/models narrate reasoning straight into the visible
+// response instead of using a separate channel — either wrapped in tags
+// (<think>...</think>, seen from some reasoning-tuned open models on
+// OpenRouter/custom endpoints) or as plain unlabelled prose. The tagged
+// form is stripped here; the plain-prose form is what NO_REASONING_INSTRUCTION
+// above is aimed at, and extractBalancedJsonObjects()/the sentence-boundary
+// trim in runPrompt() are the last-resort recovery for whatever gets through
+// anyway.
+function stripReasoningArtifacts(text: string): string {
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
+    .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, "")
+    .trim();
+}
+
+// Scans raw text and pulls out every top-level, balanced {...} object it
+// contains, tracking quoted-string/escape state so braces inside a string
+// value don't confuse the depth count. This is the actual fix for the "AI
+// did not return valid flashcard JSON" failure in the screenshot: the
+// model's response was a valid array for the first 14 cards, then
+// narrated "Wait, my thought process hit card 15:" in the middle of the
+// array (breaking JSON.parse for the whole batch) before running out of
+// tokens. Rather than discard all 15 cards over one bad one, this pulls
+// out every individual {"front":...,"back":...} object that IS
+// well-formed — wherever it sits in the text — and the caller keeps those,
+// silently dropping only the ones that didn't parse.
+function extractBalancedJsonObjects(text: string): unknown[] {
+  const results: unknown[] = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escape = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escape) escape = false;
+      else if (ch === "\\") escape = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === "{") { if (depth === 0) start = i; depth++; }
+    else if (ch === "}") {
+      if (depth > 0) {
+        depth--;
+        if (depth === 0 && start >= 0) {
+          try { results.push(JSON.parse(text.slice(start, i + 1))); } catch { /* skip this one malformed fragment, keep scanning */ }
+          start = -1;
+        }
+      }
+    }
+  }
+  return results;
+}
+
 function parseFlashcardJson(raw: string): GeneratedFlashcard[] {
-  // Strip code fences the model may add despite instructions not to.
-  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+  // Strip any leaked <think> blocks and code fences the model may add
+  // despite instructions not to.
+  const cleaned = stripReasoningArtifacts(raw).replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
   let parsed: unknown;
   try {
     parsed = JSON.parse(cleaned);
   } catch {
     // Some models wrap the array in extra prose — try to extract the first [...] block.
     const match = cleaned.match(/\[[\s\S]*\]/);
-    // Include a snippet of what the model actually said in both failure
-    // cases below — a bare "AI did not return valid flashcard JSON" gave no
-    // way to tell "the model refused/ignored the format" apart from "the
-    // response got cut off mid-array" apart from "OpenRouter returned an
-    // error payload shaped differently than expected." The raw text is the
-    // only way to tell these apart from the admin UI.
-    if (!match) throw new Error(`AI did not return valid flashcard JSON. Raw response: ${cleaned.slice(0, 500)}`);
     try {
-      parsed = JSON.parse(match[0]);
-    } catch {
-      // Found brackets but the content between them didn't parse — almost
-      // always means the response got cut off before the array closed
-      // (ran out of max_tokens). Say so explicitly since "increase the
-      // token limit" is a very different fix than "pick a better model."
-      throw new Error(`AI's flashcard JSON was cut off or malformed (likely ran out of output tokens mid-response). Raw response: ${cleaned.slice(0, 500)}`);
-    }
+      if (match) parsed = JSON.parse(match[0]);
+    } catch { /* fall through to per-object salvage below */ }
   }
-  if (!Array.isArray(parsed)) throw new Error(`AI did not return a flashcard array. Raw response: ${cleaned.slice(0, 500)}`);
-  return parsed
+  if (!Array.isArray(parsed)) {
+    // The whole-array parse failed (missing brackets, or valid brackets
+    // with unparseable prose mixed in between entries, e.g. the reasoning
+    // narration in the bug report). Last resort: salvage every individual
+    // front/back object that IS well-formed anywhere in the text instead
+    // of failing the entire batch over one bad entry.
+    const salvaged = extractBalancedJsonObjects(cleaned).filter(
+      (o): o is { front: unknown; back: unknown } => !!o && typeof o === "object" && "front" in (o as object) && "back" in (o as object),
+    );
+    if (!salvaged.length) {
+      // Include a snippet of what the model actually said — a bare "AI did
+      // not return valid flashcard JSON" gave no way to tell "the model
+      // refused/ignored the format" apart from "the response got cut off
+      // mid-array" apart from "OpenRouter returned an error payload shaped
+      // differently than expected." The raw text is the only way to tell
+      // these apart from the admin UI.
+      throw new Error(`AI did not return valid flashcard JSON. Raw response: ${cleaned.slice(0, 500)}`);
+    }
+    parsed = salvaged;
+  }
+  return (parsed as unknown[])
     .filter((c): c is { front: unknown; back: unknown } => !!c && typeof c === "object")
     .map((c) => ({ front: String((c as { front: unknown }).front ?? "").trim(), back: String((c as { back: unknown }).back ?? "").trim() }))
     .filter((c) => c.front.length > 0 && c.back.length > 0);
@@ -208,25 +286,33 @@ function buildMcqGenerationPrompt({ topicLabel, existingQuestions, count }: McqG
     "",
     "Respond with ONLY a valid JSON array, no prose before or after, no code fences, no introductory sentence, no closing remarks — the response must start with [ and end with ] and contain nothing else, in this exact shape (optionExplanations must have exactly one entry per option, in the same order as options; difficulty must be exactly \"easy\", \"moderate\", or \"hard\"):",
     '[{"question": "...", "options": ["...", "...", "...", "..."], "correctAnswer": "...", "explanation": "...", "optionExplanations": ["...", "...", "...", "..."], "difficulty": "moderate"}]',
+    NO_REASONING_INSTRUCTION + " Do not narrate progress between questions — every question is just another array entry.",
   ].join("\n");
 }
 
 function parseMcqJson(raw: string): GeneratedMcq[] {
-  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+  const cleaned = stripReasoningArtifacts(raw).replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
   let parsed: unknown;
   try {
     parsed = JSON.parse(cleaned);
   } catch {
     const match = cleaned.match(/\[[\s\S]*\]/);
-    if (!match) throw new Error(`AI did not return valid MCQ JSON. Raw response: ${cleaned.slice(0, 500)}`);
     try {
-      parsed = JSON.parse(match[0]);
-    } catch {
-      throw new Error(`AI's MCQ JSON was cut off or malformed (likely ran out of output tokens mid-response). Raw response: ${cleaned.slice(0, 500)}`);
-    }
+      if (match) parsed = JSON.parse(match[0]);
+    } catch { /* fall through to per-object salvage below */ }
   }
-  if (!Array.isArray(parsed)) throw new Error(`AI did not return an MCQ array. Raw response: ${cleaned.slice(0, 500)}`);
-  return parsed
+  if (!Array.isArray(parsed)) {
+    // Same salvage strategy as parseFlashcardJson — pull every well-formed
+    // {"question":...,"options":...} object out of the raw text rather than
+    // discarding the whole batch because one entry (or a narrated aside
+    // between entries) broke the overall array parse.
+    const salvaged = extractBalancedJsonObjects(cleaned).filter(
+      (o): o is { question: unknown; options: unknown } => !!o && typeof o === "object" && "question" in (o as object) && "options" in (o as object),
+    );
+    if (!salvaged.length) throw new Error(`AI did not return valid MCQ JSON. Raw response: ${cleaned.slice(0, 500)}`);
+    parsed = salvaged;
+  }
+  return (parsed as unknown[])
     .filter((m): m is { question: unknown; options: unknown; correctAnswer: unknown; explanation: unknown; optionExplanations: unknown } => !!m && typeof m === "object")
     .map((m) => {
       const options = Array.isArray((m as { options: unknown }).options) ? ((m as { options: unknown[] }).options).map((o) => String(o).trim()).filter(Boolean) : [];
@@ -290,7 +376,15 @@ async function parseJsonOrThrow(res: Response, url: string, providerLabel: strin
 // at all (explanations, "explain this step").
 export type JsonMode = "object" | "array" | false;
 
-async function generateWithAnthropic(apiKey: string, model: string, prompt: string, maxTokens = 400, jsonMode: JsonMode = false): Promise<string> {
+// Every provider function below returns not just the text but whether the
+// provider itself reported the response as cut off by the token budget
+// (Anthropic's stop_reason, OpenAI/Gemini/custom's finish_reason). runPrompt()
+// uses this to retry once with a bigger budget — see its own comment — which
+// is the actual fix for both "AI did not return valid flashcard JSON" and
+// the AI explanation panel cutting off mid-sentence.
+interface ProviderResult { text: string; truncated: boolean }
+
+async function generateWithAnthropic(apiKey: string, model: string, prompt: string, maxTokens = 400, jsonMode: JsonMode = false): Promise<ProviderResult> {
   const url = "https://api.anthropic.com/v1/messages";
   // Anthropic has no dedicated JSON-mode flag. The standard trick is an
   // assistant-turn "prefill": seed the reply with the opening brace/bracket
@@ -314,13 +408,13 @@ async function generateWithAnthropic(apiKey: string, model: string, prompt: stri
     const body = await res.text().catch(() => "");
     throw new Error(`Anthropic API error (${res.status}): ${body.slice(0, 300)}`);
   }
-  const data = await parseJsonOrThrow(res, url, "Anthropic") as { content?: Array<{ type: string; text?: string }> };
+  const data = await parseJsonOrThrow(res, url, "Anthropic") as { content?: Array<{ type: string; text?: string }>; stop_reason?: string };
   const text = data.content?.find((block) => block.type === "text")?.text;
   if (!text) throw new Error("Anthropic API returned no text content");
-  return prefill ? prefill + text.trim() : text.trim();
+  return { text: prefill ? prefill + text.trim() : text.trim(), truncated: data.stop_reason === "max_tokens" };
 }
 
-async function generateWithOpenAi(apiKey: string, model: string, prompt: string, maxTokens = 400, jsonMode: JsonMode = false): Promise<string> {
+async function generateWithOpenAi(apiKey: string, model: string, prompt: string, maxTokens = 400, jsonMode: JsonMode = false): Promise<ProviderResult> {
   const url = "https://api.openai.com/v1/chat/completions";
   // OpenAI's native JSON mode (response_format: json_object) only guarantees
   // a top-level *object* — turning it on for an array-shaped request (the
@@ -342,13 +436,14 @@ async function generateWithOpenAi(apiKey: string, model: string, prompt: string,
     const body = await res.text().catch(() => "");
     throw new Error(`OpenAI API error (${res.status}): ${body.slice(0, 300)}`);
   }
-  const data = await parseJsonOrThrow(res, url, "OpenAI") as { choices?: Array<{ message?: { content?: string } }> };
-  const text = data.choices?.[0]?.message?.content;
+  const data = await parseJsonOrThrow(res, url, "OpenAI") as { choices?: Array<{ message?: { content?: string }; finish_reason?: string }> };
+  const choice = data.choices?.[0];
+  const text = choice?.message?.content;
   if (!text) throw new Error("OpenAI API returned no text content");
-  return text.trim();
+  return { text: text.trim(), truncated: choice?.finish_reason === "length" };
 }
 
-async function generateWithGemini(apiKey: string, model: string, prompt: string, maxTokens = 400, jsonMode: JsonMode = false): Promise<string> {
+async function generateWithGemini(apiKey: string, model: string, prompt: string, maxTokens = 400, jsonMode: JsonMode = false): Promise<ProviderResult> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const res = await fetchWithTimeout(url, {
     method: "POST",
@@ -367,10 +462,11 @@ async function generateWithGemini(apiKey: string, model: string, prompt: string,
     const body = await res.text().catch(() => "");
     throw new Error(`Gemini API error (${res.status}): ${body.slice(0, 300)}`);
   }
-  const data = await parseJsonOrThrow(res, url, "Gemini") as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-  const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("");
+  const data = await parseJsonOrThrow(res, url, "Gemini") as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }> };
+  const candidate = data.candidates?.[0];
+  const text = candidate?.content?.parts?.map((p) => p.text ?? "").join("");
   if (!text) throw new Error("Gemini API returned no text content");
-  return text.trim();
+  return { text: text.trim(), truncated: candidate?.finishReason === "MAX_TOKENS" };
 }
 
 /**
@@ -386,7 +482,7 @@ async function generateWithGemini(apiKey: string, model: string, prompt: string,
  * send to any other OpenAI-compatible provider too, since they'll just
  * ignore headers they don't recognize.
  */
-async function generateWithCustomEndpoint(baseUrl: string, apiKey: string, model: string, prompt: string, maxTokens = 400, jsonMode: JsonMode = false): Promise<string> {
+async function generateWithCustomEndpoint(baseUrl: string, apiKey: string, model: string, prompt: string, maxTokens = 400, jsonMode: JsonMode = false): Promise<ProviderResult> {
   const url = baseUrl.replace(/\/$/, "") + "/chat/completions";
   // Left without a native JSON-mode flag on purpose — this is an arbitrary
   // admin-supplied OpenAI-compatible endpoint (Groq, OpenRouter, a
@@ -410,10 +506,17 @@ async function generateWithCustomEndpoint(baseUrl: string, apiKey: string, model
     const body = await res.text().catch(() => "");
     throw new Error(`AI endpoint error (${res.status}): ${body.slice(0, 300)}`);
   }
-  const data = await parseJsonOrThrow(res, url, "Custom AI endpoint") as { choices?: Array<{ message?: { content?: string } }> };
-  const text = data.choices?.[0]?.message?.content;
+  // Reasoning-tuned models served through custom/OpenAI-compatible endpoints
+  // (DeepSeek R1, Qwen QwQ, and most "thinking" models on OpenRouter) often
+  // return their chain-of-thought in a separate `reasoning_content` field
+  // alongside the real answer in `content` — deliberately read only
+  // `content` here so that reasoning never ends up in what's shown to a
+  // student or fed to a JSON parser.
+  const data = await parseJsonOrThrow(res, url, "Custom AI endpoint") as { choices?: Array<{ message?: { content?: string; reasoning_content?: string }; finish_reason?: string }> };
+  const choice = data.choices?.[0];
+  const text = choice?.message?.content;
   if (!text) throw new Error("AI endpoint returned no text content");
-  return text.trim();
+  return { text: text.trim(), truncated: choice?.finish_reason === "length" };
 }
 
 export const AI_PROVIDERS = ["anthropic", "openai", "gemini", "custom"] as const;
@@ -460,9 +563,7 @@ async function resolveProvider(modelOverride?: string): Promise<{ provider: AiPr
   return null;
 }
 
-export async function runPrompt(prompt: string, maxTokens = 400, jsonMode: JsonMode = false, modelOverride?: string): Promise<string> {
-  const resolved = await resolveProvider(modelOverride);
-  if (!resolved) throw new AiNotConfiguredError();
+async function callProvider(resolved: { provider: AiProvider; apiKey: string; model: string; baseUrl?: string }, prompt: string, maxTokens: number, jsonMode: JsonMode): Promise<ProviderResult> {
   switch (resolved.provider) {
     case "anthropic": return generateWithAnthropic(resolved.apiKey, resolved.model, prompt, maxTokens, jsonMode);
     case "openai": return generateWithOpenAi(resolved.apiKey, resolved.model, prompt, maxTokens, jsonMode);
@@ -471,14 +572,63 @@ export async function runPrompt(prompt: string, maxTokens = 400, jsonMode: JsonM
   }
 }
 
+// Hard ceiling on the retry budget below — protects against a stubborn
+// model (or a runaway reasoning model that always eats its whole budget on
+// "thinking") driving the token cost up indefinitely on one request.
+const TRUNCATION_RETRY_TOKEN_CEILING = 6000;
+
+// If the response ends mid-thought (no sentence-ending punctuation) and the
+// provider told us it was cut off by the token limit, trim back to the last
+// complete sentence rather than showing a dangling fragment like "...caused
+// by impaired DNA" with nothing after it. Only ever used for prose
+// (jsonMode === false) — JSON parsing has its own bracket/salvage logic.
+function trimToLastCompleteSentence(text: string): string {
+  const trimmed = text.trim();
+  if (/[.!?)"'\u201d]\s*$/.test(trimmed)) return trimmed; // already ends cleanly
+  const boundary = Math.max(trimmed.lastIndexOf(". "), trimmed.lastIndexOf("! "), trimmed.lastIndexOf("? "), trimmed.lastIndexOf(".\n"));
+  // Only trim back if we're not throwing away most of the response — an
+  // early boundary usually means there wasn't a good one to find.
+  if (boundary > trimmed.length * 0.4) return trimmed.slice(0, boundary + 1).trim();
+  return trimmed;
+}
+
+export async function runPrompt(prompt: string, maxTokens = 400, jsonMode: JsonMode = false, modelOverride?: string): Promise<string> {
+  const resolved = await resolveProvider(modelOverride);
+  if (!resolved) throw new AiNotConfiguredError();
+  let result = await callProvider(resolved, prompt, maxTokens, jsonMode);
+  // The actual fix for both "AI did not return valid flashcard JSON" and the
+  // AI-explanation panel cutting off mid-sentence: the provider itself told
+  // us the response was truncated by the token budget (often because a
+  // reasoning-capable model spent most of it on invisible/leaked
+  // "thinking" before writing the real answer). One retry with a bigger
+  // budget recovers cleanly in the common case; capped so a stubborn model
+  // can't run the cost up indefinitely, and swallowed on failure so a flaky
+  // retry doesn't turn a usable (if truncated) first response into a hard
+  // error.
+  if (result.truncated && maxTokens < TRUNCATION_RETRY_TOKEN_CEILING) {
+    const retryTokens = Math.min(TRUNCATION_RETRY_TOKEN_CEILING, Math.round(maxTokens * 2.2));
+    try {
+      const retry = await callProvider(resolved, prompt, retryTokens, jsonMode);
+      if (!retry.truncated || retry.text.length > result.text.length) result = retry;
+    } catch { /* keep the first (truncated) result rather than fail the whole request */ }
+  }
+  const cleaned = stripReasoningArtifacts(result.text);
+  return jsonMode || !result.truncated ? cleaned : trimToLastCompleteSentence(cleaned);
+}
+
+// 700 (up from the old 400) gives a reasoning-capable model enough headroom
+// that its invisible "thinking" doesn't crowd out the ~150-word answer the
+// prompt asks for — see NO_REASONING_INSTRUCTION and runPrompt's retry
+// above for the rest of this fix.
 export async function generateExplanation(request: ExplanationRequest, modelOverride?: string): Promise<string> {
-  return runPrompt(buildPrompt(request), 400, false, modelOverride);
+  return runPrompt(buildPrompt(request), 700, false, modelOverride);
 }
 
 function buildHintPrompt({ question, options, reference }: ExplanationRequest): string {
   return [
     "You are writing a short study HINT for a medical school MCQ (MBBS/BDS level) — this is shown to a student who is stuck WHILE still attempting the question, so it must nudge their reasoning without revealing or pointing directly at the correct option.",
     "Under 30 words. No markdown. Do not name or rule out any specific option letter/answer.",
+    NO_REASONING_INSTRUCTION,
     "",
     `Question: ${question}`,
     `Options:\n${options.map((opt, i) => `${String.fromCharCode(65 + i)}. ${opt}`).join("\n")}`,
@@ -491,11 +641,44 @@ function buildHintPrompt({ question, options, reference }: ExplanationRequest): 
  * generateExplanation() since a hint must NOT reveal the answer the way an
  * explanation deliberately does. */
 export async function generateHint(request: ExplanationRequest, modelOverride?: string): Promise<string> {
-  return runPrompt(buildHintPrompt(request), 100, false, modelOverride);
+  return runPrompt(buildHintPrompt(request), 250, false, modelOverride);
+}
+
+function buildDifficultyPrompt({ question, options, correctAnswer }: ExplanationRequest): string {
+  return [
+    "You are grading the difficulty of a medical school MCQ (MBBS/BDS level) for exam-prep purposes.",
+    "Classify it as exactly one of: easy, moderate, hard.",
+    "- easy: a well-known, single-step recall fact.",
+    "- moderate: requires connecting two related facts, or a common/textbook clinical scenario.",
+    "- hard: requires multi-step reasoning, an uncommon presentation, or a fine distinction between similar-looking options.",
+    "Respond with ONLY the single word — easy, moderate, or hard. No punctuation, no explanation, nothing else.",
+    NO_REASONING_INSTRUCTION,
+    "",
+    `Question: ${question}`,
+    `Options:\n${options.map((opt, i) => `${String.fromCharCode(65 + i)}. ${opt}`).join("\n")}`,
+    correctAnswer ? `Correct answer: ${correctAnswer}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+const VALID_DIFFICULTIES = new Set(["easy", "moderate", "hard"]);
+
+/** Auto-classifies difficulty for a freshly-imported/AI-drafted MCQ instead
+ * of leaving every import stuck at the parser's "moderate" placeholder.
+ * Falls back to "moderate" on an unparseable/unexpected response rather
+ * than throwing — this is a nice-to-have on top of a successful import,
+ * not something that should fail the import itself. */
+export async function classifyDifficulty(request: ExplanationRequest, modelOverride?: string): Promise<"easy" | "moderate" | "hard"> {
+  try {
+    const raw = await runPrompt(buildDifficultyPrompt(request), 20, false, modelOverride);
+    const normalized = raw.trim().toLowerCase().replace(/[^a-z]/g, "");
+    return VALID_DIFFICULTIES.has(normalized) ? (normalized as "easy" | "moderate" | "hard") : "moderate";
+  } catch {
+    return "moderate";
+  }
 }
 
 export async function generateFlashcardExplanation(request: FlashcardExplanationRequest): Promise<string> {
-  return runPrompt(buildFlashcardPrompt(request));
+  return runPrompt(buildFlashcardPrompt(request), 700);
 }
 
 // The default maxTokens (400, sized for a single short explanation) is far
@@ -510,10 +693,10 @@ export async function generateFlashcardExplanation(request: FlashcardExplanation
 // still get enough room for the model's other overhead (any preamble,
 // closing punctuation, etc).
 function flashcardMaxTokens(count: number): number {
-  return Math.max(800, count * 150);
+  return Math.max(900, count * 170);
 }
 function mcqMaxTokens(count: number): number {
-  return Math.max(1500, count * 500);
+  return Math.max(1600, count * 550);
 }
 
 /** Generates draft front/back flashcard pairs — callers should treat these as editable drafts, not auto-publish. */

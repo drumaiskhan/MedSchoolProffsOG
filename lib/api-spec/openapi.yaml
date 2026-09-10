@@ -586,6 +586,9 @@ components:
         correctAnswer: { type: ["string", "null"] }
         explanation: { type: ["string", "null"] }
         reference: { type: ["string", "null"] }
+        # Short pre-answer nudge shown while a student is still attempting the
+        # question — distinct from `explanation`, which reveals the answer.
+        hint: { type: ["string", "null"] }
         difficulty: { type: string }
         status: { type: string }
         module: { type: string }
@@ -602,6 +605,7 @@ components:
         correctAnswer: { type: string }
         explanation: { type: string }
         reference: { type: string }
+        hint: { type: string }
         difficulty: { type: string }
         moduleId: { type: integer }
         subjectId: { type: integer }

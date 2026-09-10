@@ -11,6 +11,7 @@ export interface McqInput {
     correctAnswer?: string;
     explanation?: string;
     reference?: string;
+    hint?: string;
     difficulty: string;
     moduleId: number;
     subjectId: number;

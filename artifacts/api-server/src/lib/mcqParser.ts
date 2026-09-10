@@ -8,6 +8,12 @@ export interface ParsedMcqCandidate {
   // "no specific explanation was found for this option in the source file."
   optionExplanations: (string | null)[] | null;
   reference: string | null;
+  // A short pre-answer nudge distinct from `explanation` — shown to a
+  // student WHILE attempting the question, so it must not reveal the
+  // answer. Parsed from a "Hint:" line if the source file has one;
+  // otherwise left null and can still be AI-generated later (see
+  // generateHint in lib/aiExplain.ts and the auto-explain-on-import queue).
+  hint: string | null;
   needsReview: boolean;
   rawBlock?: string;
   // Round 3, item 5 — the file-import pipeline never had a difficulty
@@ -24,6 +30,13 @@ export interface ImportPatternSet {
   optionPattern: string;
   answerPattern: string;
   explanationPattern: string;
+  // Optional — profiles saved before this field existed won't have one, so
+  // every read-site falls back to DEFAULT_IMPORT_PATTERNS.hintPattern /
+  // .referencePattern (see extractMcqsFromText below). Nullable too since a
+  // profile row loaded straight from the DB (nullable columns) is assigned
+  // to this type as-is.
+  hintPattern?: string | null;
+  referencePattern?: string | null;
 }
 
 export const DEFAULT_IMPORT_PATTERNS: ImportPatternSet = {
@@ -36,6 +49,10 @@ export const DEFAULT_IMPORT_PATTERNS: ImportPatternSet = {
   answerPattern: "^\\s*(?:Answer|Ans|Correct\\s*Answer|Key)\\s*[:\\-]\\s*\\(?([A-Ea-e])\\)?",
   // Matches "Explanation: ...", "Rationale: ...", "Explain: ..."
   explanationPattern: "^\\s*(?:Explanation|Rationale|Explain)\\s*[:\\-]\\s*(.+)$",
+  // Matches "Hint: ...", "Tip: ...", "Clue: ..."
+  hintPattern: "^\\s*(?:Hint|Tip|Clue)\\s*[:\\-]\\s*(.+)$",
+  // Matches "Reference: ...", "Ref: ...", "Source: ...", "Citation: ..."
+  referencePattern: "^\\s*(?:Reference|Ref|Source|Citation)\\s*[:\\-]\\s*(.+)$",
 };
 
 // A second built-in preset for sources that number their options (1./1))
@@ -45,6 +62,8 @@ export const NUMBERED_IMPORT_PATTERNS: ImportPatternSet = {
   optionPattern: "^\\s*\\(?([1-5])\\)?[\\.\\):]\\s+(.+)$",
   answerPattern: "^\\s*(?:Answer|Ans\\.?|Correct\\s*Answer|Key)\\s*[:\\-]\\s*\\(?([1-5])\\)?",
   explanationPattern: DEFAULT_IMPORT_PATTERNS.explanationPattern,
+  hintPattern: DEFAULT_IMPORT_PATTERNS.hintPattern,
+  referencePattern: DEFAULT_IMPORT_PATTERNS.referencePattern,
 };
 
 function buildRegex(pattern: string): RegExp {
@@ -87,24 +106,29 @@ export function extractMcqsFromText(rawText: string, patterns: ImportPatternSet 
   const answerRe = buildRegex(patterns.answerPattern);
   const numberedAnswerRe = buildRegex(NUMBERED_IMPORT_PATTERNS.answerPattern);
   const explanationRe = buildRegex(patterns.explanationPattern);
+  // Fall back to the built-in defaults when a saved profile predates these
+  // two fields (see ImportPatternSet's own comment).
+  const hintRe = buildRegex(patterns.hintPattern ?? DEFAULT_IMPORT_PATTERNS.hintPattern!);
+  const referenceRe = buildRegex(patterns.referencePattern ?? DEFAULT_IMPORT_PATTERNS.referencePattern!);
 
   const lines = rawText.replace(/\r\n/g, "\n").split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
 
-  type Block = { questionLines: string[]; optionLines: { key: string; text: string; inlineCorrect: boolean; explanationLines: string[] }[]; answerKey: string | null; explanationLines: string[]; raw: string[] };
+  type Block = { questionLines: string[]; optionLines: { key: string; text: string; inlineCorrect: boolean; explanationLines: string[] }[]; answerKey: string | null; explanationLines: string[]; hintLines: string[]; referenceLines: string[]; raw: string[] };
   const blocks: Block[] = [];
   let current: Block | null = null;
   // "option-explanation" is a distinct mode from "explanation" — it means
   // an explanation line was found directly attached to the option just
   // above it (per-option format), so continuation lines should keep
   // appending to THAT option's explanation rather than to a whole-block
-  // explanation or the option's own text.
-  let mode: "question" | "option" | "option-explanation" | "explanation" = "question";
+  // explanation or the option's own text. "hint" and "reference" are their
+  // own whole-block modes, same shape as "explanation".
+  let mode: "question" | "option" | "option-explanation" | "explanation" | "hint" | "reference" = "question";
 
   for (const line of lines) {
     const qMatch = line.match(questionRe);
     if (qMatch) {
       if (current) blocks.push(current);
-      current = { questionLines: [qMatch[qMatch.length - 1] ?? line], optionLines: [], answerKey: null, explanationLines: [], raw: [line] };
+      current = { questionLines: [qMatch[qMatch.length - 1] ?? line], optionLines: [], answerKey: null, explanationLines: [], hintLines: [], referenceLines: [], raw: [line] };
       mode = "question";
       continue;
     }
@@ -162,6 +186,14 @@ export function extractMcqsFromText(rawText: string, patterns: ImportPatternSet 
       mode = "explanation";
       continue;
     }
+    // Hint and Reference lines are checked before the generic Explanation
+    // pattern (and can appear anywhere in the block — before or after the
+    // answer key) since they're distinct labeled fields, not part of the
+    // explanation text itself.
+    const hintMatch = line.match(hintRe);
+    if (hintMatch) { current.hintLines.push(hintMatch[1]); mode = "hint"; continue; }
+    const refMatch = line.match(referenceRe);
+    if (refMatch) { current.referenceLines.push(refMatch[1]); mode = "reference"; continue; }
     const expMatch = line.match(explanationRe);
     if (expMatch) {
       // An explanation line that directly follows an option (before the
@@ -187,6 +219,8 @@ export function extractMcqsFromText(rawText: string, patterns: ImportPatternSet 
     else if (mode === "option" && current.optionLines.length > 0) current.optionLines[current.optionLines.length - 1].text += " " + line;
     else if (mode === "option-explanation" && current.optionLines.length > 0) current.optionLines[current.optionLines.length - 1].explanationLines.push(line);
     else if (mode === "explanation") current.explanationLines.push(line);
+    else if (mode === "hint") current.hintLines.push(line);
+    else if (mode === "reference") current.referenceLines.push(line);
   }
   if (current) blocks.push(current);
 
@@ -206,8 +240,10 @@ export function extractMcqsFromText(rawText: string, patterns: ImportPatternSet 
     const blockExplanation = block.explanationLines.join(" ").trim() || null;
     const correctOptionExplanation = answerOption ? optionExplanationTexts[sortedOptions.indexOf(answerOption)] : null;
     const explanation = blockExplanation || correctOptionExplanation;
+    const hint = block.hintLines.join(" ").trim() || null;
+    const reference = block.referenceLines.join(" ").trim() || null;
     const needsReview = !question || options.length < 2 || !correctAnswer;
-    return { question, options, correctAnswer, explanation, optionExplanations: hasAnyOptionExplanation ? optionExplanationTexts : null, reference: null, needsReview, rawBlock: block.raw.join("\n"), difficulty: "moderate" as const };
+    return { question, options, correctAnswer, explanation, optionExplanations: hasAnyOptionExplanation ? optionExplanationTexts : null, reference, hint, needsReview, rawBlock: block.raw.join("\n"), difficulty: "moderate" as const };
   }).filter((c) => c.question.length > 0);
 }
 
@@ -229,6 +265,7 @@ const HEADER_ALIASES: Record<string, string[]> = {
   explanationD: ["explanationd", "explanation d", "why d", "rationale d", "explain d", "reason d"],
   explanationE: ["explanatione", "explanation e", "why e", "rationale e", "explain e", "reason e"],
   reference: ["reference", "ref", "source"],
+  hint: ["hint", "tip", "clue"],
 };
 
 function matchHeader(header: string): string | null {
@@ -256,6 +293,7 @@ export function extractMcqsFromRows(rows: string[][]): ParsedMcqCandidate[] | nu
   const explanationCols = ["explanationA", "explanationB", "explanationC", "explanationD", "explanationE"].map((k) => headerRow.indexOf(k));
   const hasPerOptionExplanations = explanationCols.some((c) => c >= 0);
   const referenceCol = headerRow.indexOf("reference");
+  const hintCol = headerRow.indexOf("hint");
 
   const candidates: ParsedMcqCandidate[] = [];
   for (let i = 1; i < rows.length; i++) {
@@ -289,7 +327,8 @@ export function extractMcqsFromRows(rows: string[][]): ParsedMcqCandidate[] | nu
       : null;
     const explanation = explanationCol >= 0 ? String(row[explanationCol] ?? "").trim() || null : (optionExplanations && correctIndex >= 0 ? optionExplanations[correctIndex] : null);
     const reference = referenceCol >= 0 ? String(row[referenceCol] ?? "").trim() || null : null;
-    candidates.push({ question, options, correctAnswer, explanation, optionExplanations: optionExplanations && optionExplanations.some((e) => e != null) ? optionExplanations : null, reference, needsReview: options.length < 2 || !correctAnswer, difficulty: "moderate" });
+    const hint = hintCol >= 0 ? String(row[hintCol] ?? "").trim() || null : null;
+    candidates.push({ question, options, correctAnswer, explanation, optionExplanations: optionExplanations && optionExplanations.some((e) => e != null) ? optionExplanations : null, reference, hint, needsReview: options.length < 2 || !correctAnswer, difficulty: "moderate" });
   }
   return candidates;
 }

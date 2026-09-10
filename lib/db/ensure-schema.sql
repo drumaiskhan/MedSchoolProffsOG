@@ -475,10 +475,17 @@ CREATE TABLE IF NOT EXISTS med_mcq_import_profiles (
   option_pattern TEXT NOT NULL,
   answer_pattern TEXT NOT NULL,
   explanation_pattern TEXT NOT NULL,
+  hint_pattern TEXT,
+  reference_pattern TEXT,
   is_default BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Hint/Reference line parsing for text-pattern MCQ imports (see mcqParser.ts) —
+-- nullable so existing saved profiles fall back to DEFAULT_IMPORT_PATTERNS.
+ALTER TABLE med_mcq_import_profiles ADD COLUMN IF NOT EXISTS hint_pattern TEXT;
+ALTER TABLE med_mcq_import_profiles ADD COLUMN IF NOT EXISTS reference_pattern TEXT;
 
 CREATE TABLE IF NOT EXISTS med_notebook_entries (
   id SERIAL PRIMARY KEY,

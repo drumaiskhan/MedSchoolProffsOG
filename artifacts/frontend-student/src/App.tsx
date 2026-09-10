@@ -573,6 +573,16 @@ function Practice() {
   // (~90s/question, a standard board-exam pace) rather than counting up,
   // and auto-submits at zero.
   const [mode, setMode] = useState<'timed' | 'untimed' | null>(null);
+  // Which card is highlighted on the "before you start" setup screen,
+  // before Start is pressed — distinct from `mode`, which is null until
+  // the session actually begins (and flips the whole screen over to the
+  // live practice view). Timer is highlighted by default to match the
+  // reference layout (Timer selected, with the minutes editor open).
+  const [pendingMode, setPendingMode] = useState<'timed' | 'untimed'>('timed');
+  // null = use the auto-estimated time budget (~1.5 min/question); once the
+  // student edits it (stepper, preset chip, or typing directly), their
+  // choice sticks even if they flip between Timer/Timeless and back.
+  const [customMinutes, setCustomMinutes] = useState<number | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState(0);
   const mcqs: Mcq[] = q.data ?? [];
   const current = mcqs[index];
@@ -605,7 +615,7 @@ function Practice() {
     if (sessionAnswers.length) submitAnswer.mutate({ topicId, answers: sessionAnswers, durationSeconds, mode: mode ?? undefined });
     setFinished(true);
   };
-  const restartSession = () => { setIndex(0); setAnswers({}); setFlaggedIds(new Set()); setSavedIds(new Set()); setPanel(null); setPaused(false); setFinished(false); setMode(null); setRemainingSeconds(0); askAi.reset(); };
+  const restartSession = () => { setIndex(0); setAnswers({}); setFlaggedIds(new Set()); setSavedIds(new Set()); setPanel(null); setPaused(false); setFinished(false); setMode(null); setRemainingSeconds(0); setPendingMode('timed'); setCustomMinutes(null); askAi.reset(); };
 
   useEffect(() => {
     if (mode !== 'timed' || finished || paused) return;
@@ -628,15 +638,42 @@ function Practice() {
   }
 
   if (!mode) {
+    const autoMinutes = Math.max(1, Math.round(mcqs.length * 1.5));
+    const effectiveMinutes = customMinutes ?? autoMinutes;
     return <div className="mx-auto max-w-lg"><SectionHeader eyebrow="Daily practice" title="Before you start" />
       <div className="rounded-3xl border border-border bg-card p-6 text-center md:p-9">
         <div className="mx-auto grid size-12 place-items-center rounded-full bg-[#eef7f1] text-primary"><Clock3 size={22} /></div>
         <h2 className="mt-5 font-display text-xl">How do you want to practice?</h2>
         <p className="mt-2 text-xs text-muted-foreground">{mcqs.length} question{mcqs.length === 1 ? '' : 's'} in this set.</p>
         <div className="mt-7 grid gap-3 sm:grid-cols-2">
-          <button onClick={() => { setMode('timed'); setRemainingSeconds(mcqs.length * 90); sessionStartRef.current = Date.now(); }} className="card-lift rounded-2xl border-2 border-primary bg-[#eef7f1] p-5 text-left" data-testid="button-mode-timed"><Clock3 size={18} className="text-primary" /><div className="mt-3 text-sm font-extrabold text-[#164b4b]">Timed</div><p className="mt-1 text-[11px] text-muted-foreground">A countdown timer, exam-style — {Math.round(mcqs.length * 1.5)} min for this set.</p></button>
-          <button onClick={() => { setMode('untimed'); sessionStartRef.current = Date.now(); }} className="card-lift rounded-2xl border border-border bg-card p-5 text-left" data-testid="button-mode-untimed"><Target size={18} className="text-muted-foreground" /><div className="mt-3 text-sm font-extrabold">Untimed</div><p className="mt-1 text-[11px] text-muted-foreground">Go at your own pace, no clock on screen.</p></button>
+          <button onClick={() => setPendingMode('timed')} className={cn('card-lift rounded-2xl border-2 p-5 text-left', pendingMode === 'timed' ? 'border-primary bg-[#eef7f1]' : 'border-border bg-card')} data-testid="button-mode-timed"><Clock3 size={18} className={pendingMode === 'timed' ? 'text-primary' : 'text-muted-foreground'} /><div className={cn('mt-3 text-sm font-extrabold', pendingMode === 'timed' && 'text-[#164b4b]')}>Timer</div><p className="mt-1 text-[11px] text-muted-foreground">Practice with a countdown, auto-submits when time runs out.</p></button>
+          <button onClick={() => setPendingMode('untimed')} className={cn('card-lift rounded-2xl border-2 p-5 text-left', pendingMode === 'untimed' ? 'border-primary bg-[#eef7f1]' : 'border-border bg-card')} data-testid="button-mode-untimed"><Target size={18} className={pendingMode === 'untimed' ? 'text-primary' : 'text-muted-foreground'} /><div className={cn('mt-3 text-sm font-extrabold', pendingMode === 'untimed' && 'text-[#164b4b]')}>Timeless</div><p className="mt-1 text-[11px] text-muted-foreground">No time limit — study at your own pace.</p></button>
         </div>
+        {pendingMode === 'timed' && <div className="mt-4 rounded-2xl border border-border bg-muted/40 p-4 text-left">
+          <div className="text-[11px] font-bold text-muted-foreground">Set your own time</div>
+          <div className="mt-2 flex items-center gap-2">
+            <button type="button" onClick={() => setCustomMinutes(Math.max(1, effectiveMinutes - 5))} className="grid size-9 shrink-0 place-items-center rounded-lg border border-border text-sm font-bold hover:bg-muted" data-testid="button-timer-minus" aria-label="Subtract 5 minutes">−</button>
+            <input
+              type="number"
+              min={1}
+              max={480}
+              value={effectiveMinutes}
+              onChange={(e) => setCustomMinutes(Math.max(1, Math.min(480, Number(e.target.value) || 1)))}
+              className="h-9 w-20 rounded-lg border border-border bg-background px-2 text-center text-sm font-mono-app font-bold"
+              data-testid="input-timer-minutes"
+            />
+            <span className="text-xs text-muted-foreground">minutes</span>
+            <button type="button" onClick={() => setCustomMinutes(Math.min(480, effectiveMinutes + 5))} className="grid size-9 shrink-0 place-items-center rounded-lg border border-border text-sm font-bold hover:bg-muted" data-testid="button-timer-plus" aria-label="Add 5 minutes">+</button>
+          </div>
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
+            {[autoMinutes, 15, 30, 45, 60].filter((v, idx, arr) => v > 0 && arr.indexOf(v) === idx).map((v) => <button key={v} type="button" onClick={() => setCustomMinutes(v)} className={cn('rounded-full border px-2.5 py-1 text-[11px] font-bold', effectiveMinutes === v ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-muted')} data-testid={`button-timer-preset-${v}`}>{v === autoMinutes ? `${v} min (recommended)` : `${v} min`}</button>)}
+          </div>
+        </div>}
+        <button
+          onClick={() => { setMode(pendingMode); setRemainingSeconds(pendingMode === 'timed' ? effectiveMinutes * 60 : 0); sessionStartRef.current = Date.now(); }}
+          className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-xs font-extrabold text-primary-foreground"
+          data-testid="button-start-session"
+        >Start {pendingMode === 'timed' ? `(${effectiveMinutes} min)` : 'session'}</button>
         <button
           onClick={() => saveSession.mutate({ name: `Practice — ${new Date().toLocaleDateString()}`, config: { topicId, pastPaperId } })}
           disabled={saveSession.isPending}
@@ -720,7 +757,7 @@ function Practice() {
           <button onClick={() => setPanel(panel === 'references' ? null : 'references')} className={cn('inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2.5 text-xs font-bold', panel === 'references' ? 'bg-[#6a4c93] text-white' : 'border border-[#6a4c93]/40 bg-[#efe8f7] text-[#6a4c93]')} data-testid="button-references"><BookOpen size={13} /> References</button>
         </div>
 
-        {panel === 'hint' && <div className="mt-4 rounded-xl bg-[#fdf6e8] p-4 text-xs leading-6 text-[#8a5a12]" data-testid="panel-hint"><div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide"><Lightbulb size={10} /> Hint</div>{current.reference ? current.reference : 'Re-read the question stem carefully — focus on the specific mechanism or finding it\'s asking about, and rule out options that don\'t fit that exact scenario.'}</div>}
+        {panel === 'hint' && <div className="mt-4 rounded-xl bg-[#fdf6e8] p-4 text-xs leading-6 text-[#8a5a12]" data-testid="panel-hint"><div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide"><Lightbulb size={10} /> Hint</div>{current.hint ? current.hint : 'Re-read the question stem carefully — focus on the specific mechanism or finding it\'s asking about, and rule out options that don\'t fit that exact scenario.'}</div>}
         {panel === 'references' && <div className="mt-4 rounded-xl bg-[#efe8f7] p-4 text-xs leading-6 text-[#6a4c93]" data-testid="panel-references"><div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide"><BookOpen size={10} /> References</div>{current.reference || 'No reference has been attached to this question yet.'}</div>}
         {panel === 'explain' && <div className="mt-4 rounded-xl bg-[#dceaf1] p-4 text-xs leading-6 text-[#32647b]" data-testid="panel-explain">
           <div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide"><CircleHelp size={10} /> Explanation</div>

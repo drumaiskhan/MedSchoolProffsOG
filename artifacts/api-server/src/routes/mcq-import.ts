@@ -8,7 +8,7 @@ import { extractFileContent } from "../lib/fileExtraction";
 import { extractMcqsFromText, extractMcqsFromRows, DEFAULT_IMPORT_PATTERNS, type ImportPatternSet } from "../lib/mcqParser";
 import { dbErrorMessage } from "../lib/dbErrors";
 import { getSetting } from "../lib/settings";
-import { generateExplanation, generateHint } from "../lib/aiExplain";
+import { generateExplanation, generateHint, classifyDifficulty } from "../lib/aiExplain";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -39,6 +39,11 @@ const ProfileBody = z.object({
   optionPattern: z.string().min(1).max(500),
   answerPattern: z.string().min(1).max(500),
   explanationPattern: z.string().min(1).max(500),
+  // Optional — profiles saved before hint/reference parsing existed won't
+  // send these; extractMcqsFromText falls back to DEFAULT_IMPORT_PATTERNS'
+  // own hintPattern/referencePattern when a profile omits them.
+  hintPattern: z.string().min(1).max(500).optional(),
+  referencePattern: z.string().min(1).max(500).optional(),
   isDefault: z.boolean().optional(),
 });
 
@@ -47,7 +52,7 @@ router.post("/admin/mcq-import-profiles", requireAdmin, async (req, res): Promis
   if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message }); return; }
   // validate the regexes compile before saving, so a typo can't silently break future imports
   try {
-    for (const pattern of [parsed.data.questionPattern, parsed.data.optionPattern, parsed.data.answerPattern, parsed.data.explanationPattern]) {
+    for (const pattern of [parsed.data.questionPattern, parsed.data.optionPattern, parsed.data.answerPattern, parsed.data.explanationPattern, parsed.data.hintPattern, parsed.data.referencePattern].filter((p): p is string => !!p)) {
       new RegExp(pattern, "i");
     }
   } catch {
@@ -125,6 +130,10 @@ const CommitBody = z.object({
     explanation: z.string().nullable().optional(),
     optionExplanations: z.array(z.string().nullable()).nullable().optional(),
     reference: z.string().nullable().optional(),
+    // A short pre-answer nudge, distinct from `explanation` (see
+    // ParsedMcqCandidate.hint's own comment in mcqParser.ts) — parsed from
+    // a "Hint:" line/column, or filled in later by AI auto-explain.
+    hint: z.string().nullable().optional(),
     // Round 3, item 5 — the file-import commit path never accepted a
     // difficulty at all (unlike AI-drafted MCQs and the manual/bulk-add
     // forms), so even an admin who set it per-candidate in the review UI
@@ -156,20 +165,30 @@ const TRUTHY = new Set(["true", "1", "on", "yes"]);
  * existing on-demand "Ask AI to explain" flow (explanations.ts) marks a
  * freshly-generated explanation — never silently APPROVED.
  */
-async function queueAutoExplain(items: Array<{ id: number; question: string; options: string[]; correctAnswer: string | null; reference: string | null; hasExplanationAlready: boolean }>): Promise<void> {
+async function queueAutoExplain(items: Array<{ id: number; question: string; options: string[]; correctAnswer: string | null; reference: string | null; hasExplanationAlready: boolean; hasHintAlready: boolean; needsDifficulty: boolean }>): Promise<void> {
   const autoEnabledRaw = await getSetting("AI_AUTO_EXPLAIN_ON_IMPORT", null);
   if (!autoEnabledRaw || !TRUTHY.has(autoEnabledRaw.toLowerCase())) return;
   const modelOverride = (await getSetting("AI_AUTO_EXPLAIN_MODEL", null)) || undefined;
 
   for (const item of items) {
-    if (item.hasExplanationAlready) continue; // don't overwrite an explanation the import file already provided
+    // Only generate whichever field the import file didn't already
+    // provide — previously this skipped BOTH explanation and hint
+    // whenever an explanation already existed, which meant a question
+    // imported with a hint but no explanation had its good imported hint
+    // silently overwritten by a freshly-generated one for no reason.
+    if (item.hasExplanationAlready && item.hasHintAlready && !item.needsDifficulty) continue;
     try {
       const request = { question: item.question, options: item.options, correctAnswer: item.correctAnswer, reference: item.reference };
-      const [explanation, hint] = await Promise.all([
-        generateExplanation(request, modelOverride),
-        generateHint(request, modelOverride),
+      const [explanation, hint, difficulty] = await Promise.all([
+        item.hasExplanationAlready ? Promise.resolve(undefined) : generateExplanation(request, modelOverride),
+        item.hasHintAlready ? Promise.resolve(undefined) : generateHint(request, modelOverride),
+        item.needsDifficulty ? classifyDifficulty(request, modelOverride) : Promise.resolve(undefined),
       ]);
-      await db.update(mcqsTable).set({ explanation, hint, explanationStatus: "AI_GENERATED" }).where(eq(mcqsTable.id, item.id));
+      const patch: Partial<{ explanation: string; hint: string; explanationStatus: "AI_GENERATED"; difficulty: "easy" | "moderate" | "hard" }> = {};
+      if (explanation !== undefined) { patch.explanation = explanation; patch.explanationStatus = "AI_GENERATED"; }
+      if (hint !== undefined) patch.hint = hint;
+      if (difficulty !== undefined) patch.difficulty = difficulty;
+      if (Object.keys(patch).length) await db.update(mcqsTable).set(patch).where(eq(mcqsTable.id, item.id));
     } catch (err) {
       // One question's generation failing (rate limit, provider hiccup,
       // AI not configured) must not stop the rest of the queue — it stays
@@ -194,6 +213,7 @@ router.post("/admin/mcq-import/commit", requireAdmin, async (req, res): Promise<
         optionExplanations: mcq.optionExplanations ?? null,
         explanationStatus: mcq.explanation?.trim() ? "APPROVED" as const : "PENDING" as const,
         reference: mcq.reference ?? null,
+        hint: mcq.hint ?? null,
         difficulty: mcq.difficulty ?? "moderate",
         status: data.status,
         source: "import" as const,
@@ -227,6 +247,13 @@ router.post("/admin/mcq-import/commit", requireAdmin, async (req, res): Promise<
       correctAnswer: data.mcqs[i].correctAnswer ?? null,
       reference: data.mcqs[i].reference ?? null,
       hasExplanationAlready: !!data.mcqs[i].explanation?.trim(),
+      hasHintAlready: !!data.mcqs[i].hint?.trim(),
+      // "moderate" is the parser's blanket default for every candidate
+      // (it has no real signal for difficulty from raw file text — see
+      // ParsedMcqCandidate's own comment), so treat it as "not yet
+      // classified" and let AI fill it in. An admin who deliberately
+      // picked "easy" or "hard" in the review UI is left alone.
+      needsDifficulty: (data.mcqs[i].difficulty ?? "moderate") === "moderate",
     })));
 
     res.status(201).json({ imported: rows.length, ids: rows.map((r) => r.id) });

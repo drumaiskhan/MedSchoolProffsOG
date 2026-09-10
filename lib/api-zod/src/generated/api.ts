@@ -470,6 +470,9 @@ export const ListMcqsResponseItem = zod.object({
   "explanation": zod.string().nullish(),
   "optionExplanations": zod.array(zod.string().nullable()).nullish(),
   "reference": zod.string().nullish(),
+  // Short pre-answer nudge shown while a student is still attempting the
+  // question — distinct from "explanation", which reveals the answer.
+  "hint": zod.string().nullish(),
   "difficulty": zod.string(),
   "status": zod.string(),
   "module": zod.string(),
@@ -492,6 +495,7 @@ export const CreateMcqBody = zod.object({
   // can have this filled in for some options and not others.
   "optionExplanations": zod.array(zod.string().nullable()).optional(),
   "reference": zod.string().optional(),
+  "hint": zod.string().optional(),
   "difficulty": zod.string(),
   "moduleId": zod.int(),
   "subjectId": zod.int(),
@@ -506,6 +510,7 @@ export const CreateMcqResponse = zod.object({
   "explanation": zod.string().nullish(),
   "optionExplanations": zod.array(zod.string().nullable()).nullish(),
   "reference": zod.string().nullish(),
+  "hint": zod.string().nullish(),
   "difficulty": zod.string(),
   "status": zod.string(),
   "module": zod.string(),

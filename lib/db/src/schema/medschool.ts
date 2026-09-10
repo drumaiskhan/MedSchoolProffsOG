@@ -528,6 +528,10 @@ export const mcqImportProfilesTable = pgTable("med_mcq_import_profiles", {
   optionPattern: text("option_pattern").notNull(),
   answerPattern: text("answer_pattern").notNull(),
   explanationPattern: text("explanation_pattern").notNull(),
+  // Nullable — profiles saved before hint/reference text-pattern parsing
+  // existed fall back to DEFAULT_IMPORT_PATTERNS in mcqParser.ts.
+  hintPattern: text("hint_pattern"),
+  referencePattern: text("reference_pattern"),
   isDefault: boolean("is_default").notNull().default(false),
   ...timestamps,
 });
