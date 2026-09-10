@@ -402,7 +402,7 @@ function ModuleRow({ m, canMoveUp, canMoveDown, onReorder, update, curriculumId,
       <button onClick={() => setDeletingId(m.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-module-${m.id}`}><Trash2 size={15} /></button>
     </div>
     {editingId === m.id && <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-border pt-4"><ModuleTargetingFields programTargetKind={editProgram} yearTargetNumber={editYear} onChange={(patch) => { if (patch.programTargetKind !== undefined) setEditProgram(patch.programTargetKind); if (patch.yearTargetNumber !== undefined) setEditYear(patch.yearTargetNumber); }} /><button onClick={() => update.mutate({ id: m.id, body: { programTargetKind: editProgram || null, yearTargetNumber: editYear ? Number(editYear) : null } }, { onSuccess: () => setEditingId(null) } as never)} className="h-10 rounded-xl bg-primary px-4 text-xs font-bold text-primary-foreground" data-testid={`button-save-targeting-${m.id}`}>Update visibility</button></div>}
-    {curriculumId === m.id && <div className="mt-4 border-t border-border pt-4"><SubjectsTopicsManager moduleId={m.id} /></div>}
+    {curriculumId === m.id && <div className="mt-4 border-t border-border pt-4"><SubjectsTopicsManager moduleId={m.id} breadcrumb={`${m.blockName || 'Other modules'} > ${m.name}`} /></div>}
   </div>;
 }
 
@@ -569,7 +569,7 @@ function AdminContent() {
 // Inline subject/topic builder shown inside a module row on the Academic
 // content screen — lets an admin build out a module's curriculum (subjects,
 // then topics within each subject) without leaving the module list.
-function SubjectsTopicsManager({ moduleId }: { moduleId: number }) {
+function SubjectsTopicsManager({ moduleId, breadcrumb }: { moduleId: number; breadcrumb?: string }) {
   const subjectsQ = useQuery({ queryKey: ['admin-subjects', moduleId], queryFn: () => subjectAdminApi.list(moduleId) });
   const subjects = subjectsQ.data ?? [];
   const [expandedSubjectId, setExpandedSubjectId] = useState<number | null>(null);
@@ -581,6 +581,10 @@ function SubjectsTopicsManager({ moduleId }: { moduleId: number }) {
   const removeSubject = useMutation({ mutationFn: subjectAdminApi.remove, onSuccess: () => { invalidateSubjects(); setDeletingSubjectId(null); }, onError: (err: unknown) => toast({ title: 'Could not delete subject', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
 
   return <div className="rounded-2xl bg-muted/40 p-4">
+    {/* Makes the Block > Module > Subjects nesting explicit at the point
+        subjects/topics are managed, instead of only being implied by which
+        collapsible section this drawer happens to be open under. */}
+    {breadcrumb && <div className="mb-2 text-[10px] font-semibold text-muted-foreground" data-testid="text-curriculum-breadcrumb">{breadcrumb} <ChevronRight size={10} className="mx-0.5 inline" /> Subjects</div>}
     <div className="mb-3 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Subjects</div>
     <div className="space-y-2">{subjects.map((s) => <div key={s.id} className="rounded-xl border border-border bg-card">
       <div className="flex items-center gap-2 p-3"><button onClick={() => setExpandedSubjectId(expandedSubjectId === s.id ? null : s.id)} className="flex flex-1 items-center gap-2 text-left text-xs font-bold" data-testid={`row-subject-${s.id}`}><ChevronRight size={13} className={cn('transition-transform', expandedSubjectId === s.id && 'rotate-90')} /> {s.name} <span className="font-normal text-muted-foreground">· {s.topicCount} topics</span></button><button onClick={() => setDeletingSubjectId(s.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-subject-${s.id}`}><Trash2 size={13} /></button></div>
@@ -723,7 +727,7 @@ function McqTreeModule({ moduleId, name, mcqCount, mcqsByTopic }: { moduleId: nu
   </div>;
 }
 
-function McqBankTree({ modules }: { modules: AdminModule[] }) {
+function McqBankTree({ modules, blocks }: { modules: AdminModule[]; blocks: AdminBlock[] }) {
   const treeQ = useQuery({ queryKey: ['admin-mcqs-tree'], queryFn: mcqAdminApi.list });
   const examsQ = useQuery({ queryKey: ['admin-exams'], queryFn: examsAdminApi.list });
   const papersQ = useQuery({ queryKey: ['admin-past-papers'], queryFn: () => pastPapersApi.list() });
@@ -748,8 +752,20 @@ function McqBankTree({ modules }: { modules: AdminModule[] }) {
   const paperTitle = (id: number) => papersQ.data?.find((p) => p.id === id)?.title ?? `Past paper #${id}`;
   if (treeQ.isLoading) return <SkeletonPage />;
   if (!modules.length && !byExam.size && !byPaper.size && !trulyUnassigned.length) return <EmptyState icon={CircleHelp} title="No modules yet" body="Create a module first under Academic content, then come back to browse its questions here." />;
-  return <div className="space-y-3">
-    {modules.map((m) => <McqTreeModule key={m.id} moduleId={m.id} name={m.name} mcqCount={countByModule.get(m.id) ?? 0} mcqsByTopic={mcqsByTopic} />)}
+  // Group modules under their Block so the bank tree reads Block > Module >
+  // Subject > Topic, same grouping level the parser's Block filter below
+  // narrows by. Modules with no blockId fall into an "Other modules" group.
+  const modulesByBlock = new Map<number | 'other', AdminModule[]>();
+  for (const m of modules) { const key = m.blockId ?? 'other'; const list = modulesByBlock.get(key); if (list) list.push(m); else modulesByBlock.set(key, [m]); }
+  const blockGroups: Array<{ key: number | 'other'; name: string; mods: AdminModule[] }> = [
+    ...blocks.filter((b) => modulesByBlock.has(b.id)).map((b) => ({ key: b.id, name: b.name, mods: modulesByBlock.get(b.id)! })),
+    ...(modulesByBlock.has('other') ? [{ key: 'other' as const, name: 'Other modules', mods: modulesByBlock.get('other')! }] : []),
+  ];
+  return <div className="space-y-5">
+    {blockGroups.map((g) => <div key={g.key} className="space-y-3">
+      {blocks.length > 0 && <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground" data-testid={`text-mcq-block-group-${g.key}`}>{g.name}</p>}
+      {g.mods.map((m) => <McqTreeModule key={m.id} moduleId={m.id} name={m.name} mcqCount={countByModule.get(m.id) ?? 0} mcqsByTopic={mcqsByTopic} />)}
+    </div>)}
     {(!!byExam.size || !!byPaper.size) && <div className="rounded-2xl border border-border bg-card p-4">
       <p className="mb-3 text-xs font-extrabold">Exam &amp; past-paper question bank</p>
       <p className="mb-3 text-[11px] text-muted-foreground">Questions imported for a specific exam or past paper — kept in their own bank instead of the module tree above.</p>
@@ -826,8 +842,19 @@ function AdminMcqs() {
   });
 
   // Target selection shared by both manual add and file import
-  const modulesQ = useListModules();
-  const modules = modulesQ.data ?? [];
+  const blocksQ = useQuery({ queryKey: ['admin-blocks'], queryFn: blockAdminApi.listAll });
+  const blocks = blocksQ.data ?? [];
+  const [blockId, setBlockId] = useState('');
+  // useListModules() (the public/student-facing hook) returns a `Module`
+  // shape with no blockId — moduleAdminApi.listAll() returns `AdminModule`,
+  // which carries blockId, so that's what the Block filter (and the bank
+  // tree's grouping) need to filter/group by.
+  const modulesQ = useQuery({ queryKey: ['admin-modules'], queryFn: moduleAdminApi.listAll });
+  const allModules = modulesQ.data ?? [];
+  // Narrow the module choices to the selected Block, same cascade the
+  // flashcard admin form already uses — "All blocks" (default) shows every
+  // module, matching the previous behavior when nothing is selected.
+  const modules = blockId ? allModules.filter((m) => String(m.blockId ?? '') === blockId) : allModules;
   const [moduleId, setModuleId] = useState('');
   const subjectsQ = useListSubjects(moduleId ? { moduleId: Number(moduleId) } : undefined);
   const [subjectId, setSubjectId] = useState('');
@@ -883,7 +910,7 @@ function AdminMcqs() {
 
     <div className="rounded-3xl border border-primary/30 bg-[#eef7f1] p-6"><div className="flex items-start gap-3"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground"><FileText size={18} /></div><div><h3 className="text-sm font-extrabold">Bulk upload from a file</h3><p className="mt-1 text-xs leading-5 text-muted-foreground">Upload a question bank as .txt, .csv, .xlsx/.xls, .pdf, or .docx. We'll extract the questions automatically — review and fix anything before it's added to the bank.</p></div></div>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-4"><select value={moduleId} onChange={(e) => { setModuleId(e.target.value); setSubjectId(''); setTopicId(''); }} className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-import-module"><option value="">Select module</option>{modules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select><select value={subjectId} onChange={(e) => { setSubjectId(e.target.value); setTopicId(''); }} disabled={!moduleId} className="h-10 rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-import-subject"><option value="">Select subject</option>{(subjectsQ.data || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select><select value={topicId} onChange={(e) => setTopicId(e.target.value)} disabled={!subjectId} className="h-10 rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-import-topic"><option value="">Select topic</option>{(topicsQ.data || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select><select value={pastPaperId} onChange={(e) => setPastPaperId(e.target.value)} className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-import-past-paper"><option value="">No past paper (optional)</option>{(pastPapersQ.data || []).map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}</select></div>
+      <div className="mt-5 grid gap-3 sm:grid-cols-5"><select value={blockId} onChange={(e) => { setBlockId(e.target.value); setModuleId(''); setSubjectId(''); setTopicId(''); }} className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-import-block"><option value="">All blocks</option>{blocks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select><select value={moduleId} onChange={(e) => { setModuleId(e.target.value); setSubjectId(''); setTopicId(''); }} className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-import-module"><option value="">Select module</option>{modules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select><select value={subjectId} onChange={(e) => { setSubjectId(e.target.value); setTopicId(''); }} disabled={!moduleId} className="h-10 rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-import-subject"><option value="">Select subject</option>{(subjectsQ.data || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select><select value={topicId} onChange={(e) => setTopicId(e.target.value)} disabled={!subjectId} className="h-10 rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-import-topic"><option value="">Select topic</option>{(topicsQ.data || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select><select value={pastPaperId} onChange={(e) => setPastPaperId(e.target.value)} className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-import-past-paper"><option value="">No past paper (optional)</option>{(pastPapersQ.data || []).map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}</select></div>
       {!targetReady && <p className="mt-2 text-[11px] font-semibold text-[#8a5a12]">Pick a module, subject, and topic before uploading — every imported question needs a home.</p>}
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -945,7 +972,7 @@ function AdminMcqs() {
         <div className="flex gap-2"><button disabled={!targetReady || bulkCreateMutation.isPending} onClick={() => bulkCreateMutation.mutate()} className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-save-bulk-mcqs">{bulkCreateMutation.isPending ? 'Adding…' : `Add ${bulkRows.filter((r) => r.question.trim()).length} questions`}</button><button onClick={() => { setBulkAddOpen(false); setBulkRows(bulkAddRowsInit()); }} className="rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold" data-testid="button-cancel-bulk-mcqs">Cancel</button></div>
       </div>}
 
-      {bankView === 'tree' ? <McqBankTree modules={modules} /> : (mcqs.length ? <div className="space-y-3">
+      {bankView === 'tree' ? <McqBankTree modules={allModules} blocks={blocks} /> : (mcqs.length ? <div className="space-y-3">
         <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-2.5"><label className="flex items-center gap-2 text-xs font-bold"><input type="checkbox" checked={selectedIds.size > 0 && selectedIds.size === mcqs.length} onChange={toggleSelectAll} data-testid="checkbox-select-all-mcqs" />{selectedIds.size > 0 ? `${selectedIds.size} selected` : 'Select all'}</label><div className="flex gap-2">{selectedIds.size > 0 && <button onClick={() => setBulkDeleteMode('selected')} className="inline-flex items-center gap-1 rounded-lg border border-destructive/30 px-2.5 py-1.5 text-[11px] font-bold text-destructive" data-testid="button-bulk-delete-selected"><Trash2 size={12} /> Delete selected</button>}<button onClick={() => setBulkDeleteMode('all')} className="inline-flex items-center gap-1 rounded-lg border border-destructive/30 px-2.5 py-1.5 text-[11px] font-bold text-destructive" data-testid="button-bulk-delete-all"><Trash2 size={12} /> Delete all ({mcqs.length})</button></div></div>
         {mcqs.map((m) => <div key={m.id} className="rounded-2xl border border-border bg-card p-5" data-testid={`card-mcq-${m.id}`}><div className="flex items-center justify-between"><div className="flex items-center gap-2"><input type="checkbox" checked={selectedIds.has(m.id)} onChange={() => toggleSelected(m.id)} data-testid={`checkbox-select-mcq-${m.id}`} /><Badge tone={m.status === 'published' ? 'green' : 'amber'}>{m.status}</Badge></div><div className="flex items-center gap-2"><span className="text-[10px] text-muted-foreground">{m.difficulty}</span><button onClick={() => setDeletingMcqId(m.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-mcq-${m.id}`}><Trash2 size={14} /></button></div></div><p className="mt-4 text-sm font-bold leading-6">{m.question}</p><div className="mt-3 text-xs text-muted-foreground">{m.module} · {m.subject} · {m.topic}</div><McqExplanationRow mcq={m} /></div>)}</div> : <EmptyState icon={CircleHelp} title="Your question bank is quiet" body="Upload a file above to bulk-import questions in seconds." />)}
       {deletingMcqId !== null && <ConfirmDialog title="Delete this question?" body="It will be removed from the bank and from any draft exams using it." onCancel={() => setDeletingMcqId(null)} onConfirm={() => removeMcq.mutate(deletingMcqId)} pending={removeMcq.isPending} />}
@@ -1044,7 +1071,7 @@ function AdminSettings() {
     onError: (err: unknown) => toast({ title: 'Could not run the test', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
   const set = (key: string, value: string) => setForm({ ...values, [key]: value });
-  const [tab, setTab] = useState<'general' | 'branding' | 'ai' | 'storage' | 'security'>('general');
+  const [tab, setTab] = useState<'general' | 'branding' | 'ai' | 'storage' | 'security' | 'notifications'>('general');
   const storageIssue = values.CLOUDINARY_CONFIGURED !== 'true';
 
   const TABS: Array<{ id: typeof tab; label: string; icon: typeof Sparkles; badge?: boolean }> = [
@@ -1053,6 +1080,7 @@ function AdminSettings() {
     { id: 'ai', label: 'AI', icon: Sparkles },
     { id: 'storage', label: 'Storage', icon: UploadCloud, badge: storageIssue },
     { id: 'security', label: 'Security & access', icon: ShieldCheck },
+    { id: 'notifications', label: 'Notifications', icon: Bell },
   ];
 
   return <div className="max-w-3xl"><SectionHeader eyebrow="Workspace" title="Platform settings" action={<span className="text-[10px] text-muted-foreground">Changes apply to every student instantly</span>} />
@@ -1113,10 +1141,56 @@ function AdminSettings() {
       {tab === 'security' && <div className="rounded-2xl border border-primary/30 bg-[#eef7f1] p-6"><h3 className="font-bold">Admin sign-up invite code</h3><p className="mt-1 text-xs text-muted-foreground">Share this code with anyone who should be able to create an admin account at <code className="rounded bg-card px-1 py-0.5">/admin-signup/1</code>. Rotate it any time to revoke access for anyone who has the old code.</p><div className="mt-4 flex flex-wrap items-center gap-3"><input value={values.ADMIN_SIGNUP_CODE || ''} onChange={(e) => set('ADMIN_SIGNUP_CODE', e.target.value)} className="h-10 w-56 rounded-xl border border-border bg-card px-3 text-xs font-mono-app tracking-wider" data-testid="input-admin-signup-code" /><button type="button" onClick={() => rotate.mutate()} disabled={rotate.isPending} className="rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold" data-testid="button-rotate-admin-code">{rotate.isPending ? 'Rotating…' : 'Generate new code'}</button></div>
         {values.ADMIN_SIGNUP_CODE && <div className="mt-3 flex flex-wrap items-center gap-2"><input readOnly value={`${window.location.origin}/admin-signup/1?code=${encodeURIComponent(values.ADMIN_SIGNUP_CODE)}`} className="h-9 min-w-0 flex-1 rounded-xl border border-border bg-card px-3 text-[11px] text-muted-foreground" data-testid="input-admin-invite-link" onFocus={(e) => e.currentTarget.select()} /><button type="button" onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/admin-signup/1?code=${encodeURIComponent(values.ADMIN_SIGNUP_CODE || '')}`); toast({ title: 'Invite link copied' }); }} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-[11px] font-bold text-primary-foreground" data-testid="button-copy-admin-invite-link"><Copy size={12} /> Copy link</button></div>}
       </div>}
+
+      {tab === 'notifications' && <NotificationBroadcastPanel />}
     </div>
 
-    <button onClick={() => save.mutate(values)} disabled={save.isPending} className="mt-5 rounded-xl bg-primary px-5 py-3 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-save-settings">{save.isPending ? 'Saving…' : save.isSuccess && !form ? 'Settings saved' : 'Save settings'}</button>
+    {tab !== 'notifications' && <button onClick={() => save.mutate(values)} disabled={save.isPending} className="mt-5 rounded-xl bg-primary px-5 py-3 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-save-settings">{save.isPending ? 'Saving…' : save.isSuccess && !form ? 'Settings saved' : 'Save settings'}</button>}
     <AdminAccountSection />
+  </div>;
+}
+
+// Send a one-off notification to students, optionally narrowed to a
+// program (MBBS/BDS) and/or academic year — a separate "Send" action
+// rather than a settings field, since it fires immediately instead of
+// being saved for later like the rest of this page.
+function NotificationBroadcastPanel() {
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+  const [type, setType] = useState<'info' | 'success' | 'warning'>('info');
+  const [programTargetKind, setProgramTargetKind] = useState('');
+  const [yearTargetNumber, setYearTargetNumber] = useState('');
+
+  const send = useMutation({
+    mutationFn: () => notificationsApi.broadcast({
+      title: title.trim(),
+      body: body.trim(),
+      type,
+      programTargetKind: programTargetKind || null,
+      yearTargetNumber: yearTargetNumber ? Number(yearTargetNumber) : null,
+    }),
+    onSuccess: (res) => {
+      setTitle(''); setBody('');
+      toast({ title: 'Notification sent', description: res.targetedUsers === null ? 'Delivered to every student.' : `Delivered to ${res.targetedUsers} matching student${res.targetedUsers === 1 ? '' : 's'}.` });
+    },
+    onError: (err: unknown) => toast({ title: 'Could not send notification', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
+
+  const scopeLabel = `${programTargetKind || 'All programs'} · ${yearTargetNumber ? `${yearTargetNumber}${['th', 'st', 'nd', 'rd'][Number(yearTargetNumber) % 10 > 3 ? 0 : Number(yearTargetNumber) % 10]} Year` : 'All years'}`;
+
+  return <div className="rounded-2xl border border-border bg-card p-6">
+    <h3 className="font-bold">Send a notification</h3>
+    <p className="mt-1 text-xs text-muted-foreground">Reaches students' notification bells right away. Narrow it to a program and/or year, or leave both as "All" to reach everyone.</p>
+    <div className="mt-5 grid gap-4 sm:grid-cols-2">
+      <label className="text-xs font-bold sm:col-span-2">Title<input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. New past paper uploaded" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-notification-title" /></label>
+      <label className="text-xs font-bold sm:col-span-2">Message<textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="What should students know?" className="mt-2 min-h-20 w-full rounded-xl border border-border bg-background p-3 text-xs" data-testid="input-notification-body" /></label>
+      <label className="text-xs font-bold">Type<select value={type} onChange={(e) => setType(e.target.value as typeof type)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs capitalize" data-testid="select-notification-type">{['info', 'success', 'warning'].map((t) => <option key={t} value={t}>{t}</option>)}</select></label>
+      <div />
+      <label className="text-xs font-bold">Programme<select value={programTargetKind} onChange={(e) => setProgramTargetKind(e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="select-notification-program"><option value="">All programs</option><option value="MBBS">MBBS</option><option value="BDS">BDS</option></select></label>
+      <label className="text-xs font-bold">Year<select value={yearTargetNumber} onChange={(e) => setYearTargetNumber(e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="select-notification-year"><option value="">All years</option>{[1, 2, 3, 4, 5, 6].map((y) => <option key={y} value={y}>Year {y}</option>)}</select></label>
+    </div>
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-muted px-4 py-2.5 text-[11px] font-semibold text-muted-foreground"><span>Will reach: {scopeLabel}</span></div>
+    <button onClick={() => send.mutate()} disabled={send.isPending || !title.trim() || !body.trim()} className="mt-4 rounded-xl bg-primary px-5 py-3 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-send-notification">{send.isPending ? 'Sending…' : 'Send notification'}</button>
   </div>;
 }
 
@@ -1132,19 +1206,42 @@ function AdminInstitutionsList({ selectedId, onSelect }: { selectedId: number | 
   const renameInstitution = useMutation({ mutationFn: ({ id, name }: { id: number; name: string }) => academicApi.updateInstitution(id, { name }), onSuccess: () => { invalidate(); setRenamingId(null); }, onError: (err: unknown) => toast({ title: 'Could not rename institution', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
   const toggleInstitution = useMutation({ mutationFn: ({ id, active }: { id: number; active: boolean }) => academicApi.updateInstitution(id, { active }), onSuccess: invalidate });
   const removePermanent = useMutation({ mutationFn: academicApi.removeInstitutionPermanent, onSuccess: () => { invalidate(); setDeletingPermanentId(null); }, onError: (err: unknown) => toast({ title: 'Could not permanently delete institution', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
+  // Custom ordering — persisted via the existing `displayOrder` column
+  // (already read by GET /institutions' ORDER BY and already accepted by
+  // PATCH /institutions/:id; nothing new needed server-side). Moving a row
+  // swaps its displayOrder with its neighbor's rather than renumbering the
+  // whole list, so this stays a single PATCH pair per move.
+  const reorder = useMutation({
+    mutationFn: ({ a, b }: { a: { id: number; displayOrder: number }; b: { id: number; displayOrder: number } }) =>
+      Promise.all([academicApi.updateInstitution(a.id, { displayOrder: b.displayOrder }), academicApi.updateInstitution(b.id, { displayOrder: a.displayOrder })]),
+    onSuccess: invalidate,
+    onError: (err: unknown) => toast({ title: 'Could not reorder institutions', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
+  const orderedInstitutions = [...(institutions.data || [])].sort((x, y) => x.displayOrder - y.displayOrder || x.name.localeCompare(y.name));
+  const moveInstitution = (index: number, dir: -1 | 1) => {
+    const target = index + dir;
+    if (target < 0 || target >= orderedInstitutions.length || reorder.isPending) return;
+    reorder.mutate({ a: orderedInstitutions[index], b: orderedInstitutions[target] });
+  };
 
   return <div className="rounded-2xl border border-border bg-card p-5">
     <h4 className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Institutions</h4>
-    <p className="mt-1 text-[11px] text-muted-foreground">Just the list of colleges students can register under. Manage their programmes, years, and batches below.</p>
+    <p className="mt-1 text-[11px] text-muted-foreground">Just the list of colleges students can register under — use the arrows to arrange them in your own order. Manage their programmes, years, and batches below.</p>
     <div className="mt-3 space-y-1.5">
-      {(institutions.data || []).map((i: Institution) => <div key={i.id} onClick={() => onSelect(i.id)} className={cn('flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs cursor-pointer hover:bg-muted', selectedId === i.id && 'bg-[#eef7f1] font-bold')} data-testid={`row-institution-${i.id}`}>
-        {renamingId === i.id
-          ? <form onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); if (renameValue.trim()) renameInstitution.mutate({ id: i.id, name: renameValue.trim() }); }} className="flex flex-1 items-center gap-1.5">
-              <input autoFocus value={renameValue} onChange={(e) => setRenameValue(e.target.value)} className="h-7 min-w-0 flex-1 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`input-rename-institution-${i.id}`} />
-              <button type="submit" className="rounded-lg bg-primary px-2 py-1 text-[10px] font-bold text-primary-foreground" data-testid={`button-save-rename-institution-${i.id}`}>Save</button>
-              <button type="button" onClick={() => setRenamingId(null)} className="rounded-lg border border-border px-2 py-1 text-[10px] font-bold" data-testid={`button-cancel-rename-institution-${i.id}`}>Cancel</button>
-            </form>
-          : <span className={cn('flex-1', !i.active && 'text-muted-foreground line-through')}>{i.name}</span>}
+      {orderedInstitutions.map((i: Institution, idx) => <div key={i.id} onClick={() => onSelect(i.id)} className={cn('flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs cursor-pointer hover:bg-muted', selectedId === i.id && 'bg-[#eef7f1] font-bold')} data-testid={`row-institution-${i.id}`}>
+        <div className="flex flex-1 items-center gap-2 min-w-0">
+          <div className="flex shrink-0 flex-col" onClick={(e) => e.stopPropagation()}>
+            <button type="button" disabled={idx === 0 || reorder.isPending} onClick={() => moveInstitution(idx, -1)} className="grid size-4 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-30" data-testid={`button-move-up-institution-${i.id}`} aria-label="Move up"><ChevronUp size={12} /></button>
+            <button type="button" disabled={idx === orderedInstitutions.length - 1 || reorder.isPending} onClick={() => moveInstitution(idx, 1)} className="grid size-4 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-30" data-testid={`button-move-down-institution-${i.id}`} aria-label="Move down"><ChevronDown size={12} /></button>
+          </div>
+          {renamingId === i.id
+            ? <form onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); if (renameValue.trim()) renameInstitution.mutate({ id: i.id, name: renameValue.trim() }); }} className="flex flex-1 items-center gap-1.5">
+                <input autoFocus value={renameValue} onChange={(e) => setRenameValue(e.target.value)} className="h-7 min-w-0 flex-1 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`input-rename-institution-${i.id}`} />
+                <button type="submit" className="rounded-lg bg-primary px-2 py-1 text-[10px] font-bold text-primary-foreground" data-testid={`button-save-rename-institution-${i.id}`}>Save</button>
+                <button type="button" onClick={() => setRenamingId(null)} className="rounded-lg border border-border px-2 py-1 text-[10px] font-bold" data-testid={`button-cancel-rename-institution-${i.id}`}>Cancel</button>
+              </form>
+            : <span className={cn('flex-1 truncate', !i.active && 'text-muted-foreground line-through')}>{i.name}</span>}
+        </div>
         {renamingId !== i.id && <div className="flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
           <button type="button" onClick={() => { setRenamingId(i.id); setRenameValue(i.name); }} className="text-[10px] font-bold text-primary" data-testid={`button-rename-institution-${i.id}`}>Rename</button>
           <button type="button" onClick={() => toggleInstitution.mutate({ id: i.id, active: !i.active })} className="text-[10px] font-bold text-primary" data-testid={`button-toggle-institution-${i.id}`}>{i.active ? 'Archive' : 'Activate'}</button>

@@ -55,6 +55,7 @@ import {
   notificationsTable,
   auditLogsTable,
   academicYearsTable,
+  programsTable,
   batchesTable,
   emailVerificationTokensTable,
   passwordResetTokensTable,
@@ -1179,6 +1180,61 @@ router.post("/notifications/:id/read", requireAuth, async (req, res): Promise<vo
   const id = Number(req.params.id);
   await db.update(notificationsTable).set({ read: true }).where(eq(notificationsTable.id, id));
   res.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// Admin: broadcast a notification, optionally targeted by program kind
+// (MBBS/BDS) and/or academic year — mirrors the same targeting concept
+// used by Blocks/Modules/Exams (see getStudentTargeting in
+// contentVisibility.ts) so admins have one consistent mental model for
+// "who sees this" across content and notifications.
+// ---------------------------------------------------------------------------
+
+const BroadcastNotificationBody = z.object({
+  title: z.string().min(1).max(200),
+  body: z.string().min(1).max(2000),
+  type: z.enum(["info", "success", "warning"]).optional(),
+  // null/omitted = every program or every year; a specific value narrows it.
+  programTargetKind: z.string().max(40).nullable().optional(),
+  yearTargetNumber: z.number().int().min(1).max(6).nullable().optional(),
+});
+
+router.post("/admin/notifications/broadcast", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = BroadcastNotificationBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid notification" }); return; }
+  const { title, body, type, programTargetKind, yearTargetNumber } = parsed.data;
+  const normalizedKind = programTargetKind ? programTargetKind.trim().toUpperCase() : null;
+
+  // No targeting at all — use the existing userId=NULL convention that
+  // GET /notifications already treats as "visible to everyone".
+  if (!normalizedKind && !yearTargetNumber) {
+    const [row] = await db.insert(notificationsTable).values({ userId: null, title, body, type: type ?? "info" }).returning();
+    await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "NOTIFICATION_BROADCAST", entity: "notification", entityId: row.id });
+    res.json({ ok: true, targetedUsers: null });
+    return;
+  }
+
+  // Targeted broadcast: a single userId=NULL row can't be scoped by
+  // program/year (every student would see it), so resolve the matching
+  // students here and insert one notification row per recipient.
+  const students = await db.select({ id: usersTable.id, programId: usersTable.programId, academicYearId: usersTable.academicYearId }).from(usersTable).where(eq(usersTable.role, "student"));
+  const programs = await db.select().from(programsTable);
+  const academicYears = await db.select().from(academicYearsTable);
+  const programKindById = new Map(programs.map((p) => [p.id, p.kind ? p.kind.trim().toUpperCase() : null]));
+  const yearNumberById = new Map(academicYears.map((y) => [y.id, y.yearNumber]));
+
+  const targetIds = students
+    .filter((s) => {
+      const kind = s.programId ? programKindById.get(s.programId) ?? null : null;
+      const year = s.academicYearId ? yearNumberById.get(s.academicYearId) ?? null : null;
+      return (!normalizedKind || kind === normalizedKind) && (!yearTargetNumber || year === yearTargetNumber);
+    })
+    .map((s) => s.id);
+
+  if (!targetIds.length) { res.json({ ok: true, targetedUsers: 0 }); return; }
+  await db.insert(notificationsTable).values(targetIds.map((userId) => ({ userId, title, body, type: type ?? "info" })));
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "NOTIFICATION_BROADCAST", entity: "notification", entityId: targetIds[0] });
+  res.json({ ok: true, targetedUsers: targetIds.length });
 });
 
 export default router;

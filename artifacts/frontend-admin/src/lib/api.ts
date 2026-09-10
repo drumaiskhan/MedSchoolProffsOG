@@ -315,8 +315,20 @@ export const authApi = {
   updateMe: (body: { name?: string; phone?: string; email?: string; currentPassword?: string }) => request<AuthUser>('/auth/me', { method: 'PATCH', body: JSON.stringify(body) }),
 };
 
+export interface BroadcastNotificationBody {
+  title: string;
+  body: string;
+  type?: 'info' | 'success' | 'warning';
+  programTargetKind?: string | null;
+  yearTargetNumber?: number | null;
+}
+export interface BroadcastNotificationResponse { ok: true; targetedUsers: number | null }
+
 export const notificationsApi = {
   markRead: (id: number) => request<{ ok: true }>(`/notifications/${id}/read`, { method: 'POST' }),
+  // targetedUsers is null when sent to everyone (no program/year filter),
+  // otherwise the count of students who matched the filter and got a row.
+  broadcast: (body: BroadcastNotificationBody) => request<BroadcastNotificationResponse>('/admin/notifications/broadcast', { method: 'POST', body: JSON.stringify(body) }),
 };
 
 // ---------------------------------------------------------------------------

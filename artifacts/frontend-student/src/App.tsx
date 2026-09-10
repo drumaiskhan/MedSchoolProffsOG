@@ -155,6 +155,20 @@ function QuickJump({ open, value, onChange, onClose }: { open: boolean; value: s
 // distraction-free by intent. Lifted above Shell (rather than local Shell
 // state) so Practice()/TakeExam() can set it from inside their own route.
 const FocusModeContext = createContext<{ focusMode: boolean; setFocusMode: (v: boolean) => void }>({ focusMode: false, setFocusMode: () => {} });
+// Lets a page (e.g. TakeExam) override the header's auto-generated,
+// URL-derived title — needed because that auto title is just the route
+// path with slashes ("Exams / Take / 2"), which surfaces raw numeric
+// attempt IDs to students on exam-taking/result pages. A page sets a
+// friendly title (the exam/paper name) once it knows it; null falls back
+// to the normal path-derived title everywhere else.
+const PageTitleContext = createContext<{ pageTitle: string | null; setPageTitle: (v: string | null) => void }>({ pageTitle: null, setPageTitle: () => {} });
+function usePageTitle(title: string | null | undefined) {
+  const { setPageTitle } = useContext(PageTitleContext);
+  useEffect(() => {
+    setPageTitle(title ?? null);
+    return () => setPageTitle(null);
+  }, [title, setPageTitle]);
+}
 function useFocusMode(active: boolean) {
   const { setFocusMode } = useContext(FocusModeContext);
   useEffect(() => {
@@ -212,14 +226,38 @@ function Shell({ children }: { children: ReactNode }) {
   // what students see) — the reverse is not true, see the equivalent check
   // in frontend-admin/src/App.tsx's Shell, which still blocks students.
 
-  const title = location === '/' ? `Good morning, ${user.name?.split(' ')[0] || 'there'}` : location.slice(1).split('/').map((part) => part.replaceAll('-', ' ')).join(' / ');
+  const { pageTitle } = useContext(PageTitleContext);
+  const title = pageTitle ?? (location === '/' ? `Good morning, ${user.name?.split(' ')[0] || 'there'}` : location.slice(1).split('/').map((part) => part.replaceAll('-', ' ')).join(' / '));
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
-  // Focus mode: no left nav at all, just a slim top bar with a back/exit
-  // affordance — the full-width real estate goes to the question instead.
-  if (focusMode) return <div className="min-h-[100dvh] bg-background"><header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border/70 bg-background/90 px-4 backdrop-blur-md md:px-8"><button onClick={() => setLocation('/')} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold text-muted-foreground hover:bg-muted" data-testid="button-exit-focus-mode"><ArrowLeft size={15} /> Exit</button><span className="text-xs font-bold capitalize text-foreground">{title}</span></header><div className="page-enter px-5 py-6 md:px-10 md:py-8">{children}</div></div>;
-
-  return <div className="flex min-h-[100dvh] bg-background"><div className={cn(menuOpen ? 'block' : 'hidden', 'fixed inset-0 z-30 bg-[#071e2b]/45 md:hidden')} onClick={() => setMenuOpen(false)} />{(menuOpen || !isMobile) && <SideNav user={user} onClose={() => setMenuOpen(false)} />}<main className="min-w-0 flex-1"><header className="sticky top-0 z-20 flex h-[66px] items-center justify-between border-b border-border/70 bg-background/92 px-4 backdrop-blur-md md:px-8"><div className="flex min-w-0 items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} data-testid="button-open-menu"><Menu size={20} /></button><div className="min-w-0"><div className="font-mono-app text-[9px] uppercase tracking-[.16em] text-muted-foreground">{today}</div><h1 className="mt-1 truncate text-[16px] font-bold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="relative flex items-center gap-2"><button onClick={() => { setQuickJumpOpen((current) => !current); setQuickJumpValue(''); }} className="hidden h-9 w-[220px] items-center gap-2 rounded-lg border border-border bg-card px-3 text-left text-[11px] text-muted-foreground shadow-sm hover:border-primary/50 sm:flex md:w-[340px]" data-testid="button-open-quick-jump"><Search size={14} /><span className="truncate">Search modules, topics, MCQs...</span><span className="ml-auto rounded border border-border px-1 text-[9px]">⌘K</span></button><Link href="/notifications" className="relative grid size-9 place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:bg-muted" data-testid="link-notifications"><Bell size={16} /></Link><Link href="/profile" className="ml-1 grid size-8 place-items-center rounded-full bg-[#cdebf0] text-[10px] font-extrabold text-[#0d5267]" data-testid="link-header-profile">{initials(user.name)}</Link><QuickJump open={quickJumpOpen} value={quickJumpValue} onChange={setQuickJumpValue} onClose={() => setQuickJumpOpen(false)} /></div></header><div className="page-enter px-4 py-6 md:px-8 md:py-8">{children}</div></main></div>;
+  // IMPORTANT: focus mode and the normal layout used to be two separate
+  // `if (focusMode) return <...>` branches with entirely different JSX
+  // shapes. Since {children} sat at a different depth/position in each
+  // branch, React couldn't match the old subtree to the new one when
+  // focusMode flipped — it unmounted and remounted {children} from
+  // scratch, wiping its state. That's exactly what broke Practice(): the
+  // Timed/Untimed buttons call setMode(...), which flips focusMode from
+  // false to true via useFocusMode's effect, which swapped Shell's branch
+  // and remounted Practice — resetting `mode` straight back to null, so
+  // the student appeared to be bounced back to the "How do you want to
+  // practice?" screen no matter which option they picked. Same risk
+  // existed on mobile: opening/closing the menu changed whether SideNav
+  // was mounted at all, shifting {children}'s sibling index and remounting
+  // it too. Fixed by keeping one single tree shape at all times — SideNav
+  // and the overlay are always mounted (hidden via CSS instead of
+  // conditionally rendered), and {children} always sits inside the same
+  // `<main><header/><div>{children}</div></main>` position; only the
+  // header's *content* differs between focus and normal mode.
+  return <div className="flex min-h-[100dvh] bg-background">
+    <div className={cn(!focusMode && menuOpen ? 'block' : 'hidden', 'fixed inset-0 z-30 bg-[#071e2b]/45 md:hidden')} onClick={() => setMenuOpen(false)} />
+    <div className={cn(focusMode ? 'hidden' : (menuOpen || !isMobile) ? 'block' : 'hidden')}><SideNav user={user} onClose={() => setMenuOpen(false)} /></div>
+    <main className="min-w-0 flex-1">
+      {focusMode
+        ? <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border/70 bg-background/90 px-4 backdrop-blur-md md:px-8"><button onClick={() => setLocation('/')} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold text-muted-foreground hover:bg-muted" data-testid="button-exit-focus-mode"><ArrowLeft size={15} /> Exit</button><span className="text-xs font-bold capitalize text-foreground">{title}</span></header>
+        : <header className="sticky top-0 z-20 flex h-[66px] items-center justify-between border-b border-border/70 bg-background/92 px-4 backdrop-blur-md md:px-8"><div className="flex min-w-0 items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} data-testid="button-open-menu"><Menu size={20} /></button><div className="min-w-0"><div className="font-mono-app text-[9px] uppercase tracking-[.16em] text-muted-foreground">{today}</div><h1 className="mt-1 truncate text-[16px] font-bold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="relative flex items-center gap-2"><button onClick={() => { setQuickJumpOpen((current) => !current); setQuickJumpValue(''); }} className="hidden h-9 w-[220px] items-center gap-2 rounded-lg border border-border bg-card px-3 text-left text-[11px] text-muted-foreground shadow-sm hover:border-primary/50 sm:flex md:w-[340px]" data-testid="button-open-quick-jump"><Search size={14} /><span className="truncate">Search modules, topics, MCQs...</span><span className="ml-auto rounded border border-border px-1 text-[9px]">⌘K</span></button><Link href="/notifications" className="relative grid size-9 place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:bg-muted" data-testid="link-notifications"><Bell size={16} /></Link><Link href="/profile" className="ml-1 grid size-8 place-items-center rounded-full bg-[#cdebf0] text-[10px] font-extrabold text-[#0d5267]" data-testid="link-header-profile">{initials(user.name)}</Link><QuickJump open={quickJumpOpen} value={quickJumpValue} onChange={setQuickJumpValue} onClose={() => setQuickJumpOpen(false)} /></div></header>}
+      <div className={cn('page-enter', focusMode ? 'px-5 py-6 md:px-10 md:py-8' : 'px-4 py-6 md:px-8 md:py-8')}>{children}</div>
+    </main>
+  </div>;
 }
 
 function SkeletonPage() { return <div className="space-y-5"><div className="skeleton h-8 w-56 rounded-lg" /><div className="grid gap-4 md:grid-cols-3"><div className="skeleton h-32 rounded-2xl" /><div className="skeleton h-32 rounded-2xl" /><div className="skeleton h-32 rounded-2xl" /></div><div className="skeleton h-72 rounded-2xl" /></div>; }
@@ -649,7 +687,7 @@ function Practice() {
     <button onClick={finishSession} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#c0503f] px-4 py-3 text-xs font-extrabold text-white" data-testid="button-exit-session"><X size={14} /> Exit &amp; submit</button>
     <div className="rounded-2xl border border-border bg-card p-4">
       <div className="grid grid-cols-5 gap-1.5">{mcqs.map((m, i) => { const st = stateForIndex(i); return <button key={m.id} onClick={() => goTo(i)} className={cn('grid aspect-square place-items-center rounded-lg text-[11px] font-bold transition-colors', st === 'current' && 'border-2 border-primary bg-card text-primary', st === 'answered' && 'bg-[#32647b] text-white', st === 'flagged' && 'bg-[#e5a952] text-white', st === 'new' && 'bg-muted text-muted-foreground')} data-testid={`button-goto-question-${i}`}>{i + 1}</button>; })}</div>
-      <div className="mt-3 flex flex-wrap gap-3 text-[10px] text-muted-foreground"><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-[#32647b]" /> Answered</span><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-[#e5a952]" /> Flagged</span><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-muted" /> New</span></div>
+      <div className="mt-3 flex flex-wrap gap-3 text-[10px] text-muted-foreground"><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-[#32647b]" /> Answered</span><span className="flex items-center gap-1"><span className="size-2 rounded-full border-2 border-primary" /> Current</span><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-muted" /> Not Answered</span><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-[#e5a952]" /> Bookmarked</span></div>
     </div>
   </div>;
 
@@ -659,7 +697,16 @@ function Practice() {
     </div>;
   }
 
-  return <div className="max-w-6xl"><SectionHeader eyebrow="Daily practice" title="Practice with purpose" action={<span className="font-mono-app text-[11px] text-muted-foreground">{index + 1} / {mcqs.length}</span>} />
+  // Breadcrumb (Module > Subject > Topic) + a "Leave" exit action, matching
+  // the reference design's Practice MCQs header — Mcq already carries the
+  // module/subject/topic names, so no extra fetch is needed.
+  const breadcrumbParts = [current.module, current.subject, current.topic].filter(Boolean);
+  return <div className="max-w-6xl">
+    <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+      {breadcrumbParts.length > 0 && <div className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground" data-testid="text-practice-breadcrumb">{breadcrumbParts.map((part, i) => <span key={i} className="flex items-center gap-1.5">{i > 0 && <ChevronRight size={11} />}<span>{part}</span></span>)}</div>}
+      <button onClick={finishSession} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-[11px] font-bold text-muted-foreground hover:bg-muted" data-testid="button-leave-practice"><X size={13} /> Leave</button>
+    </div>
+    <SectionHeader eyebrow="Daily practice" title="Practice MCQs" action={<span className="font-mono-app text-[11px] text-muted-foreground">{index + 1} / {mcqs.length}</span>} />
     <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
       <div className="order-2 lg:order-1">{controlPanel}</div>
       <div className="order-1 rounded-3xl border border-border bg-card p-5 sm:p-6 md:p-9 lg:order-2">
@@ -849,7 +896,16 @@ function Flashcards() {
     if (delta < 0) goNext(); else goPrev();
   };
 
-  return <div className="mx-auto max-w-3xl">{header}{toolbar}{statCards}{filterBar}
+  // Slim top strip (back arrow + page name + "x / y" progress) matching
+  // the reference design's study-mode header, layered above the existing
+  // richer header/toolbar/stat-card block rather than replacing it.
+  const studyTopStrip = <div className="mb-4 flex items-center gap-3">
+    <Link href="/" className="grid size-8 shrink-0 place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:bg-muted" data-testid="link-flashcards-back" aria-label="Back"><ArrowLeft size={15} /></Link>
+    <span className="text-sm font-extrabold">Flashcards</span>
+    <div className="ml-auto flex items-center gap-2"><div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted sm:w-40"><div className="h-full rounded-full bg-primary transition-all" style={{ width: `${(cardNumber / cards.length) * 100}%` }} /></div><span className="font-mono-app text-[11px] text-muted-foreground">{cardNumber} / {cards.length}</span></div>
+  </div>;
+
+  return <div className="mx-auto max-w-3xl">{studyTopStrip}{header}{toolbar}{statCards}{filterBar}
     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
       <span className="font-mono-app text-[11px] text-muted-foreground">Card {cardNumber} of {cards.length}</span>
       <div className="flex items-center gap-2 text-[11px] font-bold">
@@ -860,7 +916,7 @@ function Flashcards() {
     <div className="mb-4"><Progress value={(reviewedCount / cards.length) * 100} color="bg-primary" /></div>
     <div className="mb-4 flex justify-center gap-1.5">{cards.map((c, i) => <div key={c.id} className={cn('h-1.5 w-6 rounded-full transition-colors', i === index % cards.length ? 'bg-primary' : known[c.id] === true ? 'bg-[#8bcbb8]' : known[c.id] === false ? 'bg-[#e5a952]' : 'bg-muted')} />)}</div>
     <div className="flex items-center gap-2 sm:gap-4">
-      <button onClick={goPrev} disabled={index === 0} className="hidden shrink-0 rounded-xl border border-border bg-card p-3 text-muted-foreground disabled:opacity-30 disabled:pointer-events-none hover:bg-muted sm:grid sm:place-items-center" data-testid="button-flashcard-prev" aria-label="Previous card"><ArrowLeft size={16} /></button>
+      <button onClick={goPrev} disabled={index === 0} className="hidden size-11 shrink-0 rounded-full border border-border bg-card text-muted-foreground disabled:opacity-30 disabled:pointer-events-none hover:bg-muted sm:grid sm:place-items-center" data-testid="button-flashcard-prev" aria-label="Previous card"><ArrowLeft size={16} /></button>
       <div className="flex-1 [perspective:1600px]" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}><button onClick={() => setFlipped(!flipped)} className="relative min-h-[350px] w-full [transform-style:preserve-3d] transition-transform duration-500 ease-out hover:-translate-y-0.5 active:scale-[.99] md:min-h-[420px]" style={{ transform: flipped ? 'rotateY(180deg)' : 'none' }} data-testid="button-flashcard">
         {/* Front — same badge row / footer language as the grid card's front face, just at single-card scale, plus 3 low-opacity decorative shapes behind the content so grid and study read as one design language. */}
         <div className="absolute inset-0 flex flex-col overflow-hidden rounded-3xl border p-9 text-left text-[#eaf2e9] shadow-lg [backface-visibility:hidden] md:p-14" style={{ background: `linear-gradient(155deg, hsl(var(${topicColorVar(card.topic || card.module)}) / 0.92), hsl(208 40% 14%))` }}>
@@ -880,7 +936,7 @@ function Flashcards() {
           <div className="relative mt-3 text-center text-xs" style={{ color: `hsl(var(${topicColorVar(card.topic || card.module)}))` }}>Click to flip back</div>
         </div>
       </button></div>
-      <button onClick={goNext} className="hidden shrink-0 rounded-xl border border-border bg-card p-3 text-muted-foreground hover:bg-muted sm:grid sm:place-items-center" data-testid="button-flashcard-next" aria-label="Next card"><ArrowRight size={16} /></button>
+      <button onClick={goNext} className="hidden size-11 shrink-0 rounded-full border border-border bg-card text-muted-foreground hover:bg-muted sm:grid sm:place-items-center" data-testid="button-flashcard-next" aria-label="Next card"><ArrowRight size={16} /></button>
     </div>
     {/* Mobile equivalents of the Prev/Next buttons above, hidden on sm+ where the flanking arrows already do the job */}
     <div className="mt-3 flex justify-center gap-3 sm:hidden">
@@ -888,7 +944,8 @@ function Flashcards() {
       <button onClick={goNext} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold text-muted-foreground" data-testid="button-flashcard-next-mobile">Next <ArrowRight size={13} /></button>
     </div>
     {flipped && <div className="mt-4 flex justify-center">{!askAi.data ? <button onClick={() => askAi.mutate()} disabled={askAi.isPending} className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-[#eef7f1] px-3 py-1.5 text-[11px] font-bold text-primary disabled:opacity-50" data-testid="button-ask-ai-flashcard">{askAi.isPending ? 'Thinking…' : <><Sparkles size={11} /> Ask AI to explain differently</>}</button> : <div className="max-w-xl rounded-xl bg-[#eef7f1] p-3 text-xs leading-5"><div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-primary"><Sparkles size={10} /> AI explanation</div>{askAi.data.explanation}</div>}{askAi.isError && <p className="mt-2 text-[11px] font-semibold text-destructive">{askAi.error instanceof ApiRequestError ? askAi.error.message : 'Could not reach AI right now.'}</p>}</div>}
-    <div className="mt-6 flex justify-center gap-3">{flipped ? <><button onClick={() => advance(false)} className="inline-flex items-center gap-2 rounded-xl border border-[#e5a952] bg-[#fff0cb] px-5 py-3 text-xs font-bold text-[#8a5a12] transition-transform hover:-translate-y-0.5" data-testid="button-still-learning"><ThumbsDown size={14} /> Still learning</button><button onClick={() => advance(true)} className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-xs font-bold text-primary-foreground transition-transform hover:-translate-y-0.5" data-testid="button-know-it"><ThumbsUp size={14} /> I know this</button></> : <button onClick={() => setFlipped(true)} className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-6 py-3 text-xs font-bold hover:bg-muted" data-testid="button-reveal-card">Reveal answer <ChevronRight size={14} /></button>}</div>
+    <div className="mt-6 flex justify-center gap-3">{flipped ? <><button onClick={() => advance(false)} className="inline-flex items-center gap-2 rounded-xl border border-[#e5a952] bg-[#fff0cb] px-5 py-3 text-xs font-bold text-[#8a5a12] transition-transform hover:-translate-y-0.5" data-testid="button-still-learning"><ThumbsDown size={14} /> Still learning</button><button onClick={() => advance(true)} className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-xs font-bold text-primary-foreground transition-transform hover:-translate-y-0.5" data-testid="button-know-it"><ThumbsUp size={14} /> I know this</button></> : <button onClick={() => setFlipped(true)} className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-xs font-bold text-primary-foreground hover:opacity-90" data-testid="button-reveal-card">Show Answer <ChevronRight size={14} /></button>}</div>
+    <div className="mt-2 flex justify-center text-[11px] text-muted-foreground">Tap the card to flip</div>
     <div className="mt-3 flex justify-center"><button onClick={resetDeck} className="inline-flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground hover:text-foreground" data-testid="button-restart-deck"><RotateCcw size={12} /> Restart deck</button></div>
   </div>;
 }
@@ -1374,27 +1431,65 @@ function VerifyEmail() {
   return <AuthLayout><div className="w-full text-center">{!token ? <p className="text-sm text-muted-foreground">Missing verification token.</p> : verify.isLoading ? <p className="text-sm text-muted-foreground">Verifying your email…</p> : verify.isError ? <p className="text-sm text-destructive">This link is invalid or has expired.</p> : <div><div className="mx-auto mb-5 grid size-14 place-items-center rounded-full bg-[#d7eee4] text-[#164b4b]"><CheckCircle2 size={26} /></div><h1 className="font-display text-3xl tracking-[-.04em]">Email verified</h1><p className="mt-3 text-sm text-muted-foreground">You can now sign in.</p></div>}<Link href="/login" className="mt-7 inline-block rounded-xl bg-primary px-6 py-3 text-xs font-extrabold text-primary-foreground" data-testid="link-verify-login">Go to sign in</Link></div></AuthLayout>;
 }
 
+// Row icon color cycles through the same --chart-1..5 palette used
+// elsewhere (topicAccentStyles) so each subject/exam-board reads as a
+// distinct color at a glance, matching the reference design's colored
+// paper icons — deterministic per examBoard so the same subject always
+// gets the same color rather than reshuffling on refetch.
+function PastPaperRowIcon({ examBoard }: { examBoard: string }) {
+  const styles = topicAccentStyles(examBoard || 'paper');
+  return <span className="grid size-10 shrink-0 place-items-center rounded-xl" style={styles.badge}><FileStack size={18} /></span>;
+}
+
+// Past papers don't store an estimated duration server-side (only
+// mcqCount) — this mirrors the ~1 min/question pacing convention implied
+// by the reference design (120 Q -> 2h, 150 Q -> 2.5h, 100 Q -> 1.5h),
+// rounded to the nearest half hour purely for display.
+function pastPaperEstimatedHours(mcqCount: number): number {
+  return Math.round((mcqCount / 60) * 2) / 2;
+}
+
 function PastPapers() {
   const papers = useQuery({ queryKey: ['past-papers'], queryFn: () => pastPapersApi.list() });
   const list = papers.data || [];
   // Scoping to the student's own program/year now happens server-side (see
   // GET /past-papers), the same way exam eligibility does — so there's no
   // more manual "All levels" toggle needed here; students just see what
-  // applies to them.
+  // applies to them. The Year/Subject/Module filters below are a
+  // client-side narrowing on top of that, matching the reference design —
+  // "Module" is mapped to the paper's `level` field since PastPaper has no
+  // separate module association.
+  const [yearFilter, setYearFilter] = useState('');
+  const [subjectFilter, setSubjectFilter] = useState('');
+  const [moduleFilter, setModuleFilter] = useState('');
+  const years = Array.from(new Set(list.map((p) => p.year).filter(Boolean))).sort().reverse();
+  const subjects = Array.from(new Set(list.map((p) => p.examBoard).filter(Boolean))).sort();
+  const modules = Array.from(new Set(list.map((p) => p.level).filter(Boolean))).sort();
+  const filtered = list.filter((p) => (!yearFilter || p.year === yearFilter) && (!subjectFilter || p.examBoard === subjectFilter) && (!moduleFilter || p.level === moduleFilter));
   const totals = { papers: list.length, questions: list.reduce((s, p) => s + p.mcqCount, 0) };
 
-  return <div><div className="rounded-2xl border border-border bg-[#eef2fb] p-6"><div className="flex items-start gap-4"><div className="grid size-11 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground"><FileStack size={20} /></div><div><h1 className="font-display text-2xl tracking-[-.03em]">Past Papers</h1><p className="mt-1 text-sm text-muted-foreground">Master the examination pattern by practicing with authentic previous years' medical board questions.</p></div></div>
+  return <div><div className="rounded-2xl border border-border bg-[#eef2fb] p-6"><div className="flex items-start gap-4"><div className="grid size-11 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground"><FileStack size={20} /></div><div><h1 className="font-display text-2xl tracking-[-.03em]">Past Papers</h1><p className="mt-1 text-sm text-muted-foreground">Previous exam papers and practice tests.</p></div></div>
     <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-2"><Stat label="Available Papers" value={totals.papers} /><Stat label="Total Questions" value={totals.questions} /></div>
   </div>
-  {papers.isLoading ? <SkeletonPage /> : list.length ? <div className="mt-6 grid gap-4 sm:grid-cols-2">{list.map((paper) => {
-    const meta = [paper.examBoard, paper.year, paper.level, `${paper.mcqCount} question${paper.mcqCount === 1 ? '' : 's'}`].filter(Boolean).join(' · ');
-    return <div key={paper.id} className="card-lift rounded-2xl border border-border bg-card p-5" data-testid={`card-paper-${paper.id}`}>
-      <div className="flex items-start justify-between"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#eef2fb] text-primary"><FileStack size={18} /></div><span className="rounded-full bg-muted px-2.5 py-1 text-[10px] font-bold">{paper.mcqCount} MCQ{paper.mcqCount === 1 ? '' : 's'}</span></div>
-      <div className="mt-4 text-sm font-extrabold leading-5">{paper.title}</div>
-      {meta && <div className="mt-1.5 text-[11px] font-medium text-muted-foreground">{meta}</div>}
-      <Link href={`/practice?pastPaperId=${paper.id}`} className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground" data-testid={`button-start-paper-${paper.id}`}>Start Session <ArrowRight size={13} /></Link>
+
+  <div className="mt-5 flex flex-wrap gap-2">
+    <select value={yearFilter} onChange={(e) => setYearFilter(e.target.value)} className="h-10 rounded-xl border border-border bg-card px-3 text-xs font-semibold" data-testid="select-paper-filter-year"><option value="">All Years</option>{years.map((y) => <option key={y} value={y}>{y}</option>)}</select>
+    <select value={subjectFilter} onChange={(e) => setSubjectFilter(e.target.value)} className="h-10 rounded-xl border border-border bg-card px-3 text-xs font-semibold" data-testid="select-paper-filter-subject"><option value="">All Subjects</option>{subjects.map((s) => <option key={s} value={s}>{s}</option>)}</select>
+    <select value={moduleFilter} onChange={(e) => setModuleFilter(e.target.value)} className="h-10 rounded-xl border border-border bg-card px-3 text-xs font-semibold" data-testid="select-paper-filter-module"><option value="">All Modules</option>{modules.map((m) => <option key={m} value={m}>{m}</option>)}</select>
+  </div>
+
+  {papers.isLoading ? <SkeletonPage /> : filtered.length ? <div className="mt-5 space-y-3">{filtered.map((paper) => {
+    const hours = pastPaperEstimatedHours(paper.mcqCount);
+    return <div key={paper.id} className="card-lift flex items-center gap-4 rounded-2xl border border-border bg-card p-4" data-testid={`card-paper-${paper.id}`}>
+      <PastPaperRowIcon examBoard={paper.examBoard} />
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] font-bold text-muted-foreground">{paper.year}</div>
+        <div className="truncate text-sm font-extrabold leading-5">{paper.examBoard || paper.title}</div>
+        <div className="mt-0.5 text-[11px] text-muted-foreground">{paper.mcqCount} Question{paper.mcqCount === 1 ? '' : 's'} · {hours} Hour{hours === 1 ? '' : 's'}</div>
+      </div>
+      <Link href={`/practice?pastPaperId=${paper.id}`} className="shrink-0 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground" data-testid={`button-start-paper-${paper.id}`}>View</Link>
     </div>;
-  })}</div> : <EmptyState icon={FileStack} title="No past papers yet" body="Your admin can add past papers from Admin → Past papers, or none apply to your program/year yet." />}
+  })}</div> : <EmptyState icon={FileStack} title="No past papers yet" body="Your admin can add past papers from Admin → Past papers, or none match these filters yet." />}
   </div>;
 }
 
@@ -1626,7 +1721,10 @@ function TakeExam() {
   // mutation); this page just needs the question set. Re-calling start is
   // safe — the backend returns the same in-progress attempt's questions.
 
-  const load = useQuery({ queryKey: ['exam-session', attemptId], queryFn: async () => { const exams = await examsApi.list(); const exam = exams.find((e) => e.inProgressAttemptId === attemptId); if (!exam) throw new Error('Attempt not found'); return examsApi.start(exam.id); } });
+  const load = useQuery({ queryKey: ['exam-session', attemptId], queryFn: async () => { const exams = await examsApi.list(); const exam = exams.find((e) => e.inProgressAttemptId === attemptId); if (!exam) throw new Error('Attempt not found'); const started = await examsApi.start(exam.id); return { ...started, examTitle: exam.title } as ExamStartResponse & { examTitle: string }; } });
+  // Replaces the header's default "Exams / Take / 2" (raw route path) with
+  // the actual paper name once it's loaded.
+  usePageTitle(load.data ? load.data.examTitle : 'Exam');
 
   useEffect(() => {
     if (load.data && !session) {
@@ -1654,7 +1752,7 @@ function TakeExam() {
 
   const selectAnswer = (opt: string) => { setAnswers((prev) => ({ ...prev, [current.id]: opt })); saveAnswer.mutate({ mcqId: current.id, selectedAnswer: opt }); };
 
-  return <div className="max-w-4xl"><div className="mb-5 flex items-center justify-between rounded-2xl border border-border bg-card px-5 py-3"><div className="text-xs font-bold">Question {index + 1} / {session.questions.length} <span className="ml-2 text-muted-foreground">{answeredCount} answered</span></div><div className={cn('flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-extrabold', secondsLeft !== null && secondsLeft < 60 ? 'bg-destructive/10 text-destructive' : 'bg-muted')}><Clock3 size={13} /> {String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}</div></div>
+  return <div className="mx-auto max-w-4xl px-1 sm:px-0"><div className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border bg-card px-4 py-3 sm:px-5"><div className="min-w-0"><div className="truncate text-xs font-extrabold" data-testid="text-exam-title">{(load.data as { examTitle?: string } | undefined)?.examTitle}</div><div className="text-[11px] text-muted-foreground">Question {index + 1} / {session.questions.length} · {answeredCount} answered</div></div><div className={cn('flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-extrabold', secondsLeft !== null && secondsLeft < 60 ? 'bg-destructive/10 text-destructive' : 'bg-muted')}><Clock3 size={13} /> {String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}</div></div>
     <div className="rounded-3xl border border-border bg-card p-6 md:p-9"><Badge tone={difficultyTone(current.difficulty)}>{current.difficulty}</Badge><h2 className="mt-6 text-xl font-extrabold leading-8">{current.question}</h2><div className="mt-7 space-y-3">{current.options.map((opt, i) => <button key={opt} onClick={() => selectAnswer(opt)} className={cn('flex w-full items-center gap-3 rounded-xl border p-4 text-left text-sm transition-colors', answers[current.id] === opt ? 'border-primary bg-[#e6f3ed]' : 'border-border hover:bg-muted')} data-testid={`button-exam-answer-${i}`}><span className="grid size-7 shrink-0 place-items-center rounded-lg bg-muted font-mono-app text-[11px]">{String.fromCharCode(65 + i)}</span>{opt}</button>)}</div></div>
     <div className="mt-5 flex flex-wrap items-center justify-between gap-3"><div className="flex gap-2"><button disabled={index === 0} onClick={() => setIndex((i) => i - 1)} className="rounded-xl border border-border bg-card px-4 py-2.5 text-xs font-bold disabled:opacity-40" data-testid="button-exam-prev">Previous</button><button disabled={index === session.questions.length - 1} onClick={() => setIndex((i) => i + 1)} className="rounded-xl border border-border bg-card px-4 py-2.5 text-xs font-bold disabled:opacity-40" data-testid="button-exam-next">Next</button></div><button onClick={() => setConfirming(true)} className="rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-exam-finish">Submit exam</button></div>
     <div className="mt-4 flex flex-wrap gap-1.5">{session.questions.map((q, i) => <button key={q.id} onClick={() => setIndex(i)} className={cn('grid size-8 place-items-center rounded-lg text-[11px] font-bold', i === index ? 'bg-primary text-primary-foreground' : answers[q.id] != null ? 'bg-[#d7eee4] text-[#164b4b]' : 'bg-muted text-muted-foreground')} data-testid={`button-exam-nav-${i}`}>{i + 1}</button>)}</div>
@@ -1667,6 +1765,11 @@ function ExamResult() {
   const attemptId = Number(params.attemptId);
   const q = useQuery({ queryKey: ['exam-result', attemptId], queryFn: () => examsApi.result(attemptId), refetchInterval: (query) => query.state.data?.released ? false : 5000 });
   const r = q.data;
+  // The result payload doesn't carry the exam's title back (only score
+  // data), so this can't show the paper name the way TakeExam does — but
+  // it still replaces the raw "Exams / Result / 2" path-derived header
+  // with a clean, numberless label.
+  usePageTitle('Exam Result');
   if (q.isLoading) return <SkeletonPage />;
   if (!r?.released) return <div className="mx-auto max-w-md rounded-2xl border border-border bg-card p-8 text-center"><Clock3 size={28} className="mx-auto text-muted-foreground" /><h2 className="mt-4 font-bold">Results not released yet</h2><p className="mt-2 text-xs text-muted-foreground">Your admin will release results according to this exam's settings. Check back soon.</p><Link href="/exams" className="mt-5 inline-block text-xs font-bold text-primary" data-testid="link-back-to-exams">Back to exams</Link></div>;
   return <div className="max-w-3xl"><div className="rounded-3xl border border-border bg-card p-8 text-center"><div className={cn('mx-auto grid size-16 place-items-center rounded-full', r.passed === false ? 'bg-destructive/10 text-destructive' : 'bg-[#d7eee4] text-[#164b4b]')}>{r.passed === false ? <X size={28} /> : <CheckCircle2 size={28} />}</div>{r.percentage != null && <div className="mt-5 font-display text-5xl">{r.percentage.toFixed(1)}%</div>}{r.passed !== null && <Badge tone={r.passed ? 'green' : 'red'}>{r.passed ? 'Passed' : 'Not passed'}</Badge>}<div className="mt-5 grid grid-cols-3 gap-3 text-xs"><div><div className="font-display text-xl">{r.correctCount}</div><div className="text-muted-foreground">Correct</div></div><div><div className="font-display text-xl">{r.wrongCount}</div><div className="text-muted-foreground">Wrong</div></div><div><div className="font-display text-xl">{r.unansweredCount}</div><div className="text-muted-foreground">Skipped</div></div></div></div>
@@ -1703,6 +1806,7 @@ function AppRoutes() {
  return <Switch><Route path="/login" component={Login} /><Route path="/register" component={Register} /><Route path="/forgot-password" component={ForgotPassword} /><Route path="/reset-password" component={ResetPassword} /><Route path="/verify-email" component={VerifyEmail} /><Route path="/"><Shell><Dashboard /></Shell></Route><Route path="/blocks"><Shell><Blocks /></Shell></Route><Route path="/blocks/:id"><Shell><BlockDetail /></Shell></Route><Route path="/modules"><Shell><ModulesRedirect /></Shell></Route><Route path="/modules/:id"><Shell><Subjects /></Shell></Route><Route path="/subjects"><Shell><Subjects /></Shell></Route><Route path="/subjects/:id"><Shell><Subjects topics /></Shell></Route><Route path="/topics"><Shell><Subjects topics /></Shell></Route><Route path="/practice"><Shell><Practice /></Shell></Route><Route path="/exams"><Shell><Exams /></Shell></Route><Route path="/exams/take/:attemptId"><Shell><TakeExam /></Shell></Route><Route path="/exams/result/:attemptId"><Shell><ExamResult /></Shell></Route><Route path="/past-papers"><Shell><PastPapers /></Shell></Route><Route path="/flashcards"><Shell><Flashcards /></Shell></Route><Route path="/ai-visualizer"><Shell><AiVisualizer /></Shell></Route><Route path="/books"><Shell><Books /></Shell></Route><Route path="/resources"><Shell><Resources /></Shell></Route><Route path="/notebook"><Shell><Notebook /></Shell></Route><Route path="/saved-sessions"><Shell><SavedSessions /></Shell></Route><Route path="/flagged-mcqs"><Shell><FlaggedMcqs /></Shell></Route><Route path="/leaderboard"><Shell><Leaderboard /></Shell></Route><Route path="/notifications"><Shell><Notifications /></Shell></Route><Route path="/payments"><Shell><Payments /></Shell></Route><Route path="/feedback"><Shell><Feedback /></Shell></Route><Route path="/profile"><Shell><Profile /></Shell></Route><Route component={NotFound} /></Switch>; }
 function App() {
   const [focusMode, setFocusMode] = useState(false);
-  return <QueryClientProvider client={queryClient}><TooltipProvider><FocusModeContext.Provider value={{ focusMode, setFocusMode }}><WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}><ErrorBoundary><AppRoutes /></ErrorBoundary></WouterRouter><Toaster /></FocusModeContext.Provider></TooltipProvider></QueryClientProvider>;
+  const [pageTitle, setPageTitle] = useState<string | null>(null);
+  return <QueryClientProvider client={queryClient}><TooltipProvider><FocusModeContext.Provider value={{ focusMode, setFocusMode }}><PageTitleContext.Provider value={{ pageTitle, setPageTitle }}><WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}><ErrorBoundary><AppRoutes /></ErrorBoundary></WouterRouter><Toaster /></PageTitleContext.Provider></FocusModeContext.Provider></TooltipProvider></QueryClientProvider>;
 }
 export default App;
