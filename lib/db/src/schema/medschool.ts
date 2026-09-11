@@ -443,6 +443,9 @@ export const teamMembersTable = pgTable("med_team_members", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   role: text("role").notNull(),
+  // One of TEAM_CATEGORIES (reviewer/question_setter/ownership) — which
+  // group this member is shown under on Profile's "Our Academic Team".
+  category: text("category").notNull().default("reviewer"),
   bio: text("bio").notNull().default(""),
   achievementBadge: text("achievement_badge").notNull().default(""),
   photoPath: text("photo_path"),

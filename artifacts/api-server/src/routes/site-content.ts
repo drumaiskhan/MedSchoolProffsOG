@@ -35,6 +35,12 @@ const SITE_CONTENT_KEYS = [
   ...THEME_KEYS,
 ] as const;
 
+// The only three groups team members can be shown under (see
+// teamMembersTable.category) — deliberately not "Professors" or any other
+// open-ended label, per the initial ask.
+export const TEAM_CATEGORIES = ["reviewer", "question_setter", "ownership"] as const;
+export type TeamCategory = (typeof TEAM_CATEGORIES)[number];
+
 function teamView(member: typeof teamMembersTable.$inferSelect) {
   return { ...member, photoPath: resolveFileUrl(member.photoPath) };
 }
@@ -65,6 +71,7 @@ router.get("/site-content", async (req, res): Promise<void> => {
 const TeamMemberBody = z.object({
   name: z.string().min(1).max(120),
   role: z.string().min(1).max(120),
+  category: z.enum(TEAM_CATEGORIES).optional(),
   bio: z.string().max(1000).optional(),
   achievementBadge: z.string().max(120).optional(),
   photoPath: z.string().max(500).optional(),

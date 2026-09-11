@@ -389,6 +389,7 @@ CREATE TABLE IF NOT EXISTS med_team_members (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
   role TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'reviewer',
   bio TEXT NOT NULL DEFAULT '',
   achievement_badge TEXT NOT NULL DEFAULT '',
   photo_path TEXT,
@@ -647,6 +648,10 @@ ALTER TABLE med_modules ADD COLUMN IF NOT EXISTS icon_path TEXT;
 
 -- Optional subject thumbnail, same pattern as blocks/modules above.
 ALTER TABLE med_subjects ADD COLUMN IF NOT EXISTS icon_path TEXT;
+
+-- Team member category (reviewer / question_setter / ownership) — existing
+-- rows default to 'reviewer' so they don't disappear from every group.
+ALTER TABLE med_team_members ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'reviewer';
 
 COMMIT;
 `;

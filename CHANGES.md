@@ -1,3 +1,63 @@
+# Round 5 — what changed, by file
+
+Same verification method/caveat as Rounds 3-4: read end-to-end, `esbuild`
+syntax-checked every touched file (all clean), no live DB/browser.
+
+## 1. Team member categories (Reviewers / Question setters / Ownership)
+A closed 3-value set, not open-ended roles like "Professors" — deliberately
+per the ask.
+- **New `category` column** on `med_team_members` (default `'reviewer'` so
+  existing rows don't vanish from every group) — `lib/db/src/schema/
+  medschool.ts`, and both copies of the schema-sync SQL (`lib/db/
+  ensure-schema.sql` and the inlined copy in `lib/db/src/ensureSchema.ts`
+  that actually runs at boot — same duplication as the subject `icon_path`
+  column in Round 4).
+- **`artifacts/api-server/src/routes/site-content.ts`** — new exported
+  `TEAM_CATEGORIES`/`TeamCategory`, `TeamMemberBody` zod now validates
+  `category` against that closed enum (so the API rejects anything else,
+  not just the UI).
+- **Both frontends' `lib/api.ts`** — `TeamMember` type, `TEAM_CATEGORIES`,
+  and a `TEAM_CATEGORY_LABELS` display-label map added identically in
+  `frontend-admin` and `frontend-student` (this app doesn't share a
+  types package between them for hand-written API clients — see Round 4's
+  note on `subjectAdminApi` for why they're duplicated rather than
+  imported from one place).
+- **Admin "Academic team" page** — add/edit form gets a category `<select>`;
+  the member list is now three grouped sections (one per category) instead
+  of one flat grid.
+- **Student Profile's "Our Academic Team"** and the **admin's internal
+  preview of that same section** — both grouped the same way.
+
+## 2. Standalone Subjects & Topics admin pages
+Delivers the "separate full settings, like Blocks" ask from Round 4 that
+was left open — `/admin/subjects` and `/admin/topics` are now their own
+nav items (Content group) and routes, alongside (not replacing) the
+nested drill-down inside Academic content, which still works and now
+stays in sync with these (see cache note below).
+- **`artifacts/frontend-admin/src/lib/api.ts`** — `subjectAdminApi.list`
+  and `topicAdminApi.list` had their parent id (`moduleId`/`subjectId`)
+  made optional. The backend already supported fetching everything for
+  admins when it's omitted (`GET /subjects`, `GET /topics` in
+  `medschool.ts` — unchanged); only the frontend wrapper was artificially
+  requiring one.
+- **`AdminSubjectsPage`/`AdminTopicsPage`** (new, in `frontend-admin/src/
+  App.tsx`, right after `TopicsManager`) — flat list grouped by parent
+  (module for subjects, subject-and-its-module for topics), each group
+  filterable via a dropdown in the header. Per group: rename, thumbnail
+  (subjects only), delete, and reorder (same self-healing whole-list
+  renumber as institutions/the nested managers). "Add" form requires
+  picking the parent from a dropdown, since that's a required field on
+  create either way.
+- **Cache consistency**: the standalone pages and the nested
+  `SubjectsTopicsManager`/`TopicsManager` use different React Query cache
+  keys (`['admin-subjects-all']` vs. `['admin-subjects', moduleId]`, same
+  split for topics) since they fetch different shapes of the same data.
+  Every mutation in all four places now invalidates both keys, so an edit
+  made from either surface shows up immediately on the other without
+  needing a manual refresh.
+
+---
+
 # Round 4 — what changed, by file
 
 **Same verification caveat as Round 3 below:** no live dev server, database,

@@ -30,7 +30,7 @@ import { toast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
-import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, analyticsApi, mcqImportApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, subjectAdminApi, topicAdminApi, flashcardsAdminApi, flashcardsAiApi, booksAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blockAdminApi, examsAdminApi, examsApi, explanationsApi, auditApi, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type StudentDetail, type SiteContent, type TeamMember, type AdminModule, type AdminBlock, type AdminSubject, type AdminTopic, type AdminFlashcard, type GeneratedFlashcard, type AdminMcqRow, type AdminBook, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type BankAccount, type PaymentMethodConfig, aiVisualizerAdminApi, type AiVisualizerLogEntry } from '@/lib/api';
+import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, analyticsApi, mcqImportApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, subjectAdminApi, topicAdminApi, flashcardsAdminApi, flashcardsAiApi, booksAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blockAdminApi, examsAdminApi, examsApi, explanationsApi, auditApi, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type StudentDetail, type SiteContent, type TeamMember, TEAM_CATEGORIES, TEAM_CATEGORY_LABELS, type TeamCategory, type AdminModule, type AdminBlock, type AdminSubject, type AdminTopic, type AdminFlashcard, type GeneratedFlashcard, type AdminMcqRow, type AdminBook, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type BankAccount, type PaymentMethodConfig, aiVisualizerAdminApi, type AiVisualizerLogEntry } from '@/lib/api';
 import './index.css';
 
 // Round 3, item 10 (performance) — same over-fetching fix as the student
@@ -113,7 +113,7 @@ const adminGroups: Array<{ label: string; items: NavItem[] }> = [
     ['/admin/plans', 'Subscription plans', CreditCard], ['/admin/payments', 'Payments & collection', ReceiptText],
   ] },
   { label: 'Content', items: [
-    ['/admin/academic-structure', 'Colleges & courses', FolderOpen], ['/admin/content', 'Academic content', Library], ['/admin/mcqs', 'MCQ bank', CircleHelp], ['/admin/flashcards', 'Flashcards', Zap], ['/admin/books', 'Books library', BookOpen], ['/admin/past-papers', 'Past papers', FileStack], ['/admin/exams', 'Pre-Proffs Exams', ClipboardCheck],
+    ['/admin/academic-structure', 'Colleges & courses', FolderOpen], ['/admin/content', 'Academic content', Library], ['/admin/subjects', 'Subjects', BookOpen], ['/admin/topics', 'Topics', CircleHelp], ['/admin/mcqs', 'MCQ bank', CircleHelp], ['/admin/flashcards', 'Flashcards', Zap], ['/admin/books', 'Books library', BookOpen], ['/admin/past-papers', 'Past papers', FileStack], ['/admin/exams', 'Pre-Proffs Exams', ClipboardCheck],
   ] },
   { label: 'Community', items: [
     ['/admin/feedback', 'Feedback inbox', MessageSquare], ['/admin/ai-visualizer-logs', 'AI Visualizer activity', Wand2], ['/admin/team', 'Academic team', Users], ['/admin/site-content', 'Site content', Landmark],
@@ -238,7 +238,10 @@ function TeamSection() {
   const q = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get });
   const team = q.data?.team || [];
   if (!team.length) return null;
-  return <div className="mt-9"><SectionHeader eyebrow="Behind the platform" title="Our Academic Team" /><div className="grid gap-4 sm:grid-cols-2">{team.map((m) => <div key={m.id} className="rounded-2xl border border-border bg-card p-5" data-testid={`card-team-${m.id}`}><div className="flex items-center gap-3">{m.photoPath ? <img src={resolveUploadUrl(m.photoPath)!} alt={m.name} className="size-14 rounded-full border border-border object-cover" /> : <div className="grid size-14 place-items-center rounded-full bg-[#d7eee4] text-sm font-extrabold text-[#164b4b]">{initials(m.name)}</div>}<div><div className="text-sm font-bold">{m.name}</div><div className="text-xs text-primary">{m.role}</div></div></div>{m.achievementBadge && <span className="mt-3 inline-flex items-center gap-1 rounded-full bg-[#fdeecb] px-2.5 py-1 text-[10px] font-bold text-[#8a5a12]"><Trophy size={11} /> {m.achievementBadge}</span>}{m.bio && <p className="mt-3 text-xs leading-5 text-muted-foreground">{m.bio}</p>}{(m.linkedinUrl || m.instagramUrl || m.email) && <div className="mt-3 flex gap-2">{m.linkedinUrl && <a href={m.linkedinUrl} target="_blank" rel="noreferrer" className="grid size-7 place-items-center rounded-full bg-muted text-[10px] font-bold hover:bg-primary/10 hover:text-primary">in</a>}{m.instagramUrl && <a href={m.instagramUrl} target="_blank" rel="noreferrer" className="grid size-7 place-items-center rounded-full bg-muted text-[10px] font-bold hover:bg-primary/10 hover:text-primary">ig</a>}{m.email && <a href={`mailto:${m.email}`} className="grid size-7 place-items-center rounded-full bg-muted hover:bg-primary/10 hover:text-primary"><Mail size={12} /></a>}</div>}</div>)}</div></div>;
+  const card = (m: TeamMember) => <div key={m.id} className="rounded-2xl border border-border bg-card p-5" data-testid={`card-team-${m.id}`}><div className="flex items-center gap-3">{m.photoPath ? <img src={resolveUploadUrl(m.photoPath)!} alt={m.name} className="size-14 rounded-full border border-border object-cover" /> : <div className="grid size-14 place-items-center rounded-full bg-[#d7eee4] text-sm font-extrabold text-[#164b4b]">{initials(m.name)}</div>}<div><div className="text-sm font-bold">{m.name}</div><div className="text-xs text-primary">{m.role}</div></div></div>{m.achievementBadge && <span className="mt-3 inline-flex items-center gap-1 rounded-full bg-[#fdeecb] px-2.5 py-1 text-[10px] font-bold text-[#8a5a12]"><Trophy size={11} /> {m.achievementBadge}</span>}{m.bio && <p className="mt-3 text-xs leading-5 text-muted-foreground">{m.bio}</p>}{(m.linkedinUrl || m.instagramUrl || m.email) && <div className="mt-3 flex gap-2">{m.linkedinUrl && <a href={m.linkedinUrl} target="_blank" rel="noreferrer" className="grid size-7 place-items-center rounded-full bg-muted text-[10px] font-bold hover:bg-primary/10 hover:text-primary">in</a>}{m.instagramUrl && <a href={m.instagramUrl} target="_blank" rel="noreferrer" className="grid size-7 place-items-center rounded-full bg-muted text-[10px] font-bold hover:bg-primary/10 hover:text-primary">ig</a>}{m.email && <a href={`mailto:${m.email}`} className="grid size-7 place-items-center rounded-full bg-muted hover:bg-primary/10 hover:text-primary"><Mail size={12} /></a>}</div>}</div>;
+  return <div className="mt-9"><SectionHeader eyebrow="Behind the platform" title="Our Academic Team" />
+    {TEAM_CATEGORIES.map((cat) => { const inCat = team.filter((m) => (m.category ?? 'reviewer') === cat); if (!inCat.length) return null; return <div key={cat} className="mb-6 last:mb-0"><div className="mb-3 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{TEAM_CATEGORY_LABELS[cat]}</div><div className="grid gap-4 sm:grid-cols-2">{inCat.map(card)}</div></div>; })}
+  </div>;
 }
 
 // Audit log actions are consistent SCREAMING_SNAKE_CASE codes (MCQ_CREATED,
@@ -583,7 +586,7 @@ function SubjectsTopicsManager({ moduleId, breadcrumb }: { moduleId: number; bre
   const [editSubjectIcon, setEditSubjectIcon] = useState<string | null | undefined>(undefined);
   const [editSubjectIconPreview, setEditSubjectIconPreview] = useState<string | null>(null);
 
-  const invalidateSubjects = () => queryClient.invalidateQueries({ queryKey: ['admin-subjects', moduleId] });
+  const invalidateSubjects = () => { queryClient.invalidateQueries({ queryKey: ['admin-subjects', moduleId] }); queryClient.invalidateQueries({ queryKey: ['admin-subjects-all'] }); };
   const createSubject = useMutation({ mutationFn: subjectAdminApi.create, onSuccess: () => { invalidateSubjects(); setNewSubjectName(''); setNewSubjectIcon(null); setNewSubjectIconPreview(null); }, onError: (err: unknown) => toast({ title: 'Could not create subject', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
   const updateSubject = useMutation({ mutationFn: ({ id, body }: { id: number; body: Parameters<typeof subjectAdminApi.update>[1] }) => subjectAdminApi.update(id, body), onSuccess: () => { invalidateSubjects(); setEditingSubjectId(null); }, onError: (err: unknown) => toast({ title: 'Could not update subject', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
   const removeSubject = useMutation({ mutationFn: subjectAdminApi.remove, onSuccess: () => { invalidateSubjects(); setDeletingSubjectId(null); }, onError: (err: unknown) => toast({ title: 'Could not delete subject', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
@@ -644,7 +647,7 @@ function TopicsManager({ subjectId }: { subjectId: number }) {
   const [deletingTopicId, setDeletingTopicId] = useState<number | null>(null);
   const [editingTopicId, setEditingTopicId] = useState<number | null>(null);
   const [editTopicName, setEditTopicName] = useState('');
-  const invalidateTopics = () => queryClient.invalidateQueries({ queryKey: ['admin-topics', subjectId] });
+  const invalidateTopics = () => { queryClient.invalidateQueries({ queryKey: ['admin-topics', subjectId] }); queryClient.invalidateQueries({ queryKey: ['admin-topics-all'] }); };
   const createTopic = useMutation({ mutationFn: topicAdminApi.create, onSuccess: () => { invalidateTopics(); setNewTopicName(''); }, onError: (err: unknown) => toast({ title: 'Could not create topic', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
   const updateTopic = useMutation({ mutationFn: ({ id, body }: { id: number; body: Parameters<typeof topicAdminApi.update>[1] }) => topicAdminApi.update(id, body), onSuccess: () => { invalidateTopics(); setEditingTopicId(null); }, onError: (err: unknown) => toast({ title: 'Could not rename topic', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
   const removeTopic = useMutation({ mutationFn: topicAdminApi.remove, onSuccess: () => { invalidateTopics(); setDeletingTopicId(null); }, onError: (err: unknown) => toast({ title: 'Could not delete topic', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
@@ -685,6 +688,169 @@ function TopicsManager({ subjectId }: { subjectId: number }) {
           </div>}
     </div>)}{!topics.length && <p className="text-xs text-muted-foreground">No topics yet.</p>}</div>
     <form onSubmit={(e) => { e.preventDefault(); if (newTopicName.trim()) createTopic.mutate({ subjectId, name: newTopicName.trim(), active: true }); }} className="mt-2 flex gap-2"><input value={newTopicName} onChange={(e) => setNewTopicName(e.target.value)} placeholder="Add topic..." className="h-8 flex-1 rounded-lg border border-border bg-background px-2 text-xs" data-testid="input-add-topic" /><button disabled={createTopic.isPending} className="rounded-lg bg-primary px-2.5 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-add-topic"><Plus size={12} /></button></form>
+    {deletingTopicId !== null && <ConfirmDialog title="Delete this topic?" body="MCQs already tagged to it are kept but will need a new home." onCancel={() => setDeletingTopicId(null)} onConfirm={() => removeTopic.mutate(deletingTopicId)} pending={removeTopic.isPending} />}
+  </div>;
+}
+
+// Standalone "Subjects" settings page — same capability as
+// SubjectsTopicsManager (rename, thumbnail, reorder, delete) but reached
+// from its own nav entry instead of nested under a specific module in
+// Academic content, and showing every subject across every module at
+// once (grouped by module, filterable to one).
+function AdminSubjectsPage() {
+  const modulesQ = useQuery({ queryKey: ['admin-modules'], queryFn: moduleAdminApi.listAll });
+  const subjectsQ = useQuery({ queryKey: ['admin-subjects-all'], queryFn: () => subjectAdminApi.list() });
+  const modules = [...(modulesQ.data ?? [])].sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+  const moduleName = (id: number) => modules.find((m) => m.id === id)?.name ?? `Module #${id}`;
+  const [moduleFilter, setModuleFilter] = useState<'all' | number>('all');
+  const [newModuleId, setNewModuleId] = useState<number | ''>('');
+  const [newSubjectName, setNewSubjectName] = useState('');
+  const [newSubjectIcon, setNewSubjectIcon] = useState<string | null>(null);
+  const [newSubjectIconPreview, setNewSubjectIconPreview] = useState<string | null>(null);
+  const [deletingSubjectId, setDeletingSubjectId] = useState<number | null>(null);
+  const [editingSubjectId, setEditingSubjectId] = useState<number | null>(null);
+  const [editSubjectName, setEditSubjectName] = useState('');
+  const [editSubjectIcon, setEditSubjectIcon] = useState<string | null | undefined>(undefined);
+  const [editSubjectIconPreview, setEditSubjectIconPreview] = useState<string | null>(null);
+
+  // Also invalidates the per-module ['admin-subjects', moduleId] cache
+  // Academic content's nested SubjectsTopicsManager uses, so editing a
+  // subject from this standalone page doesn't leave that view stale.
+  const invalidate = () => { queryClient.invalidateQueries({ queryKey: ['admin-subjects-all'] }); queryClient.invalidateQueries({ queryKey: ['admin-subjects'] }); };
+  const createSubject = useMutation({ mutationFn: subjectAdminApi.create, onSuccess: () => { invalidate(); setNewSubjectName(''); setNewSubjectIcon(null); setNewSubjectIconPreview(null); }, onError: (err: unknown) => toast({ title: 'Could not create subject', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
+  const updateSubject = useMutation({ mutationFn: ({ id, body }: { id: number; body: Parameters<typeof subjectAdminApi.update>[1] }) => subjectAdminApi.update(id, body), onSuccess: () => { invalidate(); setEditingSubjectId(null); }, onError: (err: unknown) => toast({ title: 'Could not update subject', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
+  const removeSubject = useMutation({ mutationFn: subjectAdminApi.remove, onSuccess: () => { invalidate(); setDeletingSubjectId(null); }, onError: (err: unknown) => toast({ title: 'Could not delete subject', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
+  const reorderSubjects = useMutation({
+    mutationFn: (rows: { id: number; displayOrder: number }[]) => Promise.all(rows.map((r) => subjectAdminApi.update(r.id, { displayOrder: r.displayOrder }))),
+    onSuccess: invalidate,
+    onError: (err: unknown) => toast({ title: 'Could not reorder subjects', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
+  const startEditSubject = (s: AdminSubject) => { setEditingSubjectId(s.id); setEditSubjectName(s.name); setEditSubjectIcon(undefined); setEditSubjectIconPreview(s.iconUrl ?? null); };
+
+  const allSubjects = subjectsQ.data ?? [];
+  const grouped = new Map<number, AdminSubject[]>();
+  for (const s of allSubjects) { if (moduleFilter !== 'all' && s.moduleId !== moduleFilter) continue; if (!grouped.has(s.moduleId)) grouped.set(s.moduleId, []); grouped.get(s.moduleId)!.push(s); }
+  for (const list of grouped.values()) list.sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+  const groupIds = [...grouped.keys()].sort((a, b) => moduleName(a).localeCompare(moduleName(b)));
+  // Reorder within a single module's list — same self-healing whole-list
+  // renumber as AdminInstitutionsList/SubjectsTopicsManager.
+  const moveSubject = (moduleId: number, index: number, dir: -1 | 1) => {
+    const list = grouped.get(moduleId) ?? [];
+    const target = index + dir;
+    if (target < 0 || target >= list.length || reorderSubjects.isPending) return;
+    const reordered = [...list];
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    reorderSubjects.mutate(reordered.map((s, i) => ({ id: s.id, displayOrder: i })));
+  };
+
+  return <div><SectionHeader eyebrow="Curriculum operations" title="Subjects" action={<select value={moduleFilter} onChange={(e) => setModuleFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))} className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-subjects-module-filter"><option value="all">All modules</option>{modules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>} />
+    {!groupIds.length && <EmptyState icon={BookOpen} title="No subjects yet" body="Add one below — every subject belongs to a module." />}
+    <div className="space-y-6">{groupIds.map((moduleId) => { const list = grouped.get(moduleId)!; return <div key={moduleId}>
+      <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{moduleName(moduleId)}</div>
+      <div className="space-y-2">{list.map((s, i) => <div key={s.id} className="rounded-xl border border-border bg-card">
+        <div className="flex items-center gap-2 p-3">
+          <div className="flex shrink-0 flex-col">
+            <button type="button" disabled={i === 0 || reorderSubjects.isPending} onClick={() => moveSubject(moduleId, i, -1)} className="grid size-4 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-30" data-testid={`button-move-up-subject-${s.id}`} aria-label="Move up"><ChevronUp size={12} /></button>
+            <button type="button" disabled={i === list.length - 1 || reorderSubjects.isPending} onClick={() => moveSubject(moduleId, i, 1)} className="grid size-4 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-30" data-testid={`button-move-down-subject-${s.id}`} aria-label="Move down"><ChevronDown size={12} /></button>
+          </div>
+          {s.iconUrl && <img src={resolveUploadUrl(s.iconUrl)} alt="" className="size-8 shrink-0 rounded-lg object-cover" data-testid={`img-subject-thumbnail-${s.id}`} />}
+          <div className="flex-1 text-xs font-bold">{s.name} <span className="font-normal text-muted-foreground">· {s.topicCount} topics</span></div>
+          <button onClick={() => startEditSubject(s)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" data-testid={`button-edit-subject-${s.id}`}><Pencil size={13} /></button>
+          <button onClick={() => setDeletingSubjectId(s.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-subject-${s.id}`}><Trash2 size={13} /></button>
+        </div>
+        {editingSubjectId === s.id && <form onSubmit={(e) => { e.preventDefault(); if (!editSubjectName.trim()) return; updateSubject.mutate({ id: s.id, body: { name: editSubjectName.trim(), ...(editSubjectIcon !== undefined ? { iconPath: editSubjectIcon } : {}) } }); }} className="space-y-2 border-t border-border p-3">
+          <input autoFocus value={editSubjectName} onChange={(e) => setEditSubjectName(e.target.value)} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-xs" data-testid={`input-rename-subject-${s.id}`} />
+          <AdminImageUpload currentUrl={editSubjectIconPreview || ''} kind="resource" accept="image/png,image/jpeg,image/webp" hint="Optional thumbnail · PNG, JPEG, or WEBP." testId={`input-subject-icon-upload-${s.id}`} onUploaded={(storagePath, previewUrl) => { setEditSubjectIcon(storagePath); setEditSubjectIconPreview(previewUrl); }} />
+          <div className="flex gap-2"><button type="submit" disabled={updateSubject.isPending} className="rounded-lg bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground disabled:opacity-50" data-testid={`button-save-subject-${s.id}`}>Save</button><button type="button" onClick={() => setEditingSubjectId(null)} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold text-muted-foreground" data-testid={`button-cancel-edit-subject-${s.id}`}>Cancel</button></div>
+        </form>}
+      </div>)}</div>
+    </div>; })}</div>
+    <form onSubmit={(e) => { e.preventDefault(); if (newModuleId && newSubjectName.trim()) createSubject.mutate({ moduleId: Number(newModuleId), name: newSubjectName.trim(), active: true, iconPath: newSubjectIcon ?? undefined }); }} className="mt-6 space-y-2 rounded-xl border border-dashed border-border p-4">
+      <div className="text-xs font-bold">Add subject</div>
+      <select required value={newModuleId} onChange={(e) => setNewModuleId(e.target.value ? Number(e.target.value) : '')} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-xs" data-testid="select-new-subject-module"><option value="">Choose a module…</option>{modules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
+      <input value={newSubjectName} onChange={(e) => setNewSubjectName(e.target.value)} placeholder="Subject name, e.g. Anatomy" className="h-9 w-full rounded-lg border border-border bg-background px-3 text-xs" data-testid="input-add-subject" />
+      <AdminImageUpload currentUrl={newSubjectIconPreview || ''} kind="resource" accept="image/png,image/jpeg,image/webp" hint="Optional thumbnail · PNG, JPEG, or WEBP." testId="input-new-subject-icon-upload" onUploaded={(storagePath, previewUrl) => { setNewSubjectIcon(storagePath); setNewSubjectIconPreview(previewUrl); }} />
+      <button type="submit" disabled={createSubject.isPending || !newModuleId || !newSubjectName.trim()} className="rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-add-subject">Add subject</button>
+    </form>
+    {deletingSubjectId !== null && <ConfirmDialog title="Delete this subject?" body="Its topics go with it. MCQs already tagged to it are kept but will need a new home." onCancel={() => setDeletingSubjectId(null)} onConfirm={() => removeSubject.mutate(deletingSubjectId)} pending={removeSubject.isPending} />}
+  </div>;
+}
+
+// Standalone "Topics" settings page — mirrors AdminSubjectsPage, grouped by
+// subject (with the parent module shown too, since a subject name alone
+// isn't always unique across modules).
+function AdminTopicsPage() {
+  const modulesQ = useQuery({ queryKey: ['admin-modules'], queryFn: moduleAdminApi.listAll });
+  const subjectsQ = useQuery({ queryKey: ['admin-subjects-all'], queryFn: () => subjectAdminApi.list() });
+  const topicsQ = useQuery({ queryKey: ['admin-topics-all'], queryFn: () => topicAdminApi.list() });
+  const modules = modulesQ.data ?? [];
+  const subjects = subjectsQ.data ?? [];
+  const moduleName = (id: number) => modules.find((m) => m.id === id)?.name ?? `Module #${id}`;
+  const subjectLabel = (id: number) => { const s = subjects.find((x) => x.id === id); return s ? `${s.name} — ${moduleName(s.moduleId)}` : `Subject #${id}`; };
+  const [subjectFilter, setSubjectFilter] = useState<'all' | number>('all');
+  const [newSubjectId, setNewSubjectId] = useState<number | ''>('');
+  const [newTopicName, setNewTopicName] = useState('');
+  const [deletingTopicId, setDeletingTopicId] = useState<number | null>(null);
+  const [editingTopicId, setEditingTopicId] = useState<number | null>(null);
+  const [editTopicName, setEditTopicName] = useState('');
+
+  // Same cross-invalidation as AdminSubjectsPage, for TopicsManager's
+  // per-subject cache.
+  const invalidate = () => { queryClient.invalidateQueries({ queryKey: ['admin-topics-all'] }); queryClient.invalidateQueries({ queryKey: ['admin-topics'] }); };
+  const createTopic = useMutation({ mutationFn: topicAdminApi.create, onSuccess: () => { invalidate(); setNewTopicName(''); }, onError: (err: unknown) => toast({ title: 'Could not create topic', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
+  const updateTopic = useMutation({ mutationFn: ({ id, body }: { id: number; body: Parameters<typeof topicAdminApi.update>[1] }) => topicAdminApi.update(id, body), onSuccess: () => { invalidate(); setEditingTopicId(null); }, onError: (err: unknown) => toast({ title: 'Could not rename topic', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
+  const removeTopic = useMutation({ mutationFn: topicAdminApi.remove, onSuccess: () => { invalidate(); setDeletingTopicId(null); }, onError: (err: unknown) => toast({ title: 'Could not delete topic', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
+  const reorderTopics = useMutation({
+    mutationFn: (rows: { id: number; displayOrder: number }[]) => Promise.all(rows.map((r) => topicAdminApi.update(r.id, { displayOrder: r.displayOrder }))),
+    onSuccess: invalidate,
+    onError: (err: unknown) => toast({ title: 'Could not reorder topics', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
+
+  const allTopics = topicsQ.data ?? [];
+  const grouped = new Map<number, AdminTopic[]>();
+  for (const t of allTopics) { if (subjectFilter !== 'all' && t.subjectId !== subjectFilter) continue; if (!grouped.has(t.subjectId)) grouped.set(t.subjectId, []); grouped.get(t.subjectId)!.push(t); }
+  for (const list of grouped.values()) list.sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+  const groupIds = [...grouped.keys()].sort((a, b) => subjectLabel(a).localeCompare(subjectLabel(b)));
+  const moveTopic = (subjectId: number, index: number, dir: -1 | 1) => {
+    const list = grouped.get(subjectId) ?? [];
+    const target = index + dir;
+    if (target < 0 || target >= list.length || reorderTopics.isPending) return;
+    const reordered = [...list];
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    reorderTopics.mutate(reordered.map((t, i) => ({ id: t.id, displayOrder: i })));
+  };
+
+  return <div><SectionHeader eyebrow="Curriculum operations" title="Topics" action={<select value={subjectFilter} onChange={(e) => setSubjectFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))} className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-topics-subject-filter"><option value="all">All subjects</option>{subjects.map((s) => <option key={s.id} value={s.id}>{subjectLabel(s.id)}</option>)}</select>} />
+    {!groupIds.length && <EmptyState icon={CircleHelp} title="No topics yet" body="Add one below — every topic belongs to a subject." />}
+    <div className="space-y-6">{groupIds.map((subjectId) => { const list = grouped.get(subjectId)!; return <div key={subjectId}>
+      <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{subjectLabel(subjectId)}</div>
+      <div className="space-y-1.5">{list.map((t, i) => <div key={t.id} className="rounded-lg bg-muted px-2.5 py-1.5 text-xs" data-testid={`row-topic-${t.id}`}>
+        {editingTopicId === t.id
+          ? <form onSubmit={(e) => { e.preventDefault(); if (editTopicName.trim()) updateTopic.mutate({ id: t.id, body: { name: editTopicName.trim() } }); }} className="flex items-center gap-1.5">
+              <input autoFocus value={editTopicName} onChange={(e) => setEditTopicName(e.target.value)} className="h-7 min-w-0 flex-1 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`input-rename-topic-${t.id}`} />
+              <button type="submit" disabled={updateTopic.isPending} className="rounded-lg bg-primary px-2 py-1 text-[10px] font-bold text-primary-foreground" data-testid={`button-save-topic-${t.id}`}>Save</button>
+              <button type="button" onClick={() => setEditingTopicId(null)} className="rounded-lg border border-border px-2 py-1 text-[10px] font-bold" data-testid={`button-cancel-edit-topic-${t.id}`}>Cancel</button>
+            </form>
+          : <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-1 items-center gap-1.5 min-w-0">
+                <div className="flex shrink-0 flex-col">
+                  <button type="button" disabled={i === 0 || reorderTopics.isPending} onClick={() => moveTopic(subjectId, i, -1)} className="grid size-3.5 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-30" data-testid={`button-move-up-topic-${t.id}`} aria-label="Move up"><ChevronUp size={11} /></button>
+                  <button type="button" disabled={i === list.length - 1 || reorderTopics.isPending} onClick={() => moveTopic(subjectId, i, 1)} className="grid size-3.5 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-30" data-testid={`button-move-down-topic-${t.id}`} aria-label="Move down"><ChevronDown size={11} /></button>
+                </div>
+                <span className="truncate">{t.name}</span>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <button onClick={() => { setEditingTopicId(t.id); setEditTopicName(t.name); }} className="text-muted-foreground hover:text-foreground" data-testid={`button-edit-topic-${t.id}`}><Pencil size={12} /></button>
+                <button onClick={() => setDeletingTopicId(t.id)} className="text-muted-foreground hover:text-destructive" data-testid={`button-delete-topic-${t.id}`}><Trash2 size={12} /></button>
+              </div>
+            </div>}
+      </div>)}</div>
+    </div>; })}</div>
+    <form onSubmit={(e) => { e.preventDefault(); if (newSubjectId && newTopicName.trim()) createTopic.mutate({ subjectId: Number(newSubjectId), name: newTopicName.trim(), active: true }); }} className="mt-6 space-y-2 rounded-xl border border-dashed border-border p-4">
+      <div className="text-xs font-bold">Add topic</div>
+      <select required value={newSubjectId} onChange={(e) => setNewSubjectId(e.target.value ? Number(e.target.value) : '')} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-xs" data-testid="select-new-topic-subject"><option value="">Choose a subject…</option>{subjects.map((s) => <option key={s.id} value={s.id}>{subjectLabel(s.id)}</option>)}</select>
+      <div className="flex gap-2"><input value={newTopicName} onChange={(e) => setNewTopicName(e.target.value)} placeholder="Topic name" className="h-9 flex-1 rounded-lg border border-border bg-background px-3 text-xs" data-testid="input-add-topic" /><button disabled={createTopic.isPending || !newSubjectId || !newTopicName.trim()} className="rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-add-topic">Add</button></div>
+    </form>
     {deletingTopicId !== null && <ConfirmDialog title="Delete this topic?" body="MCQs already tagged to it are kept but will need a new home." onCancel={() => setDeletingTopicId(null)} onConfirm={() => removeTopic.mutate(deletingTopicId)} pending={removeTopic.isPending} />}
   </div>;
 }
@@ -2172,19 +2338,20 @@ function AdminTeam() {
   return <div><SectionHeader eyebrow="Site content" title="Academic team" action={<div className="flex items-center gap-2"><button onClick={() => setShowArchived((v) => !v)} className={cn('rounded-xl border border-border px-3 py-2.5 text-xs font-bold', showArchived ? 'bg-muted' : 'bg-card')} data-testid="button-toggle-hidden-team">{showArchived ? 'Hide hidden' : `Show hidden${hiddenCount ? ` (${hiddenCount})` : ''}`}</button><button onClick={() => { if (formOpen) { closeForm(); } else { setOpen(true); } }} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-add-team-member"><Plus size={15} /> Add member</button></div>} />
     {formOpen && <form key={editingMember?.id ?? 'new'} onSubmit={(e) => {
       e.preventDefault(); const f = new FormData(e.currentTarget);
-      const body = { name: String(f.get('name')), role: String(f.get('role')), bio: String(f.get('bio') || ''), achievementBadge: String(f.get('achievementBadge') || ''), linkedinUrl: String(f.get('linkedinUrl') || ''), instagramUrl: String(f.get('instagramUrl') || ''), email: String(f.get('email') || ''), photoPath: photoPath || editingMember?.photoPath || undefined };
+      const body = { name: String(f.get('name')), role: String(f.get('role')), category: f.get('category') as TeamCategory, bio: String(f.get('bio') || ''), achievementBadge: String(f.get('achievementBadge') || ''), linkedinUrl: String(f.get('linkedinUrl') || ''), instagramUrl: String(f.get('instagramUrl') || ''), email: String(f.get('email') || ''), photoPath: photoPath || editingMember?.photoPath || undefined };
       if (editingMember) update.mutate({ id: editingMember.id, body }, { onSuccess: closeForm });
       else create.mutate({ ...body, active: true }, { onSuccess: closeForm });
     }} className="mb-5 space-y-3 rounded-2xl border border-primary/30 bg-[#eef7f1] p-5">
       {editingMember && <p className="text-[11px] font-bold text-primary">Editing {editingMember.name}</p>}
       <div className="grid gap-3 sm:grid-cols-2"><input required name="name" defaultValue={editingMember?.name} placeholder="Full name" className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-team-name" /><input required name="role" defaultValue={editingMember?.role} placeholder="Role, e.g. Founder & CEO" className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-team-role" /></div>
+      <label className="block text-xs font-bold">Category<select name="category" defaultValue={editingMember?.category ?? 'reviewer'} className="mt-1 h-10 w-full rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-team-category">{TEAM_CATEGORIES.map((cat) => <option key={cat} value={cat}>{TEAM_CATEGORY_LABELS[cat]}</option>)}</select></label>
       <input name="achievementBadge" defaultValue={editingMember?.achievementBadge ?? ''} placeholder="Achievement badge, e.g. 1st Position (All over KMU)" className="h-10 w-full rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-team-badge" />
       <textarea name="bio" defaultValue={editingMember?.bio ?? ''} placeholder="Short bio" className="min-h-16 w-full rounded-xl border border-border bg-card p-3 text-xs" data-testid="input-team-bio" />
       <div className="grid gap-3 sm:grid-cols-3"><input name="linkedinUrl" defaultValue={editingMember?.linkedinUrl ?? ''} placeholder="LinkedIn URL" className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-team-linkedin" /><input name="instagramUrl" defaultValue={editingMember?.instagramUrl ?? ''} placeholder="Instagram URL" className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-team-instagram" /><input name="email" defaultValue={editingMember?.email ?? ''} placeholder="Email" className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-team-email" /></div>
       <label className="block text-xs font-bold">Photo{editingMember?.photoPath && !photoPath && <span className="ml-2 font-normal text-muted-foreground">(current photo kept unless you choose a new one)</span>}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={async (e) => { const file = e.target.files?.[0]; if (!file) return; setUploading(true); try { const res = await uploadFile(file, 'profile-picture'); setPhotoPath(res.storagePath); } catch (err) { toast({ title: 'Could not upload photo', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }); } finally { setUploading(false); } }} className="mt-2 w-full rounded-xl border border-dashed border-border bg-card px-3 py-2 text-xs" data-testid="input-team-photo" />{uploading && <p className="mt-1 text-[11px] text-muted-foreground">Uploading…</p>}{photoPath && <img src={resolveUploadUrl(photoPath) ?? undefined} alt="" className="mt-2 size-14 rounded-full border border-border object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />}</label>
       <div className="flex gap-2"><button disabled={create.isPending || update.isPending} className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-save-team-member">{editingMember ? 'Save changes' : 'Save'}</button><button type="button" onClick={closeForm} className="rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold" data-testid="button-cancel-team-member">Cancel</button></div>
     </form>}
-    <div className="grid gap-3 sm:grid-cols-2">{members.map((m) => <div key={m.id} className="rounded-2xl border border-border bg-card p-5" data-testid={`card-admin-team-${m.id}`}><div className="flex items-center justify-between"><div className="flex items-center gap-3"><TeamPhoto member={m} />{" "}<div><div className="text-sm font-bold">{m.name}</div><div className="text-xs text-muted-foreground">{m.role}</div></div></div>{m.active ? <button onClick={() => update.mutate({ id: m.id, body: { active: false } })} className="rounded-lg bg-[#d7eee4] px-2.5 py-1 text-[10px] font-bold text-[#164b4b]" data-testid={`button-toggle-team-${m.id}`}>Visible</button> : <button onClick={() => update.mutate({ id: m.id, body: { active: true } })} className="rounded-lg bg-muted px-2.5 py-1 text-[10px] font-bold text-muted-foreground" data-testid={`button-toggle-team-${m.id}`}>Hidden</button>}</div>{m.bio && <p className="mt-3 text-xs text-muted-foreground">{m.bio}</p>}<div className="mt-3 flex items-center gap-3"><button onClick={() => { setEditingMember(m); setOpen(false); setPhotoPath(''); }} className="text-[11px] font-bold text-primary" data-testid={`button-edit-team-${m.id}`}>Edit</button>{m.active ? <button onClick={() => setDeletingId(m.id)} className="text-[11px] font-bold text-destructive" data-testid={`button-delete-team-${m.id}`}>Hide</button> : <><button onClick={() => update.mutate({ id: m.id, body: { active: true } })} className="text-[11px] font-bold text-primary" data-testid={`button-restore-team-${m.id}`}>Restore</button><button onClick={() => setPermaDeletingId(m.id)} className="text-[11px] font-bold text-destructive" data-testid={`button-permanent-delete-team-${m.id}`}>Delete permanently</button></>}</div></div>)}{!members.length && <EmptyState icon={Users} title={showArchived ? 'No hidden members' : 'No team members yet'} body={showArchived ? 'Members you hide will show up here so you can restore or permanently delete them.' : 'Add founders, faculty, or content team members to show on the student profile page.'} />}</div>
+    <div className="space-y-6">{TEAM_CATEGORIES.map((cat) => { const inCat = members.filter((m) => (m.category ?? 'reviewer') === cat); return <div key={cat}><div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{TEAM_CATEGORY_LABELS[cat]}</div><div className="grid gap-3 sm:grid-cols-2">{inCat.map((m) => <div key={m.id} className="rounded-2xl border border-border bg-card p-5" data-testid={`card-admin-team-${m.id}`}><div className="flex items-center justify-between"><div className="flex items-center gap-3"><TeamPhoto member={m} />{" "}<div><div className="text-sm font-bold">{m.name}</div><div className="text-xs text-muted-foreground">{m.role}</div></div></div>{m.active ? <button onClick={() => update.mutate({ id: m.id, body: { active: false } })} className="rounded-lg bg-[#d7eee4] px-2.5 py-1 text-[10px] font-bold text-[#164b4b]" data-testid={`button-toggle-team-${m.id}`}>Visible</button> : <button onClick={() => update.mutate({ id: m.id, body: { active: true } })} className="rounded-lg bg-muted px-2.5 py-1 text-[10px] font-bold text-muted-foreground" data-testid={`button-toggle-team-${m.id}`}>Hidden</button>}</div>{m.bio && <p className="mt-3 text-xs text-muted-foreground">{m.bio}</p>}<div className="mt-3 flex items-center gap-3"><button onClick={() => { setEditingMember(m); setOpen(false); setPhotoPath(''); }} className="text-[11px] font-bold text-primary" data-testid={`button-edit-team-${m.id}`}>Edit</button>{m.active ? <button onClick={() => setDeletingId(m.id)} className="text-[11px] font-bold text-destructive" data-testid={`button-delete-team-${m.id}`}>Hide</button> : <><button onClick={() => update.mutate({ id: m.id, body: { active: true } })} className="text-[11px] font-bold text-primary" data-testid={`button-restore-team-${m.id}`}>Restore</button><button onClick={() => setPermaDeletingId(m.id)} className="text-[11px] font-bold text-destructive" data-testid={`button-permanent-delete-team-${m.id}`}>Delete permanently</button></>}</div></div>)}{!inCat.length && <p className="text-xs text-muted-foreground">No one here yet.</p>}</div></div>; })}{!members.length && <EmptyState icon={Users} title={showArchived ? 'No hidden members' : 'No team members yet'} body={showArchived ? 'Members you hide will show up here so you can restore or permanently delete them.' : 'Add reviewers, question setters, or ownership to show on the student profile page.'} />}</div>
     {deletingId !== null && <ConfirmDialog title="Hide this team member?" body={'They\'ll disappear from the public profile page. You can restore or permanently delete them later from "Show hidden."'} confirmLabel="Hide" onCancel={() => setDeletingId(null)} onConfirm={() => remove.mutate(deletingId)} pending={remove.isPending} />}
     {permaDeletingId !== null && <ConfirmDialog title="Permanently delete this team member?" body="This erases their profile for good. There is no undo." confirmLabel="Delete forever" onCancel={() => setPermaDeletingId(null)} onConfirm={() => removePermanent.mutate(permaDeletingId)} pending={removePermanent.isPending} />}
   </div>;
@@ -2429,6 +2596,6 @@ function useThemeSync() {
 function AppRoutes() {
  useFaviconSync();
  useThemeSync();
- return <Switch><Route path="/login" component={Login} /><Route path="/admin/login" component={Login} /><Route path="/admin-signup/1" component={AdminSignup} /><Route path="/forgot-password" component={ForgotPassword} /><Route path="/reset-password" component={ResetPassword} /><Route path="/verify-email" component={VerifyEmail} /><Route path="/notifications"><Shell><Notifications /></Shell></Route><Route path="/profile"><Shell><Profile /></Shell></Route><Route path="/"><Shell><AdminOverview /></Shell></Route><Route path="/admin"><Shell><AdminOverview /></Shell></Route><Route path="/admin/students"><Shell><AdminStudents /></Shell></Route><Route path="/admin/payments"><Shell><AdminPaymentsHub initialTab="Proof Review" /></Shell></Route><Route path="/admin/plans"><Shell><AdminPlans /></Shell></Route><Route path="/admin/payment-details"><Shell><AdminPaymentsHub initialTab="Collection Details" /></Shell></Route><Route path="/admin/academic-structure"><Shell><AdminAcademicStructure /></Shell></Route><Route path="/admin/content"><Shell><AdminContent /></Shell></Route><Route path="/admin/mcqs"><Shell><AdminMcqs /></Shell></Route><Route path="/admin/flashcards"><Shell><AdminFlashcards /></Shell></Route><Route path="/admin/books"><Shell><AdminBooks /></Shell></Route><Route path="/admin/past-papers"><Shell><AdminPastPapers /></Shell></Route><Route path="/admin/exams"><Shell><AdminExams /></Shell></Route><Route path="/admin/feedback"><Shell><AdminFeedback /></Shell></Route><Route path="/admin/ai-visualizer-logs"><Shell><AdminAiVisualizerLogs /></Shell></Route><Route path="/admin/site-content"><Shell><AdminSiteContent /></Shell></Route><Route path="/admin/team"><Shell><AdminTeam /></Shell></Route><Route path="/admin/settings"><Shell><AdminSettings /></Shell></Route><Route component={NotFound} /></Switch>; }
+ return <Switch><Route path="/login" component={Login} /><Route path="/admin/login" component={Login} /><Route path="/admin-signup/1" component={AdminSignup} /><Route path="/forgot-password" component={ForgotPassword} /><Route path="/reset-password" component={ResetPassword} /><Route path="/verify-email" component={VerifyEmail} /><Route path="/notifications"><Shell><Notifications /></Shell></Route><Route path="/profile"><Shell><Profile /></Shell></Route><Route path="/"><Shell><AdminOverview /></Shell></Route><Route path="/admin"><Shell><AdminOverview /></Shell></Route><Route path="/admin/students"><Shell><AdminStudents /></Shell></Route><Route path="/admin/payments"><Shell><AdminPaymentsHub initialTab="Proof Review" /></Shell></Route><Route path="/admin/plans"><Shell><AdminPlans /></Shell></Route><Route path="/admin/payment-details"><Shell><AdminPaymentsHub initialTab="Collection Details" /></Shell></Route><Route path="/admin/academic-structure"><Shell><AdminAcademicStructure /></Shell></Route><Route path="/admin/content"><Shell><AdminContent /></Shell></Route><Route path="/admin/subjects"><Shell><AdminSubjectsPage /></Shell></Route><Route path="/admin/topics"><Shell><AdminTopicsPage /></Shell></Route><Route path="/admin/mcqs"><Shell><AdminMcqs /></Shell></Route><Route path="/admin/flashcards"><Shell><AdminFlashcards /></Shell></Route><Route path="/admin/books"><Shell><AdminBooks /></Shell></Route><Route path="/admin/past-papers"><Shell><AdminPastPapers /></Shell></Route><Route path="/admin/exams"><Shell><AdminExams /></Shell></Route><Route path="/admin/feedback"><Shell><AdminFeedback /></Shell></Route><Route path="/admin/ai-visualizer-logs"><Shell><AdminAiVisualizerLogs /></Shell></Route><Route path="/admin/site-content"><Shell><AdminSiteContent /></Shell></Route><Route path="/admin/team"><Shell><AdminTeam /></Shell></Route><Route path="/admin/settings"><Shell><AdminSettings /></Shell></Route><Route component={NotFound} /></Switch>; }
 function App() { return <QueryClientProvider client={queryClient}><TooltipProvider><WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}><ErrorBoundary><AppRoutes /></ErrorBoundary></WouterRouter><Toaster /></TooltipProvider></QueryClientProvider>; }
 export default App;

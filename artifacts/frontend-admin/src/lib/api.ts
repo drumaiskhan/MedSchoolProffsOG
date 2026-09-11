@@ -123,7 +123,10 @@ export const DEFAULT_IMPORT_PATTERNS = {
   referencePattern: "^\\s*(?:Reference|Ref|Source|Citation)\\s*[:\\-]\\s*(.+)$",
 };
 
-export interface TeamMember { id: number; name: string; role: string; bio: string; achievementBadge: string; photoPath: string | null; linkedinUrl: string; instagramUrl: string; email: string; active: boolean; displayOrder: number }
+export const TEAM_CATEGORIES = ['reviewer', 'question_setter', 'ownership'] as const;
+export type TeamCategory = typeof TEAM_CATEGORIES[number];
+export const TEAM_CATEGORY_LABELS: Record<TeamCategory, string> = { reviewer: 'Reviewers', question_setter: 'Question setters', ownership: 'Ownership' };
+export interface TeamMember { id: number; name: string; role: string; category: TeamCategory; bio: string; achievementBadge: string; photoPath: string | null; linkedinUrl: string; instagramUrl: string; email: string; active: boolean; displayOrder: number }
 export interface SiteContent {
   PLATFORM_NAME: string; PLATFORM_TAGLINE: string; PLATFORM_DESCRIPTION: string;
   SOCIAL_FACEBOOK: string; SOCIAL_YOUTUBE: string; SOCIAL_LINKEDIN: string; SOCIAL_INSTAGRAM: string;
@@ -370,14 +373,14 @@ export interface AdminSubject { id: number; moduleId: number; name: string; acti
 export interface AdminTopic { id: number; subjectId: number; name: string; active?: boolean; questionCount: number; completed?: boolean; displayOrder?: number }
 
 export const subjectAdminApi = {
-  list: (moduleId: number) => request<AdminSubject[]>(`/subjects?moduleId=${moduleId}`),
+  list: (moduleId?: number) => request<AdminSubject[]>(`/subjects${moduleId ? `?moduleId=${moduleId}` : ''}`),
   create: (body: { moduleId: number; name: string; active?: boolean; iconPath?: string | null; displayOrder?: number }) => request<AdminSubject>('/subjects', { method: 'POST', body: JSON.stringify(body) }),
   update: (id: number, body: Partial<{ name: string; active: boolean; iconPath: string | null; displayOrder: number }>) => request<AdminSubject>(`/subjects/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   remove: (id: number) => request<{ ok: true }>(`/subjects/${id}`, { method: 'DELETE' }),
 };
 
 export const topicAdminApi = {
-  list: (subjectId: number) => request<AdminTopic[]>(`/topics?subjectId=${subjectId}`),
+  list: (subjectId?: number) => request<AdminTopic[]>(`/topics${subjectId ? `?subjectId=${subjectId}` : ''}`),
   create: (body: { subjectId: number; name: string; active?: boolean; displayOrder?: number }) => request<AdminTopic>('/topics', { method: 'POST', body: JSON.stringify(body) }),
   update: (id: number, body: Partial<{ name: string; active: boolean; displayOrder: number }>) => request<AdminTopic>(`/topics/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   remove: (id: number) => request<{ ok: true }>(`/topics/${id}`, { method: 'DELETE' }),
