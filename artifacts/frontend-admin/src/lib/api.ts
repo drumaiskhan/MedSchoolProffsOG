@@ -366,20 +366,20 @@ export const academicApi = {
 // build out its curriculum)
 // ---------------------------------------------------------------------------
 
-export interface AdminSubject { id: number; moduleId: number; name: string; active?: boolean; topicCount: number }
-export interface AdminTopic { id: number; subjectId: number; name: string; active?: boolean; questionCount: number; completed?: boolean }
+export interface AdminSubject { id: number; moduleId: number; name: string; active?: boolean; topicCount: number; iconUrl?: string | null; displayOrder?: number }
+export interface AdminTopic { id: number; subjectId: number; name: string; active?: boolean; questionCount: number; completed?: boolean; displayOrder?: number }
 
 export const subjectAdminApi = {
   list: (moduleId: number) => request<AdminSubject[]>(`/subjects?moduleId=${moduleId}`),
-  create: (body: { moduleId: number; name: string; active?: boolean }) => request<AdminSubject>('/subjects', { method: 'POST', body: JSON.stringify(body) }),
-  update: (id: number, body: Partial<{ name: string; active: boolean }>) => request<AdminSubject>(`/subjects/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  create: (body: { moduleId: number; name: string; active?: boolean; iconPath?: string | null; displayOrder?: number }) => request<AdminSubject>('/subjects', { method: 'POST', body: JSON.stringify(body) }),
+  update: (id: number, body: Partial<{ name: string; active: boolean; iconPath: string | null; displayOrder: number }>) => request<AdminSubject>(`/subjects/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   remove: (id: number) => request<{ ok: true }>(`/subjects/${id}`, { method: 'DELETE' }),
 };
 
 export const topicAdminApi = {
   list: (subjectId: number) => request<AdminTopic[]>(`/topics?subjectId=${subjectId}`),
-  create: (body: { subjectId: number; name: string; active?: boolean }) => request<AdminTopic>('/topics', { method: 'POST', body: JSON.stringify(body) }),
-  update: (id: number, body: Partial<{ name: string; active: boolean }>) => request<AdminTopic>(`/topics/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  create: (body: { subjectId: number; name: string; active?: boolean; displayOrder?: number }) => request<AdminTopic>('/topics', { method: 'POST', body: JSON.stringify(body) }),
+  update: (id: number, body: Partial<{ name: string; active: boolean; displayOrder: number }>) => request<AdminTopic>(`/topics/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   remove: (id: number) => request<{ ok: true }>(`/topics/${id}`, { method: 'DELETE' }),
 };
 

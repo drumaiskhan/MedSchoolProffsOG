@@ -255,6 +255,9 @@ export const subjectsTable = pgTable("med_subjects", {
   id: serial("id").primaryKey(),
   moduleId: integer("module_id").notNull(),
   name: text("name").notNull(),
+  // Optional thumbnail, resolved the same way as blocksTable/modulesTable's
+  // storagePath-style columns via resolveFileUrl() in api-server/src/lib/storage.ts.
+  iconPath: text("icon_path"),
   active: boolean("active").notNull().default(true),
   archived: boolean("archived").notNull().default(false),
   displayOrder: integer("display_order").notNull().default(0),

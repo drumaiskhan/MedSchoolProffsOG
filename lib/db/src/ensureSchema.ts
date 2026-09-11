@@ -235,6 +235,7 @@ CREATE TABLE IF NOT EXISTS med_subjects (
   id SERIAL PRIMARY KEY,
   module_id INTEGER NOT NULL,
   name TEXT NOT NULL,
+  icon_path TEXT,
   active BOOLEAN NOT NULL DEFAULT TRUE,
   archived BOOLEAN NOT NULL DEFAULT FALSE,
   display_order INTEGER NOT NULL DEFAULT 0,
@@ -643,6 +644,9 @@ ALTER TABLE med_modules ADD COLUMN IF NOT EXISTS block_id INTEGER;
 
 -- Round 3, item 7: optional module thumbnail (see schema/medschool.ts).
 ALTER TABLE med_modules ADD COLUMN IF NOT EXISTS icon_path TEXT;
+
+-- Optional subject thumbnail, same pattern as blocks/modules above.
+ALTER TABLE med_subjects ADD COLUMN IF NOT EXISTS icon_path TEXT;
 
 COMMIT;
 `;

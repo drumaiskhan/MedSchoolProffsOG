@@ -1,3 +1,112 @@
+# Round 4 — what changed, by file
+
+**Same verification caveat as Round 3 below:** no live dev server, database,
+or Cloudinary account in this session either. "Verified" means the code
+paths were read end-to-end and `esbuild` structural/syntax checks were run
+on every touched file (all clean). It does NOT mean the app was run and
+clicked through — please smoke-test on staging before relying on any of
+this in production, especially the DB schema change.
+
+## 1. Curriculum breadcrumbs showing raw IDs ("Blocks / 4", "Modules / 13")
+- **Root cause:** the header title (`artifacts/frontend-student/src/App.tsx`,
+  the `Shell` component around line 230) falls back to the raw URL path
+  when no page has set a friendly title via `usePageTitle()`/
+  `PageTitleContext` — e.g. `/blocks/4` → "Blocks / 4". That mechanism
+  already existed (used by the exam pages) but `BlockDetail()` and
+  `Subjects()` (which backs both `/modules/:id` and `/subjects/:id`) never
+  called it.
+- **Fix:** both now call `usePageTitle()` with the actual block/module/
+  subject name once it's loaded (falling back to "Blocks"/"Modules …"/
+  "Subjects …" placeholders while loading, never a raw numeric id).
+  `Subjects()` fetches the module/subject name via the existing
+  `useListModules()` / `useListSubjects()` hooks (shared query cache, so
+  this doesn't add a real extra request in the common case where the list
+  was already loaded getting here).
+- **Verified:** read the routing/title logic end-to-end; `esbuild` clean.
+  **Not verified:** not rendered in a browser.
+
+## 2. Institutions list — "up/down arrows don't move anything"
+- **Root cause found:** `POST /institutions` (`artifacts/api-server/src/
+  routes/academic-structure.ts`) defaulted a new institution's
+  `displayOrder` to `0` when the request didn't send one — and the "Add
+  institution" form never sends one. Every institution created through the
+  normal admin UI therefore landed on `displayOrder = 0`. The move-up/down
+  buttons swapped two rows' `displayOrder` values — swapping `0` with `0`
+  is a no-op, so the arrows looked wired up but visibly did nothing.
+- **Fix (`artifacts/frontend-admin/src/App.tsx`, `AdminInstitutionsList`):**
+  a move now renumbers the *whole* list to a unique sequential `0..n-1`
+  order and persists all of it, instead of swapping just the two neighbors.
+  This is self-healing — it doesn't require a data migration, since every
+  click leaves the list free of duplicate `displayOrder` values regardless
+  of what state it started in.
+- **Fix (`artifacts/api-server/.../academic-structure.ts`):** new
+  institutions now default to `MAX(displayOrder) + 1` instead of `0`, so
+  the collision can't recur going forward either.
+- **Verified:** traced the swap logic and confirmed the all-zeros
+  scenario reproduces the reported symptom exactly. `esbuild` clean on
+  both files. **Not verified:** no live DB to confirm existing production
+  rows are actually all at `0` — if they're not, the symptom may have had
+  a different trigger, but the self-healing reorder fix covers that case
+  too either way.
+
+## 3. Subject thumbnails + parity for Subjects/Topics admin management
+Blocks and Modules already had a full management surface (create, rename,
+reorder, thumbnail, archive/delete). Subjects and Topics (nested inside a
+module's curriculum drawer, `SubjectsTopicsManager`/`TopicsManager`) could
+only be created and deleted — no rename, no reorder, no thumbnail. Rather
+than build brand-new standalone pages (bigger, riskier change to make
+blind without a dev server — happy to do this next if still wanted),
+brought these two up to the same *capability* level as Blocks/Modules in
+their existing nested UI:
+
+- **New `iconPath`/`iconUrl` column on subjects** — `lib/db/src/schema/
+  medschool.ts` (`subjectsTable`), plus the schema-sync SQL in *both*
+  places it's duplicated (`lib/db/ensure-schema.sql` for humans and the
+  inlined copy in `lib/db/src/ensureSchema.ts` that actually runs at boot
+  — see that file's own comment for why it's duplicated). Additive
+  (`ADD COLUMN IF NOT EXISTS`), so this is safe to run against the
+  existing production DB.
+- **`GET/POST/PATCH /subjects` and `/topics`** (`artifacts/api-server/src/
+  routes/medschool.ts`) now accept/return `iconUrl` (subjects only) and
+  `displayOrder` (both), resolved through the same `resolveFileUrl()` +
+  `THUMBNAIL_TRANSFORM` convention blocks/modules already use. Both list
+  routes now `ORDER BY display_order`. New rows default to
+  `MAX(displayOrder) + 1` within their parent, same fix as institutions.
+- **Shared contract** (`lib/api-spec/openapi.yaml`,
+  `lib/api-zod/src/generated/api.ts`,
+  `lib/api-client-react/src/generated/api.schemas.ts`) updated by hand to
+  add the new optional `iconUrl`/`displayOrder` fields to `Subject`/
+  `Topic` — these are Orval-generated files (see `.agents/memory/
+  zod-generator.md`); hand-edited to match what codegen would produce
+  rather than run codegen (no environment to run it in here). Re-running
+  the generator later should be a no-op against these edits if the spec
+  and generated output ever drift.
+- **`artifacts/frontend-admin/src/lib/api.ts`** — `AdminSubject`/
+  `AdminTopic` types and `subjectAdminApi`/`topicAdminApi` updated for the
+  new fields.
+- **`artifacts/frontend-admin/src/App.tsx`** —
+  `SubjectsTopicsManager`/`TopicsManager` rewritten: both subjects and
+  topics now have move-up/down (same self-healing whole-list-renumber
+  reorder as institutions), inline rename, and delete; subjects also get
+  an upload-thumbnail control (reusing the existing `AdminImageUpload`
+  component) on both the "add subject" form and per-row edit.
+- **`artifacts/frontend-student/src/App.tsx`** — the student-facing
+  subject cards (`Subjects()`) now show the thumbnail when one's set,
+  same treatment Block cards already get, falling back to the existing
+  numbered-badge look when there isn't one.
+- **Verified:** read every touched route/component end-to-end; `esbuild`
+  clean on all files (db schema, ensureSchema, both api routes, both
+  generated-type files, both admin/student App.tsx, admin api.ts).
+  **Not verified:** no live DB/browser — please test the upload flow and
+  a subject rename/reorder on staging, and confirm `ensure-schema.sql`'s
+  `ALTER TABLE ... ADD COLUMN IF NOT EXISTS med_subjects.icon_path` runs
+  cleanly against the real production DB before relying on this.
+- **Not done:** standalone top-level Subjects/Topics settings pages (as
+  opposed to the upgraded nested drawer above) — flagged as open in case
+  that's still wanted.
+
+---
+
 # Round 3 — what changed, by file
 
 **Verification caveat that applies to this whole document:** this pass was

@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, institutionsTable, programsTable, academicYearsTable, batchesTable, auditLogsTable, usersTable } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
@@ -27,7 +27,18 @@ const InstitutionBody = z.object({ name: z.string().min(2).max(160), city: z.str
 router.post("/institutions", requireAdmin, async (req, res): Promise<void> => {
   const parsed = InstitutionBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message }); return; }
-  const [row] = await db.insert(institutionsTable).values({ name: parsed.data.name, city: parsed.data.city ?? "", active: parsed.data.active ?? true, displayOrder: parsed.data.displayOrder ?? 0 }).returning();
+  // Default to "after everything else" rather than a flat 0 — the admin's
+  // "Add institution" form never sends displayOrder, and if every row
+  // created this way lands on the same 0, the reorder arrows' swap-based
+  // move has nothing to actually change (see the frontend fix for the
+  // matching symptom). Newly added institutions should appear at the end
+  // of the list, not silently tie with everything already there.
+  let displayOrder = parsed.data.displayOrder;
+  if (displayOrder === undefined) {
+    const [{ maxOrder } = { maxOrder: null }] = await db.select({ maxOrder: sql<number | null>`max(${institutionsTable.displayOrder})` }).from(institutionsTable);
+    displayOrder = (maxOrder ?? -1) + 1;
+  }
+  const [row] = await db.insert(institutionsTable).values({ name: parsed.data.name, city: parsed.data.city ?? "", active: parsed.data.active ?? true, displayOrder }).returning();
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "INSTITUTION_CREATED", entity: "institution", entityId: row.id });
   res.status(201).json(row);
 });

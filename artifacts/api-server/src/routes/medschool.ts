@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, desc, eq, gte, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   ApprovePaymentParams,
@@ -673,31 +673,36 @@ router.get("/subjects", requireAuth, async (req, res): Promise<void> => {
   const rows = await db.select().from(subjectsTable).where(and(
     params.data.moduleId ? eq(subjectsTable.moduleId, params.data.moduleId) : undefined,
     visibleIds ? inArray(subjectsTable.moduleId, visibleIds) : undefined,
-  ));
+  )).orderBy(asc(subjectsTable.displayOrder));
   const topicCounts = new Map<number, number>();
   if (rows.length) {
     const counted = await db.select({ subjectId: topicsTable.subjectId, count: sql<number>`count(*)` }).from(topicsTable)
       .where(inArray(topicsTable.subjectId, rows.map((r) => r.id))).groupBy(topicsTable.subjectId);
     for (const c of counted) topicCounts.set(c.subjectId, Number(c.count));
   }
-  res.json(ListSubjectsResponse.parse(rows.map((row) => ({ id: row.id, moduleId: row.moduleId, name: row.name, topicCount: topicCounts.get(row.id) ?? 0 }))));
+  res.json(ListSubjectsResponse.parse(rows.map((row) => ({ id: row.id, moduleId: row.moduleId, name: row.name, topicCount: topicCounts.get(row.id) ?? 0, iconUrl: resolveFileUrl(row.iconPath, { transform: THUMBNAIL_TRANSFORM }), displayOrder: row.displayOrder }))));
 });
 
 router.post("/subjects", requireAdmin, async (req, res): Promise<void> => {
-  const parsed = z.object({ moduleId: z.number().int().positive(), name: z.string().min(1) }).safeParse(req.body);
+  const parsed = z.object({ moduleId: z.number().int().positive(), name: z.string().min(1), iconPath: z.string().nullable().optional(), displayOrder: z.number().int().optional() }).safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "moduleId and name are required" }); return; }
-  const [row] = await db.insert(subjectsTable).values(parsed.data).returning();
+  let displayOrder = parsed.data.displayOrder;
+  if (displayOrder === undefined) {
+    const [{ maxOrder } = { maxOrder: null }] = await db.select({ maxOrder: sql<number | null>`max(${subjectsTable.displayOrder})` }).from(subjectsTable).where(eq(subjectsTable.moduleId, parsed.data.moduleId));
+    displayOrder = (maxOrder ?? -1) + 1;
+  }
+  const [row] = await db.insert(subjectsTable).values({ moduleId: parsed.data.moduleId, name: parsed.data.name, iconPath: parsed.data.iconPath ?? null, displayOrder }).returning();
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "SUBJECT_CREATED", entity: "subject", entityId: row.id });
-  res.status(201).json({ id: row.id, moduleId: row.moduleId, name: row.name, topicCount: 0 });
+  res.status(201).json({ id: row.id, moduleId: row.moduleId, name: row.name, topicCount: 0, iconUrl: resolveFileUrl(row.iconPath, { transform: THUMBNAIL_TRANSFORM }), displayOrder: row.displayOrder });
 });
 
 router.patch("/subjects/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = Number(req.params.id);
-  const parsed = z.object({ name: z.string().min(1).optional(), active: z.boolean().optional() }).safeParse(req.body);
+  const parsed = z.object({ name: z.string().min(1).optional(), active: z.boolean().optional(), iconPath: z.string().nullable().optional(), displayOrder: z.number().int().optional() }).safeParse(req.body);
   if (!parsed.success || Number.isNaN(id)) { res.status(400).json({ error: "Invalid subject" }); return; }
   const [row] = await db.update(subjectsTable).set(parsed.data).where(eq(subjectsTable.id, id)).returning();
   if (!row) { res.status(404).json({ error: "Subject not found" }); return; }
-  res.json({ id: row.id, moduleId: row.moduleId, name: row.name, topicCount: await getSubjectTopicCount(row.id) });
+  res.json({ id: row.id, moduleId: row.moduleId, name: row.name, topicCount: await getSubjectTopicCount(row.id), iconUrl: resolveFileUrl(row.iconPath, { transform: THUMBNAIL_TRANSFORM }), displayOrder: row.displayOrder });
 });
 
 router.delete("/subjects/:id", requireAdmin, async (req, res): Promise<void> => {
@@ -721,9 +726,10 @@ router.get("/topics", requireAuth, async (req, res): Promise<void> => {
     const [subject] = await db.select().from(subjectsTable).where(eq(subjectsTable.id, params.data.subjectId));
     if (!subject || !visibleModuleIds!.includes(subject.moduleId)) { res.json([]); return; }
   }
-  const rows = await db.select({ id: topicsTable.id, subjectId: topicsTable.subjectId, name: topicsTable.name, moduleId: subjectsTable.moduleId })
+  const rows = await db.select({ id: topicsTable.id, subjectId: topicsTable.subjectId, name: topicsTable.name, moduleId: subjectsTable.moduleId, displayOrder: topicsTable.displayOrder })
     .from(topicsTable).innerJoin(subjectsTable, eq(topicsTable.subjectId, subjectsTable.id))
-    .where(and(subjectFilter, visibleModuleIds ? inArray(subjectsTable.moduleId, visibleModuleIds) : undefined));
+    .where(and(subjectFilter, visibleModuleIds ? inArray(subjectsTable.moduleId, visibleModuleIds) : undefined))
+    .orderBy(asc(topicsTable.displayOrder));
   // Real per-topic MCQ count (was hardcoded to 0 — see fix-notes section 2).
   // Grouped in one query rather than N+1'd per topic; filtered to published
   // for non-admins the same way GET /mcqs is, so a student never sees a
@@ -736,24 +742,29 @@ router.get("/topics", requireAuth, async (req, res): Promise<void> => {
       .groupBy(mcqsTable.topicId);
     for (const row of countRows) if (row.topicId != null) countsByTopic.set(row.topicId, Number(row.count));
   }
-  res.json(ListTopicsResponse.parse(rows.map((row) => ({ id: row.id, subjectId: row.subjectId, name: row.name, questionCount: countsByTopic.get(row.id) ?? 0, completed: false }))));
+  res.json(ListTopicsResponse.parse(rows.map((row) => ({ id: row.id, subjectId: row.subjectId, name: row.name, questionCount: countsByTopic.get(row.id) ?? 0, completed: false, displayOrder: row.displayOrder }))));
 });
 
 router.post("/topics", requireAdmin, async (req, res): Promise<void> => {
-  const parsed = z.object({ subjectId: z.number().int().positive(), name: z.string().min(1) }).safeParse(req.body);
+  const parsed = z.object({ subjectId: z.number().int().positive(), name: z.string().min(1), displayOrder: z.number().int().optional() }).safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "subjectId and name are required" }); return; }
-  const [row] = await db.insert(topicsTable).values(parsed.data).returning();
+  let displayOrder = parsed.data.displayOrder;
+  if (displayOrder === undefined) {
+    const [{ maxOrder } = { maxOrder: null }] = await db.select({ maxOrder: sql<number | null>`max(${topicsTable.displayOrder})` }).from(topicsTable).where(eq(topicsTable.subjectId, parsed.data.subjectId));
+    displayOrder = (maxOrder ?? -1) + 1;
+  }
+  const [row] = await db.insert(topicsTable).values({ subjectId: parsed.data.subjectId, name: parsed.data.name, displayOrder }).returning();
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "TOPIC_CREATED", entity: "topic", entityId: row.id });
-  res.status(201).json({ id: row.id, subjectId: row.subjectId, name: row.name, questionCount: 0, completed: false });
+  res.status(201).json({ id: row.id, subjectId: row.subjectId, name: row.name, questionCount: 0, completed: false, displayOrder: row.displayOrder });
 });
 
 router.patch("/topics/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = Number(req.params.id);
-  const parsed = z.object({ name: z.string().min(1).optional(), active: z.boolean().optional() }).safeParse(req.body);
+  const parsed = z.object({ name: z.string().min(1).optional(), active: z.boolean().optional(), displayOrder: z.number().int().optional() }).safeParse(req.body);
   if (!parsed.success || Number.isNaN(id)) { res.status(400).json({ error: "Invalid topic" }); return; }
   const [row] = await db.update(topicsTable).set(parsed.data).where(eq(topicsTable.id, id)).returning();
   if (!row) { res.status(404).json({ error: "Topic not found" }); return; }
-  res.json({ id: row.id, subjectId: row.subjectId, name: row.name, questionCount: 0, completed: false });
+  res.json({ id: row.id, subjectId: row.subjectId, name: row.name, questionCount: 0, completed: false, displayOrder: row.displayOrder });
 });
 
 router.delete("/topics/:id", requireAdmin, async (req, res): Promise<void> => {

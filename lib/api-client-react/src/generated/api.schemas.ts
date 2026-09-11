@@ -165,6 +165,9 @@ export interface Subject {
   moduleId: number;
   name: string;
   topicCount: number;
+  /** @nullable */
+  iconUrl?: string | null;
+  displayOrder?: number;
 }
 
 export interface Topic {
@@ -173,6 +176,7 @@ export interface Topic {
   name: string;
   questionCount: number;
   completed: boolean;
+  displayOrder?: number;
 }
 
 export interface Mcq {

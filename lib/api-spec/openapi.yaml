@@ -565,6 +565,8 @@ components:
         moduleId: { type: integer }
         name: { type: string }
         topicCount: { type: integer }
+        iconUrl: { type: ["string", "null"] }
+        displayOrder: { type: integer }
     Topic:
       type: object
       required: [id, subjectId, name, questionCount, completed]
@@ -574,6 +576,7 @@ components:
         name: { type: string }
         questionCount: { type: integer }
         completed: { type: boolean }
+        displayOrder: { type: integer }
     Mcq:
       type: object
       required: [id, question, options, difficulty, status, module, subject, topic]

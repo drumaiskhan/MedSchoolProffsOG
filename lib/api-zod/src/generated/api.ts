@@ -433,7 +433,9 @@ export const ListSubjectsResponseItem = zod.object({
   "id": zod.int(),
   "moduleId": zod.int(),
   "name": zod.string(),
-  "topicCount": zod.int()
+  "topicCount": zod.int(),
+  "iconUrl": zod.string().nullable().optional(),
+  "displayOrder": zod.int().optional()
 })
 export const ListSubjectsResponse = zod.array(ListSubjectsResponseItem)
 
@@ -447,7 +449,8 @@ export const ListTopicsResponseItem = zod.object({
   "subjectId": zod.int(),
   "name": zod.string(),
   "questionCount": zod.int(),
-  "completed": zod.boolean()
+  "completed": zod.boolean(),
+  "displayOrder": zod.int().optional()
 })
 export const ListTopicsResponse = zod.array(ListTopicsResponseItem)
 
