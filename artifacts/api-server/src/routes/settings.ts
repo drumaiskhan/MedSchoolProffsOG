@@ -23,6 +23,10 @@ const EDITABLE_KEYS = [
   "PAYMENT_INSTRUCTIONS",
   "ANNOUNCEMENT_BANNER",
   "REGISTRATION_ENABLED",
+  // Same "on"/"off" pattern as REGISTRATION_ENABLED — off removes the "AI
+  // Visualizer" link from the student sidebar (frontend-student's SideNav)
+  // and the route itself refuses direct access; on brings both back.
+  "AI_VISUALIZER_ENABLED",
   // Optional decorative photo for the student Dashboard's greeting card
   // (see frontend-student's Dashboard component) — falls back to a plain
   // decorative pattern when unset.

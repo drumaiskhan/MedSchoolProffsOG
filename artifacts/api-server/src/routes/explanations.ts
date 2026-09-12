@@ -1,9 +1,9 @@
 import { Router, type IRouter } from "express";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, mcqsTable, flashcardsTable, topicsTable, subjectsTable, modulesTable, auditLogsTable } from "@workspace/db";
 import { requireAdmin, requireAuth, requireActiveMembership } from "../middlewares/auth";
-import { generateExplanation, generateFlashcardExplanation, generateFlashcardSet, generateMcqSet, AiNotConfiguredError } from "../lib/aiExplain";
+import { generateExplanation, generateFlashcardExplanation, generateFlashcardSet, generateMcqSet, classifyDifficulty, AiNotConfiguredError } from "../lib/aiExplain";
 
 const router: IRouter = Router();
 
@@ -158,12 +158,17 @@ router.post("/admin/flashcards/generate", requireAdmin, async (req, res): Promis
 const GenerateMcqsBody = z.object({
   topicId: z.number().int().positive(),
   count: z.number().int().min(1).max(15).default(5),
+  // Optional — when set, every question in this batch is generated at
+  // exactly this difficulty instead of the model varying it across the set.
+  // Lets the admin build a deliberate easy/moderate/hard set instead of
+  // whatever mix the model happens to produce.
+  difficulty: z.enum(["easy", "moderate", "hard"]).optional(),
 });
 
 router.post("/admin/mcqs/generate", requireAdmin, async (req, res): Promise<void> => {
   const parsed = GenerateMcqsBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message }); return; }
-  const { topicId, count } = parsed.data;
+  const { topicId, count, difficulty } = parsed.data;
 
   const [row] = await db.select({
     topicName: topicsTable.name, subjectName: subjectsTable.name, moduleName: modulesTable.name,
@@ -180,13 +185,68 @@ router.post("/admin/mcqs/generate", requireAdmin, async (req, res): Promise<void
   const existing = await db.select({ question: mcqsTable.question }).from(mcqsTable).where(eq(mcqsTable.topicId, topicId)).limit(8);
 
   try {
-    const drafts = await generateMcqSet({ topicLabel, existingQuestions: existing.map((m) => m.question), count });
+    const drafts = await generateMcqSet({ topicLabel, existingQuestions: existing.map((m) => m.question), count, difficulty });
     if (!drafts.length) { res.status(502).json({ error: "AI did not return any usable questions for this topic. Try again, or narrow the topic name." }); return; }
     res.json({ drafts, topicLabel });
   } catch (err) {
     if (err instanceof AiNotConfiguredError) { res.status(503).json({ error: err.message }); return; }
     res.status(502).json({ error: err instanceof Error ? err.message : "AI generation failed" });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Admin: re-run AI difficulty classification over existing questions —
+// "mcqs analysis" at any tree scope (block/module/subject/topic all reduce
+// to a moduleId/subjectId/topicId filter here, same as the bulk-delete
+// endpoints). Capped per call since each question is its own AI request;
+// callers that need a bigger scope classified just call this again — the
+// frontend button already re-fetches remaining counts and lets the admin
+// click again.
+// ---------------------------------------------------------------------------
+
+const ClassifyDifficultyBody = z.union([
+  z.object({ ids: z.array(z.number().int().positive()).min(1).max(30) }),
+  z.object({ all: z.literal(true), filters: z.object({ moduleId: z.number().int().optional(), subjectId: z.number().int().optional(), topicId: z.number().int().optional() }).optional() }),
+]);
+const CLASSIFY_BATCH_CAP = 30;
+
+router.post("/admin/mcqs/classify-difficulty", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = ClassifyDifficultyBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+
+  const rows = "ids" in parsed.data
+    ? await db.select({ id: mcqsTable.id, question: mcqsTable.question, options: mcqsTable.options, correctAnswer: mcqsTable.correctAnswer })
+        .from(mcqsTable).where(inArray(mcqsTable.id, parsed.data.ids))
+    : await db.select({ id: mcqsTable.id, question: mcqsTable.question, options: mcqsTable.options, correctAnswer: mcqsTable.correctAnswer })
+        .from(mcqsTable).where(and(
+          parsed.data.filters?.moduleId ? eq(mcqsTable.moduleId, parsed.data.filters.moduleId) : undefined,
+          parsed.data.filters?.subjectId ? eq(mcqsTable.subjectId, parsed.data.filters.subjectId) : undefined,
+          parsed.data.filters?.topicId ? eq(mcqsTable.topicId, parsed.data.filters.topicId) : undefined,
+        )).limit(CLASSIFY_BATCH_CAP);
+
+  if (!rows.length) { res.json({ classified: 0, remaining: 0, results: [] }); return; }
+
+  // Total-in-scope count so the frontend can show "classified 30 of 214 —
+  // click again" instead of implying the whole scope is done after one
+  // capped batch. Only meaningful for the {all, filters} path — the {ids}
+  // path is already the exact batch the caller wants classified.
+  let remaining = 0;
+  if (!("ids" in parsed.data)) {
+    const [{ count: totalCount } = { count: 0 }] = await db.select({ count: sql<number>`count(*)` }).from(mcqsTable).where(and(
+      parsed.data.filters?.moduleId ? eq(mcqsTable.moduleId, parsed.data.filters.moduleId) : undefined,
+      parsed.data.filters?.subjectId ? eq(mcqsTable.subjectId, parsed.data.filters.subjectId) : undefined,
+      parsed.data.filters?.topicId ? eq(mcqsTable.topicId, parsed.data.filters.topicId) : undefined,
+    ));
+    remaining = Math.max(0, Number(totalCount) - rows.length);
+  }
+
+  const results: Array<{ id: number; difficulty: "easy" | "moderate" | "hard" }> = [];
+  for (const row of rows) {
+    const difficulty = await classifyDifficulty({ question: row.question, options: row.options as string[], correctAnswer: row.correctAnswer });
+    await db.update(mcqsTable).set({ difficulty }).where(eq(mcqsTable.id, row.id));
+    results.push({ id: row.id, difficulty });
+  }
+  res.json({ classified: results.length, remaining, results });
 });
 
 // ---------------------------------------------------------------------------

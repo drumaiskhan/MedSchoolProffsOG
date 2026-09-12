@@ -1,3 +1,78 @@
+# Round 7 — what changed, by file
+
+Same method/caveat as prior rounds: read end-to-end, `esbuild` syntax-checked
+every touched file (all clean), no live DB/browser.
+
+## Past papers "no MBBS/BDS, no years" — not a bug
+Traced it: a Program (MBBS, BDS, etc.) has to belong to an institution, and
+none had been created yet under Colleges & courses — so the dropdown was
+correctly empty, not broken. Added an inline hint on the Past Papers "Add
+paper" form explaining this and linking straight to Colleges & courses,
+and pointing out the free-text Level field already covers just labeling a
+paper "3rd Year MBBS" without needing Program/Year set up at all.
+
+## "Respiration shows 10 subjects, I only added 4" — real bug, found & fixed
+The module/subject tile counts (`getModuleCounts`, plus a duplicate inline
+count on the student Blocks route, plus `getSubjectTopicCount`, plus the
+per-subject topic-count in `GET /subjects`) never excluded archived
+(soft-deleted) rows — same bug class as last round's Subjects/Topics delete
+fix, just in four more places I'd missed there. All four now filter
+`archived = false`.
+
+## AI Visualizer on/off toggle
+New `AI_VISUALIZER_ENABLED` setting (same "true"/"false" string convention
+as the existing `REGISTRATION_ENABLED`): admin toggle in Settings, removes
+the sidebar link in `frontend-student`'s `SideNav` when off, the
+`AiVisualizer` page itself refuses to render when off (covers direct-URL
+access or an already-open tab), and `POST /ai/visualizer` refuses server-side
+too — not just a UI hide.
+
+## Per-block/module/subject/topic AI difficulty classification
+New `POST /admin/mcqs/classify-difficulty` — re-runs the existing
+`classifyDifficulty()` AI function (previously only used once at import
+time) over already-saved questions, updating `easy`/`moderate`/`hard`.
+Capped at 30 questions/call (each is its own AI request); the response
+includes how many are left in that scope so the UI can offer "run again."
+Exposed as an "AI: classify difficulty" button inside the existing
+Analysis panel at the Module/Subject/Topic tree levels (Block level shows
+the read-only breakdown only — its filter would need multiple moduleIds at
+once, which the endpoint doesn't support, so classify from a module inside
+it instead).
+
+## AI-generated easy/moderate/hard difficulty sets
+`POST /admin/mcqs/generate` (and the underlying `generateMcqSet`/prompt
+builder in `aiExplain.ts`) now accepts an optional `difficulty` — when set,
+every question in that batch is pinned to exactly that difficulty instead
+of "vary it across the set." The admin "Add multiple" AI panel gained a
+difficulty selector (Mixed/Easy/Moderate/Hard) plus a one-click "Full E/M/H
+set" button that fires all three difficulties at once and merges the
+results into the review list.
+
+## MCQ bank + Flashcards: MBBS/BDS > Year > Block grouping
+Both bank trees (`McqBankTree`, `FlashcardBankTree`) now nest the existing
+Block > Module > Subject > Topic tree under a Program/Year heading —
+Blocks already had `programTargetKind`/`yearTargetNumber` columns and an
+edit UI (`BlockForm`) from an earlier round; this was purely a display
+grouping using data that already existed. Blocks with no program/year set
+land in "Unspecified program · All years" rather than being hidden.
+
+## Practice screen — layout + whitespace
+Restructured to match the reference layout: a slim progress bar now sits
+right under the header (replacing a whole separate "Timer" card that used
+to push the question down by a full card's height), the question/options
+moved to the wider left column, and the Question Navigator + Timer/Pause/
+Save/Exit moved to a narrower right-hand column (previously a tall stack on
+the left) with all its buttons made more compact.
+
+## Not done this round
+- Loading screen with the animated wave + MedschoolProffs logo — not
+  started; flagged from two rounds ago and still open.
+- Program/year grouping is applied above the tree structure, not (yet)
+  wired into any bulk-delete or AI-classify scope — those still operate at
+  block/module/subject/topic, same as before.
+
+---
+
 # Round 6 — what changed, by file
 
 Same verification method/caveat as prior rounds: read end-to-end, `esbuild`

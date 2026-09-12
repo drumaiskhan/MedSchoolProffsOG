@@ -5,6 +5,7 @@ import { db, aiVisualizerLogsTable, usersTable } from "@workspace/db";
 import { requireAuth, requireActiveMembership, requireAdmin } from "../middlewares/auth";
 import { checkRateLimit } from "../lib/rateLimit";
 import { generateVisualization, explainStep, AiNotConfiguredError, InvalidVisualizationError } from "../lib/aiVisualizer";
+import { getAllSettings } from "../lib/settings";
 
 const router: IRouter = Router();
 
@@ -15,6 +16,12 @@ const router: IRouter = Router();
 const VisualizerBody = z.object({ prompt: z.string().min(3).max(500) });
 
 router.post("/ai/visualizer", requireAuth, requireActiveMembership, async (req, res): Promise<void> => {
+  // Defense in depth: the student sidebar already hides this page when
+  // AI_VISUALIZER_ENABLED is off, but that's just UI — a direct API call
+  // (or a stale page still open in a tab) should be refused too, not just
+  // hidden from navigation.
+  const settings = await getAllSettings();
+  if (settings.AI_VISUALIZER_ENABLED === "false") { res.status(403).json({ error: "The AI Visualizer is turned off right now." }); return; }
   const parsed = VisualizerBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? "A prompt is required" }); return; }
 

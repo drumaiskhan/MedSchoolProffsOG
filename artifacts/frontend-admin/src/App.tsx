@@ -9,7 +9,7 @@ import {
   TrendingUp, Users, X, Zap, Bell, SlidersHorizontal, FileStack, NotebookPen, Bookmark,
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
   GraduationCap, CalendarDays, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
-  RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Wand2, Loader2, Activity
+  RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Wand2, Loader2, Activity, Layers, BarChart3, GraduationCap
 } from 'lucide-react';
 import { applyThemeVars, DEFAULT_THEME, readableForegroundHsl } from '@/lib/theme';
 import {
@@ -957,24 +957,105 @@ function BulkDeleteInScope({ label, count, filters }: { label: string; count: nu
   </>;
 }
 
-function McqTreeTopic({ topicId, name, mcqsByTopic }: { topicId: number; name: string; mcqsByTopic: Map<number, AdminMcqRow[]> }) {
+// Difficulty + explanation-coverage breakdown for a set of rows — the
+// "mcqs analysis" shown inline at every tree level (topic/subject/module),
+// computed client-side from data already loaded for the tree, no extra
+// requests needed.
+function analyzeMcqRows(rows: AdminMcqRow[]) {
+  const easy = rows.filter((r) => r.difficulty === 'easy').length;
+  const moderate = rows.filter((r) => r.difficulty === 'moderate').length;
+  const hard = rows.filter((r) => r.difficulty === 'hard').length;
+  const explained = rows.filter((r) => r.explanationStatus === 'APPROVED').length;
+  return { total: rows.length, easy, moderate, hard, explained };
+}
+
+function AnalysisPanel({ rows, label, filters }: { rows: AdminMcqRow[]; label: string; filters: { moduleId?: number; subjectId?: number; topicId?: number } }) {
+  const a = analyzeMcqRows(rows);
+  // AI re-classification is separate from the client-side count above — it
+  // actually calls the model per question (capped at 30/request server-side,
+  // see /admin/mcqs/classify-difficulty), so it's a deliberate action with
+  // its own pending/result state, not something that runs automatically
+  // just from opening this panel.
+  const classify = useMutation({
+    mutationFn: () => mcqAdminApi.classifyDifficulty({ all: true, filters }),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['admin-mcqs-tree'] });
+      queryClient.invalidateQueries({ queryKey: getListMcqsQueryKey() });
+      toast({ title: `AI classified ${res.classified} question${res.classified === 1 ? '' : 's'}`, description: res.remaining > 0 ? `${res.remaining} more left in "${label}" — click again to continue.` : undefined });
+    },
+    onError: (err: unknown) => toast({ title: 'Could not classify difficulty', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
+  if (!a.total) return <p className="text-[11px] text-muted-foreground">No questions here yet to analyze.</p>;
+  return <div>
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="rounded-lg bg-[#eaf6ef] p-2 text-center"><div className="text-sm font-extrabold text-[#287058]">{a.easy}</div><div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Easy</div></div>
+      <div className="rounded-lg bg-[#fdf6e8] p-2 text-center"><div className="text-sm font-extrabold text-[#8a5a12]">{a.moderate}</div><div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Moderate</div></div>
+      <div className="rounded-lg bg-[#fff1ed] p-2 text-center"><div className="text-sm font-extrabold text-[#a34c3e]">{a.hard}</div><div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Hard</div></div>
+      <div className="rounded-lg bg-muted p-2 text-center"><div className="text-sm font-extrabold">{a.explained}/{a.total}</div><div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Explained</div></div>
+    </div>
+    <button type="button" disabled={classify.isPending} onClick={(e) => { e.stopPropagation(); classify.mutate(); }} className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-[#eef7f1] px-2.5 py-1.5 text-[11px] font-bold text-primary disabled:opacity-50" data-testid="button-classify-difficulty" title="Re-runs AI difficulty classification on up to 30 questions in this scope per click">{classify.isPending ? 'Classifying…' : <><Wand2 size={12} /> AI: classify difficulty (up to 30)</>}</button>
+  </div>;
+}
+
+function AnalysisToggle({ rows, label, filters }: { rows: AdminMcqRow[]; label: string; filters: { moduleId?: number; subjectId?: number; topicId?: number } }) {
+  const [open, setOpen] = useState(false);
+  if (!rows.length) return null;
+  return <>
+    <button type="button" onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }} className={cn('rounded-lg p-1', open ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted')} data-testid="button-toggle-analysis" aria-label="Analyze this scope"><BarChart3 size={13} /></button>
+    {open && <div className="w-full basis-full pt-2" onClick={(e) => e.stopPropagation()}><AnalysisPanel rows={rows} label={label} filters={filters} /></div>}
+  </>;
+}
+
+// Self-contained "generate AI questions right here" panel for one topic —
+// unlike the top-of-page generator (which needs module/subject/topic
+// dropdowns filled in first), this already knows its scope from the tree,
+// so it's a one-click generate-review-save loop without leaving the row.
+function TopicAiGenerate({ moduleId, subjectId, topicId, topicName }: { moduleId: number; subjectId: number; topicId: number; topicName: string }) {
+  const [open, setOpen] = useState(false);
+  const [count, setCount] = useState(5);
+  const [difficulty, setDifficulty] = useState<'mixed' | 'easy' | 'moderate' | 'hard'>('mixed');
+  const [drafts, setDrafts] = useState<GeneratedFlashcard[] extends never ? never : Array<{ question: string; options: string[]; correctAnswer: string; explanation: string; optionExplanations?: (string | null)[]; difficulty?: string }> | null>(null);
+  const generate = useMutation({
+    mutationFn: () => mcqAdminApi.generateAi(topicId, count, difficulty === 'mixed' ? undefined : difficulty),
+    onSuccess: (res) => setDrafts(res.drafts),
+    onError: (err: unknown) => toast({ title: 'Could not generate questions', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
+  const save = useMutation({
+    mutationFn: () => mcqAdminApi.bulkCreate((drafts ?? []).map((d) => ({ question: d.question, options: d.options, correctAnswer: d.correctAnswer, explanation: d.explanation, optionExplanations: d.optionExplanations ?? undefined, difficulty: d.difficulty ?? 'moderate', moduleId, subjectId, topicId }))),
+    onSuccess: (res) => { queryClient.invalidateQueries({ queryKey: ['admin-mcqs-tree'] }); queryClient.invalidateQueries({ queryKey: getListMcqsQueryKey() }); toast({ title: `Added ${res.created} questions to ${topicName}` }); setDrafts(null); setOpen(false); },
+    onError: (err: unknown) => toast({ title: 'Could not save questions', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
+  return <>
+    <button type="button" onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }} className={cn('rounded-lg p-1', open ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted')} data-testid={`button-toggle-ai-generate-topic-${topicId}`} aria-label="Generate AI questions for this topic"><Sparkles size={13} /></button>
+    {open && <div className="w-full basis-full border-t border-border pt-3" onClick={(e) => e.stopPropagation()}>
+      <div className="flex flex-wrap items-center gap-2"><select value={count} onChange={(e) => setCount(Number(e.target.value))} className="h-8 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`select-ai-count-topic-${topicId}`}>{[3, 5, 8, 10].map((n) => <option key={n} value={n}>{n}</option>)}</select><select value={difficulty} onChange={(e) => setDifficulty(e.target.value as typeof difficulty)} className="h-8 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`select-ai-difficulty-topic-${topicId}`}><option value="mixed">Mixed</option><option value="easy">Easy</option><option value="moderate">Moderate</option><option value="hard">Hard</option></select><button type="button" disabled={generate.isPending} onClick={() => generate.mutate()} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground disabled:opacity-50" data-testid={`button-generate-topic-${topicId}`}>{generate.isPending ? 'Generating…' : <><Sparkles size={12} /> Generate</>}</button></div>
+      {drafts && <div className="mt-3 space-y-2">
+        {drafts.map((d, i) => <div key={i} className="rounded-lg bg-muted px-2.5 py-1.5 text-xs"><span className="mr-1.5 rounded bg-card px-1.5 py-0.5 text-[10px] font-bold uppercase">{d.difficulty ?? 'moderate'}</span>{d.question}</div>)}
+        {!drafts.length && <p className="text-[11px] text-muted-foreground">AI returned nothing usable — try again.</p>}
+        {!!drafts.length && <button type="button" disabled={save.isPending} onClick={() => save.mutate()} className="rounded-lg bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground disabled:opacity-50" data-testid={`button-save-ai-drafts-topic-${topicId}`}>{save.isPending ? 'Saving…' : `Save all ${drafts.length} to ${topicName}`}</button>}
+      </div>}
+    </div>}
+  </>;
+}
+
+function McqTreeTopic({ moduleId, subjectId, topicId, name, mcqsByTopic }: { moduleId: number; subjectId: number; topicId: number; name: string; mcqsByTopic: Map<number, AdminMcqRow[]> }) {
   const [open, setOpen] = useState(false);
   const rows = mcqsByTopic.get(topicId) ?? [];
   return <div className="rounded-lg border border-border bg-background">
-    <div className="flex items-center justify-between px-3 py-2"><button onClick={() => setOpen((v) => !v)} className="flex flex-1 items-center gap-2 text-left text-xs font-bold" data-testid={`button-tree-topic-${topicId}`}><ChevronRight size={13} className={cn('transition-transform', open && 'rotate-90')} />{name}</button><span className="text-[10px] font-normal text-muted-foreground">{rows.length} question{rows.length === 1 ? '' : 's'}</span><BulkDeleteInScope label={name} count={rows.length} filters={{ topicId }} /></div>
+    <div className="flex flex-wrap items-center justify-between gap-1 px-3 py-2"><button onClick={() => setOpen((v) => !v)} className="flex flex-1 items-center gap-2 text-left text-xs font-bold" data-testid={`button-tree-topic-${topicId}`}><ChevronRight size={13} className={cn('transition-transform', open && 'rotate-90')} />{name}</button><span className="text-[10px] font-normal text-muted-foreground">{rows.length} question{rows.length === 1 ? '' : 's'}</span><AnalysisToggle rows={rows} label={name} filters={{ topicId }} /><TopicAiGenerate moduleId={moduleId} subjectId={subjectId} topicId={topicId} topicName={name} /><BulkDeleteInScope label={name} count={rows.length} filters={{ topicId }} /></div>
     {open && <div className="space-y-2 border-t border-border p-3">{rows.length ? rows.map((m) => <McqTreeRow key={m.id} mcq={m} />) : <p className="text-[11px] text-muted-foreground">No questions in this topic yet.</p>}</div>}
   </div>;
 }
 
 // Subject level — lazily loads its topics (same query key as TopicsManager, so cache is shared).
-function McqTreeSubject({ subjectId, name, mcqsByTopic }: { subjectId: number; name: string; mcqsByTopic: Map<number, AdminMcqRow[]> }) {
+function McqTreeSubject({ moduleId, subjectId, name, mcqsByTopic }: { moduleId: number; subjectId: number; name: string; mcqsByTopic: Map<number, AdminMcqRow[]> }) {
   const [open, setOpen] = useState(false);
   const topicsQ = useQuery({ queryKey: ['admin-topics', subjectId], queryFn: () => topicAdminApi.list(subjectId), enabled: open });
   const topics = topicsQ.data ?? [];
-  const subjectCount = [...mcqsByTopic.entries()].filter(([tId]) => topics.some((t) => t.id === tId)).reduce((sum, [, rows]) => sum + rows.length, 0);
+  const subjectRows = [...mcqsByTopic.entries()].filter(([tId]) => topics.some((t) => t.id === tId)).flatMap(([, rows]) => rows);
   return <div className="rounded-xl border border-border bg-card">
-    <div className="flex items-center justify-between px-4 py-2.5"><button onClick={() => setOpen((v) => !v)} className="flex flex-1 items-center gap-2 text-left text-xs font-bold" data-testid={`button-tree-subject-${subjectId}`}><ChevronRight size={14} className={cn('transition-transform', open && 'rotate-90')} />{name}</button>{open && <BulkDeleteInScope label={name} count={subjectCount} filters={{ subjectId }} />}</div>
-    {open && <div className="space-y-2 border-t border-border p-3">{topicsQ.isLoading ? <p className="text-[11px] text-muted-foreground">Loading topics…</p> : topics.length ? topics.map((t) => <McqTreeTopic key={t.id} topicId={t.id} name={t.name} mcqsByTopic={mcqsByTopic} />) : <p className="text-[11px] text-muted-foreground">No topics in this subject yet.</p>}</div>}
+    <div className="flex flex-wrap items-center justify-between gap-1 px-4 py-2.5"><button onClick={() => setOpen((v) => !v)} className="flex flex-1 items-center gap-2 text-left text-xs font-bold" data-testid={`button-tree-subject-${subjectId}`}><ChevronRight size={14} className={cn('transition-transform', open && 'rotate-90')} />{name}</button>{open && <><AnalysisToggle rows={subjectRows} label={name} filters={{ subjectId }} /><BulkDeleteInScope label={name} count={subjectRows.length} filters={{ subjectId }} /></>}</div>
+    {open && <div className="space-y-2 border-t border-border p-3">{topicsQ.isLoading ? <p className="text-[11px] text-muted-foreground">Loading topics…</p> : topics.length ? topics.map((t) => <McqTreeTopic key={t.id} moduleId={moduleId} subjectId={subjectId} topicId={t.id} name={t.name} mcqsByTopic={mcqsByTopic} />) : <p className="text-[11px] text-muted-foreground">No topics in this subject yet.</p>}</div>}
   </div>;
 }
 
@@ -983,9 +1064,32 @@ function McqTreeModule({ moduleId, name, mcqCount, mcqsByTopic }: { moduleId: nu
   const [open, setOpen] = useState(false);
   const subjectsQ = useQuery({ queryKey: ['admin-subjects', moduleId], queryFn: () => subjectAdminApi.list(moduleId), enabled: open });
   const subjects = subjectsQ.data ?? [];
+  const moduleRows = [...mcqsByTopic.values()].flat().filter((r) => r.moduleId === moduleId);
   return <div className="rounded-2xl border border-border bg-card">
-    <div className="flex items-center justify-between px-5 py-3.5"><button onClick={() => setOpen((v) => !v)} className="flex flex-1 items-center gap-2 text-left text-sm font-extrabold" data-testid={`button-tree-module-${moduleId}`}><ChevronRight size={16} className={cn('transition-transform', open && 'rotate-90')} />{name}</button><span className="text-[11px] text-muted-foreground">{mcqCount} question{mcqCount === 1 ? '' : 's'}</span><BulkDeleteInScope label={name} count={mcqCount} filters={{ moduleId }} /></div>
-    {open && <div className="space-y-2 border-t border-border p-4">{subjectsQ.isLoading ? <p className="text-xs text-muted-foreground">Loading subjects…</p> : subjects.length ? subjects.map((s) => <McqTreeSubject key={s.id} subjectId={s.id} name={s.name} mcqsByTopic={mcqsByTopic} />) : <p className="text-xs text-muted-foreground">No subjects in this module yet.</p>}</div>}
+    <div className="flex flex-wrap items-center justify-between gap-1 px-5 py-3.5"><button onClick={() => setOpen((v) => !v)} className="flex flex-1 items-center gap-2 text-left text-sm font-extrabold" data-testid={`button-tree-module-${moduleId}`}><ChevronRight size={16} className={cn('transition-transform', open && 'rotate-90')} />{name}</button><span className="text-[11px] text-muted-foreground">{mcqCount} question{mcqCount === 1 ? '' : 's'}</span><AnalysisToggle rows={moduleRows} label={name} filters={{ moduleId }} /><BulkDeleteInScope label={name} count={mcqCount} filters={{ moduleId }} /></div>
+    {open && <div className="space-y-2 border-t border-border p-4">{subjectsQ.isLoading ? <p className="text-xs text-muted-foreground">Loading subjects…</p> : subjects.length ? subjects.map((s) => <McqTreeSubject key={s.id} moduleId={moduleId} subjectId={s.id} name={s.name} mcqsByTopic={mcqsByTopic} />) : <p className="text-xs text-muted-foreground">No subjects in this module yet.</p>}</div>}
+  </div>;
+}
+
+// Block level only shows the read-only breakdown (no AI-classify button
+// here — that endpoint's scope filter takes one moduleId/subjectId/topicId,
+// not a whole block's worth of modules at once; classify from the module
+// row below instead).
+function BlockAnalysisToggle({ rows }: { rows: AdminMcqRow[] }) {
+  const [open, setOpen] = useState(false);
+  return <>
+    <button type="button" onClick={() => setOpen((v) => !v)} className={cn('rounded-lg p-1', open ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted')} data-testid="button-toggle-block-analysis" aria-label="Analyze this block"><BarChart3 size={13} /></button>
+    {open && <div className="w-full basis-full pt-1"><AnalysisStats rows={rows} /></div>}
+  </>;
+}
+
+function AnalysisStats({ rows }: { rows: AdminMcqRow[] }) {
+  const a = analyzeMcqRows(rows);
+  return <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+    <div className="rounded-lg bg-[#eaf6ef] p-2 text-center"><div className="text-sm font-extrabold text-[#287058]">{a.easy}</div><div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Easy</div></div>
+    <div className="rounded-lg bg-[#fdf6e8] p-2 text-center"><div className="text-sm font-extrabold text-[#8a5a12]">{a.moderate}</div><div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Moderate</div></div>
+    <div className="rounded-lg bg-[#fff1ed] p-2 text-center"><div className="text-sm font-extrabold text-[#a34c3e]">{a.hard}</div><div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Hard</div></div>
+    <div className="rounded-lg bg-muted p-2 text-center"><div className="text-sm font-extrabold">{a.explained}/{a.total}</div><div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Explained</div></div>
   </div>;
 }
 
@@ -996,6 +1100,31 @@ function McqTreeModule({ moduleId, name, mcqCount, mcqsByTopic }: { moduleId: nu
 // (ExamManagePanel's "This exam's questions" / AdminPastPapers' "View
 // questions"). This only ever shows main-bank questions: curriculum-tagged,
 // or truly unassigned (no module AND no exam AND no past paper).
+// Groups blocks by (programTargetKind, yearTargetNumber) — MBBS/BDS > Year >
+// Block, the extra top level McqBankTree/FlashcardBankTree nest their
+// existing Block > Module > Subject > Topic tree under. Blocks with no
+// targeting set (the common case until an admin tags them via BlockForm)
+// fall into "Unspecified program" / "All years", not hidden or dropped.
+function groupByProgramYear<T extends { key: number | 'other'; block?: AdminBlock }>(groups: T[]): Array<{ programLabel: string; yearLabel: string; groups: T[] }> {
+  const buckets = new Map<string, { program: string; year: number | null; groups: T[] }>();
+  for (const g of groups) {
+    const program = g.block?.programTargetKind || '';
+    const year = g.block?.yearTargetNumber ?? null;
+    const key = `${program}|${year ?? ''}`;
+    const existing = buckets.get(key);
+    if (existing) existing.groups.push(g); else buckets.set(key, { program, year, groups: [g] });
+  }
+  const PROGRAM_ORDER = ['MBBS', 'BDS'];
+  return [...buckets.values()]
+    .sort((a, b) => {
+      const ai = a.program ? PROGRAM_ORDER.indexOf(a.program) : 99; const bi = b.program ? PROGRAM_ORDER.indexOf(b.program) : 99;
+      if (ai !== bi) return (ai === -1 ? 98 : ai) - (bi === -1 ? 98 : bi);
+      if (a.program !== b.program) return a.program.localeCompare(b.program);
+      return (a.year ?? 999) - (b.year ?? 999);
+    })
+    .map((b) => ({ programLabel: b.program || 'Unspecified program', yearLabel: b.year ? `Year ${b.year}` : 'All years', groups: b.groups }));
+}
+
 function McqBankTree({ modules, blocks }: { modules: AdminModule[]; blocks: AdminBlock[] }) {
   const treeQ = useQuery({ queryKey: ['admin-mcqs-tree'], queryFn: mcqAdminApi.list });
   const rows = treeQ.data ?? [];
@@ -1013,18 +1142,26 @@ function McqBankTree({ modules, blocks }: { modules: AdminModule[]; blocks: Admi
   if (!modules.length && !trulyUnassigned.length) return <EmptyState icon={CircleHelp} title="No modules yet" body="Create a module first under Academic content, then come back to browse its questions here." />;
   // Group modules under their Block so the bank tree reads Block > Module >
   // Subject > Topic, same grouping level the parser's Block filter below
-  // narrows by. Modules with no blockId fall into an "Other modules" group.
+  // narrows by. Modules with no blockId fall into an "Other modules" group,
+  // shown after the program/year sections since it has no block to tag with
+  // a program/year in the first place.
   const modulesByBlock = new Map<number | 'other', AdminModule[]>();
   for (const m of modules) { const key = m.blockId ?? 'other'; const list = modulesByBlock.get(key); if (list) list.push(m); else modulesByBlock.set(key, [m]); }
-  const blockGroups: Array<{ key: number | 'other'; name: string; mods: AdminModule[] }> = [
-    ...blocks.filter((b) => modulesByBlock.has(b.id)).map((b) => ({ key: b.id, name: b.name, mods: modulesByBlock.get(b.id)! })),
-    ...(modulesByBlock.has('other') ? [{ key: 'other' as const, name: 'Other modules', mods: modulesByBlock.get('other')! }] : []),
-  ];
-  return <div className="space-y-5">
-    {blockGroups.map((g) => <div key={g.key} className="space-y-3">
-      {blocks.length > 0 && <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground" data-testid={`text-mcq-block-group-${g.key}`}>{g.name}</p>}
-      {g.mods.map((m) => <McqTreeModule key={m.id} moduleId={m.id} name={m.name} mcqCount={countByModule.get(m.id) ?? 0} mcqsByTopic={mcqsByTopic} />)}
+  const blockGroups: Array<{ key: number | 'other'; name: string; mods: AdminModule[]; block?: AdminBlock }> = blocks.filter((b) => modulesByBlock.has(b.id)).map((b) => ({ key: b.id, name: b.name, mods: modulesByBlock.get(b.id)!, block: b }));
+  const otherMods = modulesByBlock.get('other');
+  const programYearGroups = groupByProgramYear(blockGroups);
+  return <div className="space-y-7">
+    {programYearGroups.map(({ programLabel, yearLabel, groups }) => <div key={`${programLabel}-${yearLabel}`} className="space-y-5">
+      {blocks.length > 0 && <div className="flex items-center gap-2 border-b border-border pb-2"><GraduationCap size={14} className="text-primary" /><h3 className="text-xs font-extrabold" data-testid={`text-program-year-group-${programLabel}-${yearLabel}`}>{programLabel} <span className="font-normal text-muted-foreground">· {yearLabel}</span></h3></div>}
+      {groups.map((g) => { const blockRows = rows.filter((r) => r.moduleId != null && g.mods.some((m) => m.id === r.moduleId)); return <div key={g.key} className="space-y-3">
+        {blocks.length > 0 && <div className="flex flex-wrap items-center justify-between gap-1"><p className="text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground" data-testid={`text-mcq-block-group-${g.key}`}>{g.name}</p>{!!blockRows.length && <BlockAnalysisToggle rows={blockRows} />}</div>}
+        {g.mods.map((m) => <McqTreeModule key={m.id} moduleId={m.id} name={m.name} mcqCount={countByModule.get(m.id) ?? 0} mcqsByTopic={mcqsByTopic} />)}
+      </div>; })}
     </div>)}
+    {!!otherMods?.length && <div className="space-y-3">
+      <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground">Other modules (not in a block)</p>
+      {otherMods.map((m) => <McqTreeModule key={m.id} moduleId={m.id} name={m.name} mcqCount={countByModule.get(m.id) ?? 0} mcqsByTopic={mcqsByTopic} />)}
+    </div>}
     {!!trulyUnassigned.length && <div className="rounded-2xl border border-dashed border-border bg-card p-4"><p className="mb-3 text-xs font-bold text-muted-foreground">{trulyUnassigned.length} question{trulyUnassigned.length === 1 ? '' : 's'} with no module/subject/topic, exam, or past paper</p><div className="space-y-2">{trulyUnassigned.map((m) => <McqTreeRow key={m.id} mcq={m} />)}</div></div>}
   </div>;
 }
@@ -1088,21 +1225,42 @@ function AdminMcqs() {
   const bulkAddRowsInit = () => [{ question: '', a: '', b: '', c: '', d: '', e: '', correct: 'a', explanation: '', ea: '', eb: '', ec: '', ed: '', ee: '', difficulty: 'moderate', showOptionExplanations: false }];
   const [bulkRows, setBulkRows] = useState(bulkAddRowsInit);
   const [aiCount, setAiCount] = useState(5);
+  const [aiDifficulty, setAiDifficulty] = useState<'mixed' | 'easy' | 'moderate' | 'hard'>('mixed');
+  const draftsFromAi = (drafts: Array<{ question: string; options: string[]; correctAnswer: string; explanation: string; optionExplanations?: (string | null)[]; difficulty?: string }>) => drafts.map((d) => ({
+    question: d.question,
+    a: d.options[0] ?? '', b: d.options[1] ?? '', c: d.options[2] ?? '', d: d.options[3] ?? '', e: d.options[4] ?? '',
+    correct: (['a', 'b', 'c', 'd', 'e'][d.options.findIndex((o) => o === d.correctAnswer)] ?? 'a'),
+    explanation: d.explanation,
+    ea: d.optionExplanations?.[0] ?? '', eb: d.optionExplanations?.[1] ?? '', ec: d.optionExplanations?.[2] ?? '', ed: d.optionExplanations?.[3] ?? '', ee: d.optionExplanations?.[4] ?? '',
+    difficulty: d.difficulty ?? 'moderate',
+    showOptionExplanations: !!(d.optionExplanations && d.optionExplanations.some((e) => e?.trim())),
+  }));
   const generateAiMcqs = useMutation({
-    mutationFn: () => mcqAdminApi.generateAi(Number(topicId), aiCount),
+    mutationFn: () => mcqAdminApi.generateAi(Number(topicId), aiCount, aiDifficulty === 'mixed' ? undefined : aiDifficulty),
     onSuccess: (res) => {
-      setBulkRows(res.drafts.map((d) => ({
-        question: d.question,
-        a: d.options[0] ?? '', b: d.options[1] ?? '', c: d.options[2] ?? '', d: d.options[3] ?? '', e: d.options[4] ?? '',
-        correct: (['a', 'b', 'c', 'd', 'e'][d.options.findIndex((o) => o === d.correctAnswer)] ?? 'a'),
-        explanation: d.explanation,
-        ea: d.optionExplanations?.[0] ?? '', eb: d.optionExplanations?.[1] ?? '', ec: d.optionExplanations?.[2] ?? '', ed: d.optionExplanations?.[3] ?? '', ee: d.optionExplanations?.[4] ?? '',
-        difficulty: d.difficulty ?? 'moderate',
-        showOptionExplanations: !!(d.optionExplanations && d.optionExplanations.some((e) => e?.trim())),
-      })));
+      setBulkRows(draftsFromAi(res.drafts));
       toast({ title: `Generated ${res.drafts.length} draft questions`, description: 'Review each before saving — nothing is added to the bank yet.' });
     },
     onError: (err: unknown) => toast({ title: 'Could not generate questions', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
+  // "Full set" — one deliberate easy + moderate + hard batch instead of
+  // leaving the mix up to the model. Three separate calls (one per pinned
+  // difficulty) rather than asking for a bigger mixed batch and hoping the
+  // split comes out even.
+  const generateAiFullSet = useMutation({
+    mutationFn: async () => {
+      const [easy, moderate, hard] = await Promise.all([
+        mcqAdminApi.generateAi(Number(topicId), aiCount, 'easy'),
+        mcqAdminApi.generateAi(Number(topicId), aiCount, 'moderate'),
+        mcqAdminApi.generateAi(Number(topicId), aiCount, 'hard'),
+      ]);
+      return [...easy.drafts, ...moderate.drafts, ...hard.drafts];
+    },
+    onSuccess: (drafts) => {
+      setBulkRows(draftsFromAi(drafts));
+      toast({ title: `Generated ${drafts.length} draft questions`, description: `${aiCount} easy, ${aiCount} moderate, ${aiCount} hard — review before saving.` });
+    },
+    onError: (err: unknown) => toast({ title: 'Could not generate the full set', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
   const bulkCreateMutation = useMutation({
     mutationFn: () => mcqAdminApi.bulkCreate(bulkRows.filter((r) => r.question.trim() && r.a.trim() && r.b.trim()).map((r) => {
@@ -1235,7 +1393,7 @@ function AdminMcqs() {
       {bulkAddOpen && <div className="mt-4 space-y-4 rounded-2xl border border-primary/30 bg-[#eef7f1] p-5">
         <div className="flex items-center justify-between"><p className="text-xs font-bold">Add multiple MCQs at once — uses the module/subject/topic selected above.</p><button onClick={() => setBulkRows((rows) => [...rows, ...bulkAddRowsInit()])} className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[11px] font-bold" data-testid="button-add-bulk-row"><Plus size={12} /> Add row</button></div>
         {!targetReady && <p className="text-[11px] font-semibold text-[#8a5a12]">Select module/subject/topic above first.</p>}
-        {targetReady && <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card p-3"><Sparkles size={14} className="text-primary" /><span className="text-[11px] font-bold">Generate</span><select value={aiCount} onChange={(e) => setAiCount(Number(e.target.value))} className="h-8 rounded-lg border border-border bg-background px-2 text-xs" data-testid="select-ai-mcq-count">{[3, 5, 8, 10].map((n) => <option key={n} value={n}>{n}</option>)}</select><span className="text-[11px] font-bold">questions with AI for this topic</span><button type="button" disabled={generateAiMcqs.isPending} onClick={() => generateAiMcqs.mutate()} className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground disabled:opacity-50" data-testid="button-generate-ai-mcqs">{generateAiMcqs.isPending ? 'Generating…' : <><Sparkles size={12} /> Generate</>}</button></div>}
+        {targetReady && <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card p-3"><Sparkles size={14} className="text-primary" /><span className="text-[11px] font-bold">Generate</span><select value={aiCount} onChange={(e) => setAiCount(Number(e.target.value))} className="h-8 rounded-lg border border-border bg-background px-2 text-xs" data-testid="select-ai-mcq-count">{[3, 5, 8, 10].map((n) => <option key={n} value={n}>{n}</option>)}</select><span className="text-[11px] font-bold">questions</span><select value={aiDifficulty} onChange={(e) => setAiDifficulty(e.target.value as typeof aiDifficulty)} className="h-8 rounded-lg border border-border bg-background px-2 text-xs" data-testid="select-ai-mcq-difficulty"><option value="mixed">Mixed difficulty</option><option value="easy">Easy only</option><option value="moderate">Moderate only</option><option value="hard">Hard only</option></select><span className="text-[11px] font-bold">with AI for this topic</span><div className="ml-auto flex gap-2"><button type="button" disabled={generateAiFullSet.isPending || generateAiMcqs.isPending} onClick={() => generateAiFullSet.mutate()} title={`Generates ${aiCount} easy + ${aiCount} moderate + ${aiCount} hard in one go`} className="inline-flex items-center gap-1.5 rounded-lg border border-primary/40 bg-[#eef7f1] px-3 py-1.5 text-[11px] font-bold text-primary disabled:opacity-50" data-testid="button-generate-ai-full-set">{generateAiFullSet.isPending ? 'Generating set…' : <><Layers size={12} /> Full E/M/H set</>}</button><button type="button" disabled={generateAiMcqs.isPending || generateAiFullSet.isPending} onClick={() => generateAiMcqs.mutate()} className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground disabled:opacity-50" data-testid="button-generate-ai-mcqs">{generateAiMcqs.isPending ? 'Generating…' : <><Sparkles size={12} /> Generate</>}</button></div></div>}
         <div className="space-y-3">{bulkRows.map((row, i) => <div key={i} className="rounded-xl border border-border bg-card p-3">
           <div className="flex items-center justify-between"><span className="text-[11px] font-bold text-muted-foreground">Question {i + 1}</span>{bulkRows.length > 1 && <button onClick={() => setBulkRows((rows) => rows.filter((_, ri) => ri !== i))} className="text-[11px] font-bold text-destructive" data-testid={`button-remove-bulk-row-${i}`}>Remove</button>}</div>
           <textarea value={row.question} onChange={(e) => setBulkRows((rows) => rows.map((r, ri) => ri === i ? { ...r, question: e.target.value } : r))} placeholder="Write the question..." className="mt-2 min-h-14 w-full rounded-lg border border-border bg-background p-2 text-xs" data-testid={`input-bulk-question-${i}`} />
@@ -1387,6 +1545,9 @@ function AdminSettings() {
         <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">Registration</h3><div className="mt-5 grid gap-4 sm:grid-cols-2">
           <label className="flex items-center justify-between text-xs font-bold">Open student registration<input type="checkbox" checked={values.REGISTRATION_ENABLED !== 'false'} onChange={(e) => set('REGISTRATION_ENABLED', e.target.checked ? 'true' : 'false')} className="size-4 accent-[#287058]" data-testid="checkbox-registration-enabled" /></label>
         </div><p className="mt-3 text-[11px] text-muted-foreground">Payment methods, bank accounts, and collection details have moved to <Link href="/admin/payments" className="font-bold text-primary">Payments &amp; collection</Link>.</p></div>
+        <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">AI Visualizer</h3><div className="mt-5 grid gap-4 sm:grid-cols-2">
+          <label className="flex items-center justify-between text-xs font-bold">Show in student sidebar<input type="checkbox" checked={values.AI_VISUALIZER_ENABLED !== 'false'} onChange={(e) => set('AI_VISUALIZER_ENABLED', e.target.checked ? 'true' : 'false')} className="size-4 accent-[#287058]" data-testid="checkbox-ai-visualizer-enabled" /></label>
+        </div><p className="mt-3 text-[11px] text-muted-foreground">Off removes the "AI Visualizer" link from every student's sidebar and blocks the page directly; on brings it right back — no need to save anything else.</p></div>
       </>}
 
       {tab === 'branding' && <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">Website favicon</h3><p className="mt-1 text-xs text-muted-foreground">The small icon shown in browser tabs and bookmarks.</p><div className="mt-5">
@@ -1956,6 +2117,14 @@ function AdminPastPapers() {
     {open && <form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); const programId = f.get('programId') ? Number(f.get('programId')) : undefined; const academicYearId = f.get('academicYearId') ? Number(f.get('academicYearId')) : undefined; create.mutate({ title: String(f.get('title')), examBoard: String(f.get('examBoard') || ''), year: String(f.get('year') || ''), level: String(f.get('level') || ''), programId, academicYearId, active: true }, { onSuccess: () => { setOpen(false); setFormProgramId(''); } }); }} className="mb-5 grid gap-3 rounded-2xl border border-primary/30 bg-[#eef7f1] p-5 md:grid-cols-4"><input required name="title" placeholder="Paper title, e.g. KMU 2024 G" className="h-10 rounded-xl border border-border bg-card px-3 text-xs md:col-span-2" data-testid="input-paper-title" /><input name="examBoard" placeholder="Exam board" className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-paper-board" /><input name="year" placeholder="Year" className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-paper-year" />
       <select name="programId" value={formProgramId} onChange={(e) => setFormProgramId(e.target.value)} className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-paper-program"><option value="">All programs</option>{(programsQ.data || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
       <select name="academicYearId" disabled={!formProgramId} className="h-10 rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-paper-academic-year"><option value="">All years</option>{(academicYearsQ.data || []).map((y) => <option key={y.id} value={y.id}>{y.label}</option>)}</select>
+      {/* This dropdown only lists MBBS/BDS-type Programs that have actually
+          been added under an institution in Colleges & courses — it isn't
+          pre-seeded with MBBS/BDS, since a Program has to belong to a
+          specific institution. Both selects here are optional targeting
+          (narrows which students see the paper); the free-text Level field
+          below already covers just labeling a paper "3rd Year MBBS"
+          without needing this set up at all. */}
+      {!programsQ.isLoading && !programsQ.data?.length && <p className="text-[11px] font-semibold text-[#8a5a12] md:col-span-4">No programs set up yet, so this list is empty — that's expected, not a bug. Add one (e.g. "MBBS") under <Link href="/admin/academic-structure" className="underline">Colleges &amp; courses</Link> if you want to target papers by program/year, or just use the Level field below instead.</p>}
       <input name="level" placeholder="Level label, e.g. 3rd Year MBBS (display only)" className="h-10 rounded-xl border border-border bg-card px-3 text-xs md:col-span-2" data-testid="input-paper-level" /><div className="flex gap-2"><button className="rounded-xl bg-primary px-4 text-xs font-bold text-primary-foreground" data-testid="button-save-paper">Save</button><button type="button" onClick={() => setOpen(false)} className="rounded-xl border border-border bg-card px-4 text-xs font-bold" data-testid="button-cancel-paper">Cancel</button></div></form>}
     <div className="rounded-2xl border border-border bg-card">{(papers.data || []).map((p) => <div key={p.id} className="border-b border-border p-5 last:border-0" data-testid={`row-admin-paper-${p.id}`}>
       <div className="flex items-center gap-4"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#dceaf1] text-[#32647b]"><FileStack size={17} /></div><div className="flex-1"><div className="text-sm font-bold">{p.title}</div><div className="mt-1 text-xs text-muted-foreground">{[p.examBoard, p.year, p.level].filter(Boolean).join(' · ')} · {p.mcqCount} MCQs linked</div></div><button onClick={() => setViewingId(viewingId === p.id ? null : p.id)} className={cn('inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold', viewingId === p.id ? 'bg-[#eef7f1] text-primary' : 'border border-border text-muted-foreground hover:bg-muted')} data-testid={`button-view-paper-questions-${p.id}`}><CircleHelp size={12} /> View questions</button><button onClick={() => setUploadingId(uploadingId === p.id ? null : p.id)} className={cn('inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold', uploadingId === p.id ? 'bg-[#eef7f1] text-primary' : 'border border-border text-muted-foreground hover:bg-muted')} data-testid={`button-upload-paper-${p.id}`}><UploadCloud size={12} /> Upload questions</button><button onClick={() => toggle.mutate({ id: p.id, active: !p.active })} className={cn('rounded-lg px-3 py-1.5 text-[11px] font-bold', p.active ? 'bg-[#d7eee4] text-[#164b4b]' : 'bg-muted text-muted-foreground')} data-testid={`button-toggle-paper-${p.id}`}>{p.active ? 'Published' : 'Hidden'}</button><button onClick={() => setDeletingId(p.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-paper-${p.id}`}><Trash2 size={15} /></button></div>
@@ -2112,15 +2281,21 @@ function FlashcardBankTree({ modules, blocks }: { modules: AdminModule[]; blocks
   if (!modules.length && !trulyUnassigned.length) return <EmptyState icon={Zap} title="No modules yet" body="Create a module first under Academic content, then come back to browse its flashcards here." />;
   const modulesByBlock = new Map<number | 'other', AdminModule[]>();
   for (const m of modules) { const key = m.blockId ?? 'other'; const list = modulesByBlock.get(key); if (list) list.push(m); else modulesByBlock.set(key, [m]); }
-  const blockGroups: Array<{ key: number | 'other'; name: string; mods: AdminModule[] }> = [
-    ...blocks.filter((b) => modulesByBlock.has(b.id)).map((b) => ({ key: b.id, name: b.name, mods: modulesByBlock.get(b.id)! })),
-    ...(modulesByBlock.has('other') ? [{ key: 'other' as const, name: 'Other modules', mods: modulesByBlock.get('other')! }] : []),
-  ];
-  return <div className="space-y-5">
-    {blockGroups.map((g) => <div key={g.key} className="space-y-3">
-      {blocks.length > 0 && <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground" data-testid={`text-flashcard-block-group-${g.key}`}>{g.name}</p>}
-      {g.mods.map((m) => <FlashcardTreeModule key={m.id} moduleId={m.id} name={m.name} cardCount={countByModule.get(m.id) ?? 0} cardsByTopic={cardsByTopic} />)}
+  const blockGroups: Array<{ key: number | 'other'; name: string; mods: AdminModule[]; block?: AdminBlock }> = blocks.filter((b) => modulesByBlock.has(b.id)).map((b) => ({ key: b.id, name: b.name, mods: modulesByBlock.get(b.id)!, block: b }));
+  const otherMods = modulesByBlock.get('other');
+  const programYearGroups = groupByProgramYear(blockGroups);
+  return <div className="space-y-7">
+    {programYearGroups.map(({ programLabel, yearLabel, groups }) => <div key={`${programLabel}-${yearLabel}`} className="space-y-5">
+      {blocks.length > 0 && <div className="flex items-center gap-2 border-b border-border pb-2"><GraduationCap size={14} className="text-primary" /><h3 className="text-xs font-extrabold" data-testid={`text-flashcard-program-year-group-${programLabel}-${yearLabel}`}>{programLabel} <span className="font-normal text-muted-foreground">· {yearLabel}</span></h3></div>}
+      {groups.map((g) => <div key={g.key} className="space-y-3">
+        {blocks.length > 0 && <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground" data-testid={`text-flashcard-block-group-${g.key}`}>{g.name}</p>}
+        {g.mods.map((m) => <FlashcardTreeModule key={m.id} moduleId={m.id} name={m.name} cardCount={countByModule.get(m.id) ?? 0} cardsByTopic={cardsByTopic} />)}
+      </div>)}
     </div>)}
+    {!!otherMods?.length && <div className="space-y-3">
+      <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground">Other modules (not in a block)</p>
+      {otherMods.map((m) => <FlashcardTreeModule key={m.id} moduleId={m.id} name={m.name} cardCount={countByModule.get(m.id) ?? 0} cardsByTopic={cardsByTopic} />)}
+    </div>}
     {!!trulyUnassigned.length && <div className="rounded-2xl border border-dashed border-border bg-card p-4"><p className="mb-3 text-xs font-bold text-muted-foreground">{trulyUnassigned.length} flashcard{trulyUnassigned.length === 1 ? '' : 's'} with no module/subject/topic</p><div className="space-y-2">{trulyUnassigned.map((c) => <FlashcardTreeRow key={c.id} card={c} />)}</div></div>}
   </div>;
 }

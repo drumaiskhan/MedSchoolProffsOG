@@ -81,7 +81,7 @@ export interface AuthUser {
 export interface PlatformSettings {
   [key: string]: string;
   ADMIN_SIGNUP_CODE: string; SUPPORT_EMAIL: string; SUPPORT_WHATSAPP: string; PLATFORM_NAME: string; PLATFORM_TAGLINE: string;
-  DEFAULT_CURRENCY: string; PAYMENT_INSTRUCTIONS: string; ANNOUNCEMENT_BANNER: string; REGISTRATION_ENABLED: string;
+  DEFAULT_CURRENCY: string; PAYMENT_INSTRUCTIONS: string; ANNOUNCEMENT_BANNER: string; REGISTRATION_ENABLED: string; AI_VISUALIZER_ENABLED: string;
   PAYMENT_ACCOUNT_HOLDER: string; PAYMENT_ACCOUNT_NUMBER: string; PAYMENT_BANK_NAME: string; PAYMENT_IFSC_OR_ROUTING: string; PAYMENT_UPI_ID: string; PAYMENT_QR_CODE_PATH: string;
   PAYMENT_RAAST_ID: string; PAYMENT_WALLET_PROVIDER: string; PAYMENT_WALLET_NUMBER: string; PAYMENT_WALLET_ACCOUNT_NAME: string;
   PAYMENT_BANK_ACCOUNTS: string; PAYMENT_METHODS_CONFIG: string; PAYMENT_LATE_FEE_NOTE: string; PAYMENT_REFUND_POLICY: string;
@@ -267,8 +267,14 @@ export const mcqAdminApi = {
     request<{ ok: true; deleted: number }>('/admin/mcqs/bulk', { method: 'DELETE', body: JSON.stringify(body) }),
   bulkCreate: (mcqs: Array<Partial<AdminMcqRow> & { question: string; options: string[] }>) =>
     request<{ ok: true; created: number; mcqs: AdminMcqRow[] }>('/admin/mcqs/bulk', { method: 'POST', body: JSON.stringify({ mcqs }) }),
-  generateAi: (topicId: number, count: number) =>
-    request<{ drafts: Array<{ question: string; options: string[]; correctAnswer: string; explanation: string; optionExplanations?: (string | null)[]; difficulty?: string }>; topicLabel: string }>('/admin/mcqs/generate', { method: 'POST', body: JSON.stringify({ topicId, count }) }),
+  generateAi: (topicId: number, count: number, difficulty?: 'easy' | 'moderate' | 'hard') =>
+    request<{ drafts: Array<{ question: string; options: string[]; correctAnswer: string; explanation: string; optionExplanations?: (string | null)[]; difficulty?: string }>; topicLabel: string }>('/admin/mcqs/generate', { method: 'POST', body: JSON.stringify({ topicId, count, difficulty }) }),
+  // AI-reclassifies difficulty for existing questions (easy/moderate/hard),
+  // capped at 30 per call server-side — pass {all:true, filters} for a
+  // scope, {ids} for an explicit batch. Returns how many are still left in
+  // that scope so the UI can offer "classify next batch".
+  classifyDifficulty: (body: { ids: number[] } | { all: true; filters?: { moduleId?: number; subjectId?: number; topicId?: number } }) =>
+    request<{ classified: number; remaining: number; results: Array<{ id: number; difficulty: 'easy' | 'moderate' | 'hard' }> }>('/admin/mcqs/classify-difficulty', { method: 'POST', body: JSON.stringify(body) }),
 };
 
 export const mcqImportApi = {

@@ -113,6 +113,7 @@ export interface SiteContent {
   PLATFORM_NAME: string; PLATFORM_TAGLINE: string; PLATFORM_DESCRIPTION: string;
   SOCIAL_FACEBOOK: string; SOCIAL_YOUTUBE: string; SOCIAL_LINKEDIN: string; SOCIAL_INSTAGRAM: string;
   CONTACT_EMAIL: string; CONTACT_LOCATION: string; SUPPORT_HOURS: string; COPYRIGHT_NOTICE: string; SUPPORT_WHATSAPP: string;
+  AI_VISUALIZER_ENABLED: string;
   features: string[]; quickLinks: Array<{ label: string; url: string }>; team: TeamMember[];
   faviconUrl: string | null;
   dashboardHeroImageUrl: string | null;

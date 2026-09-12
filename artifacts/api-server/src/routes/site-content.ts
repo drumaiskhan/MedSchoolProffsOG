@@ -24,6 +24,10 @@ const SITE_CONTENT_KEYS = [
   "FEATURES_LIST",
   "QUICK_LINKS",
   "SITE_FAVICON_PATH",
+  // Read by the student SideNav to decide whether to show the "AI
+  // Visualizer" link — public/authenticated-student-visible by design,
+  // same as everything else in this list.
+  "AI_VISUALIZER_ENABLED",
   // Optional decorative photo for the student Dashboard's greeting card —
   // public (not admin-gated) since students need to see it, resolved to
   // dashboardHeroImageUrl below the same way SITE_FAVICON_PATH resolves to

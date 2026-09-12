@@ -81,8 +81,13 @@ const router: IRouter = Router();
 // Shared count helpers so module/subject cards never drift out of sync with
 // hardcoded 0s again (see section 4 of the fix notes).
 async function getModuleCounts(moduleId: number): Promise<{ subjectCount: number; topicCount: number; mcqCount: number }> {
-  const [subjectCount] = await db.select({ count: sql<number>`count(*)` }).from(subjectsTable).where(eq(subjectsTable.moduleId, moduleId));
-  const [topicCount] = await db.select({ count: sql<number>`count(*)` }).from(topicsTable).innerJoin(subjectsTable, eq(topicsTable.subjectId, subjectsTable.id)).where(eq(subjectsTable.moduleId, moduleId));
+  // Bug fix: neither of these excluded archived (soft-deleted) subjects/
+  // topics, so a module's tile kept showing the count from before any
+  // deletes — e.g. "10 subjects" after the admin deleted down to 4. Same
+  // bug class as the GET /subjects and GET /topics list fix above, just in
+  // the separate count queries these tiles actually use.
+  const [subjectCount] = await db.select({ count: sql<number>`count(*)` }).from(subjectsTable).where(and(eq(subjectsTable.moduleId, moduleId), eq(subjectsTable.archived, false)));
+  const [topicCount] = await db.select({ count: sql<number>`count(*)` }).from(topicsTable).innerJoin(subjectsTable, eq(topicsTable.subjectId, subjectsTable.id)).where(and(eq(subjectsTable.moduleId, moduleId), eq(topicsTable.archived, false), eq(subjectsTable.archived, false)));
   const [mcqCount] = await db.select({ count: sql<number>`count(*)` }).from(mcqsTable).where(and(eq(mcqsTable.moduleId, moduleId), eq(mcqsTable.status, "published")));
   return { subjectCount: Number(subjectCount?.count ?? 0), topicCount: Number(topicCount?.count ?? 0), mcqCount: Number(mcqCount?.count ?? 0) };
 }
@@ -116,7 +121,7 @@ async function hardDeleteMcqs(ids: number[]): Promise<void> {
 }
 
 async function getSubjectTopicCount(subjectId: number): Promise<number> {
-  const [topicCount] = await db.select({ count: sql<number>`count(*)` }).from(topicsTable).where(eq(topicsTable.subjectId, subjectId));
+  const [topicCount] = await db.select({ count: sql<number>`count(*)` }).from(topicsTable).where(and(eq(topicsTable.subjectId, subjectId), eq(topicsTable.archived, false)));
   return Number(topicCount?.count ?? 0);
 }
 
@@ -200,8 +205,8 @@ router.get("/student/dashboard", requireAuth, async (req, res): Promise<void> =>
   let totalQuestions = 0;
   let totalAttemptedQuestions = 0;
   const modules = await Promise.all(moduleRows.map(async (module) => {
-    const [subjectCount] = await db.select({ count: sql<number>`count(*)` }).from(subjectsTable).where(eq(subjectsTable.moduleId, module.id));
-    const [topicCount] = await db.select({ count: sql<number>`count(*)` }).from(topicsTable).innerJoin(subjectsTable, eq(topicsTable.subjectId, subjectsTable.id)).where(eq(subjectsTable.moduleId, module.id));
+    const [subjectCount] = await db.select({ count: sql<number>`count(*)` }).from(subjectsTable).where(and(eq(subjectsTable.moduleId, module.id), eq(subjectsTable.archived, false)));
+    const [topicCount] = await db.select({ count: sql<number>`count(*)` }).from(topicsTable).innerJoin(subjectsTable, eq(topicsTable.subjectId, subjectsTable.id)).where(and(eq(subjectsTable.moduleId, module.id), eq(topicsTable.archived, false), eq(subjectsTable.archived, false)));
     const [mcqCount] = await db.select({ count: sql<number>`count(*)` }).from(mcqsTable).where(and(eq(mcqsTable.moduleId, module.id), eq(mcqsTable.status, "published")));
     const questions = Number(mcqCount?.count ?? 0);
     const attempted = attemptedQuestionsByModule.get(module.id)?.size ?? 0;
@@ -682,7 +687,7 @@ router.get("/subjects", requireAuth, async (req, res): Promise<void> => {
   const topicCounts = new Map<number, number>();
   if (rows.length) {
     const counted = await db.select({ subjectId: topicsTable.subjectId, count: sql<number>`count(*)` }).from(topicsTable)
-      .where(inArray(topicsTable.subjectId, rows.map((r) => r.id))).groupBy(topicsTable.subjectId);
+      .where(and(inArray(topicsTable.subjectId, rows.map((r) => r.id)), eq(topicsTable.archived, false))).groupBy(topicsTable.subjectId);
     for (const c of counted) topicCounts.set(c.subjectId, Number(c.count));
   }
   res.json(ListSubjectsResponse.parse(rows.map((row) => ({ id: row.id, moduleId: row.moduleId, name: row.name, topicCount: topicCounts.get(row.id) ?? 0, iconUrl: resolveFileUrl(row.iconPath, { transform: THUMBNAIL_TRANSFORM }), displayOrder: row.displayOrder }))));

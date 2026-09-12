@@ -88,6 +88,11 @@ export interface McqGenerationRequest {
    * and don't duplicate them; never sent as content to copy verbatim. */
   existingQuestions?: string[];
   count: number;
+  /** When set, every question in the batch is pinned to this exact
+   * difficulty instead of the model varying it across the set — used to
+   * build a deliberate easy/moderate/hard set rather than whatever mix the
+   * model happens to produce. */
+  difficulty?: "easy" | "moderate" | "hard";
 }
 
 export interface GeneratedMcq {
@@ -268,17 +273,20 @@ function parseFlashcardJson(raw: string): GeneratedFlashcard[] {
 // anything generic. existingQuestions are shown only as a "don't repeat
 // these / match this level" reference, never as content to draw the new
 // questions' subject matter from.
-function buildMcqGenerationPrompt({ topicLabel, existingQuestions, count }: McqGenerationRequest): string {
+function buildMcqGenerationPrompt({ topicLabel, existingQuestions, count, difficulty }: McqGenerationRequest): string {
   const existingBlock = existingQuestions?.length
     ? `\nFor reference only (do not repeat these, do not copy their subject if it drifted off-topic — match their difficulty level instead):\n${existingQuestions.slice(0, 8).map((q) => `- ${q}`).join("\n")}\n`
     : "";
+  const difficultyInstruction = difficulty
+    ? `Every single question in this set must be difficulty exactly "${difficulty}" — do not vary it, do not include any other difficulty level.`
+    : "Vary it across the set rather than making everything the same level.";
   return [
     `You are a medical school question-bank author. Every single question you write MUST be specifically about: "${topicLabel}".`,
     "Do not write generic pre-med trivia (bone names, cell organelles, vital sign ranges, etc.) unless that is literally what the topic above is about.",
     "Before finalizing each question, check: does this question directly test knowledge of the exact topic named above? If not, discard it and write a different one that does.",
     `Produce exactly ${count} single-best-answer multiple-choice questions (MBBS/BDS level) on "${topicLabel}".`,
     "Each question needs exactly 4 options (A-D equivalent, but return them as a plain string array, not labeled), and one correct answer that must be an exact string match to one of the options.",
-    "Also assign each question a difficulty of exactly \"easy\", \"moderate\", or \"hard\", based on how advanced the reasoning required is for an MBBS/BDS student — vary it across the set rather than making everything the same level.",
+    `Also assign each question a difficulty of exactly "easy", "moderate", or "hard", based on how advanced the reasoning required is for an MBBS/BDS student. ${difficultyInstruction}`,
     "For EVERY option (not just the correct one), write a short 1-2 sentence explanation of why that specific option is right or wrong — a real distractor-analysis, not just a generic restatement. The correct option's explanation should say why it's correct; each wrong option's explanation should say specifically why it's wrong (e.g. what it's confused with, or what's missing/incorrect about it) — this is what a real exam-prep answer key looks like, not just one blanket explanation for the correct choice.",
     "Vary the sub-topics, question stems, and clinical vs. factual framing across the set so it doesn't feel repetitive.",
     existingBlock,

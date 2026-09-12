@@ -125,7 +125,12 @@ const navGroups: Array<{ label: string; items: NavItem[] }> = [
 
 function SideNav({ user, onClose }: { user: User; onClose: () => void }) {
   const [location] = useLocation();
-  const groups = navGroups;
+  // AI_VISUALIZER_ENABLED off removes the nav link entirely — see the
+  // matching enforcement on the route itself (AiVisualizer component below)
+  // and on the backend (POST /ai/visualizer refuses directly too).
+  const siteContentQ = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get });
+  const aiVisualizerEnabled = siteContentQ.data?.AI_VISUALIZER_ENABLED !== 'false';
+  const groups = aiVisualizerEnabled ? navGroups : navGroups.map((g) => ({ ...g, items: g.items.filter(([href]) => href !== '/ai-visualizer') }));
   const notifQ = useListNotifications();
   const unreadCount = (notifQ.data ?? []).filter((n) => !n.read).length;
   const logout = useMutation({ mutationFn: authApi.logout, onSuccess: () => { queryClient.clear(); window.location.href = '/login'; } });
@@ -730,24 +735,24 @@ function Practice() {
   };
 
   const controlPanel = <div className="space-y-3">
-    <div className="rounded-2xl border border-border bg-card p-4">
-      <div className="flex items-center justify-between text-xs font-bold"><span className="flex items-center gap-1.5"><Clock3 size={14} /> Timer</span>{mode === 'timed' ? <span className={cn('font-mono-app rounded-full px-2.5 py-1 text-[11px]', remainingSeconds < 60 ? 'bg-[#fff1ed] text-[#a34c3e]' : 'bg-[#d7eee4] text-[#287058]')} data-testid="text-timer">{mm}:{ss}</span> : <span className="text-[11px] font-normal text-muted-foreground">Untimed</span>}</div>
-      <div className="mt-3 text-[11px] text-muted-foreground">{percentAnswered}% answered</div>
-      <div className="mt-1"><Progress value={percentAnswered} /></div>
-      <div className="mt-3 text-[11px] text-muted-foreground">Difficulty: <Badge tone={difficultyTone(current.difficulty)}>{current.difficulty}</Badge></div>
+    <div className="rounded-2xl border border-border bg-card p-3.5">
+      <div className="flex items-center justify-between text-xs font-bold"><span className="flex items-center gap-1.5"><Clock3 size={13} /> {mode === 'timed' ? 'Timer' : 'Untimed'}</span>{mode === 'timed' && <span className={cn('font-mono-app rounded-full px-2.5 py-1 text-[11px]', remainingSeconds < 60 ? 'bg-[#fff1ed] text-[#a34c3e]' : 'bg-[#d7eee4] text-[#287058]')} data-testid="text-timer">{mm}:{ss}</span>}</div>
+      <div className="mt-2.5 flex gap-1.5">
+        <button onClick={() => setPaused((p) => !p)} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-[#32647b] px-2 py-2 text-[11px] font-bold text-white" data-testid="button-pause-session">{paused ? <><Zap size={12} /> Resume</> : <><Clock3 size={12} /> Pause</>}</button>
+        <button onClick={saveQuestion} disabled={savedIds.has(current.id)} className={cn('flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-bold', savedIds.has(current.id) ? 'bg-[#e6dcf3] text-[#6a4c93]' : 'bg-gradient-to-r from-[#6a4c93] to-[#815276] text-white')} data-testid="button-save-question"><Bookmark size={12} /> {savedIds.has(current.id) ? 'Saved' : 'Save'}</button>
+      </div>
+      <button onClick={finishSession} className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-lg border border-[#c0503f]/30 px-2 py-2 text-[11px] font-bold text-[#c0503f] hover:bg-[#fff1ed]" data-testid="button-exit-session"><X size={12} /> Exit &amp; submit</button>
     </div>
-    <button onClick={() => setPaused((p) => !p)} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#32647b] px-4 py-3 text-xs font-extrabold text-white" data-testid="button-pause-session">{paused ? <><Zap size={14} /> Resume</> : <><Clock3 size={14} /> Pause</>}</button>
-    <button onClick={saveQuestion} disabled={savedIds.has(current.id)} className={cn('flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-xs font-extrabold', savedIds.has(current.id) ? 'bg-[#e6dcf3] text-[#6a4c93]' : 'bg-gradient-to-r from-[#6a4c93] to-[#815276] text-white')} data-testid="button-save-question"><Bookmark size={14} /> {savedIds.has(current.id) ? 'Saved to notebook' : 'Save'}</button>
-    <button onClick={finishSession} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#c0503f] px-4 py-3 text-xs font-extrabold text-white" data-testid="button-exit-session"><X size={14} /> Exit &amp; submit</button>
-    <div className="rounded-2xl border border-border bg-card p-4">
+    <div className="rounded-2xl border border-border bg-card p-3.5">
+      <div className="mb-2.5 text-[11px] font-bold text-muted-foreground">Question Navigator</div>
       <div className="grid grid-cols-5 gap-1.5">{mcqs.map((m, i) => { const st = stateForIndex(i); return <button key={m.id} onClick={() => goTo(i)} className={cn('grid aspect-square place-items-center rounded-lg text-[11px] font-bold transition-colors', st === 'current' && 'border-2 border-primary bg-card text-primary', st === 'answered' && 'bg-[#32647b] text-white', st === 'flagged' && 'bg-[#e5a952] text-white', st === 'new' && 'bg-muted text-muted-foreground')} data-testid={`button-goto-question-${i}`}>{i + 1}</button>; })}</div>
-      <div className="mt-3 flex flex-wrap gap-3 text-[10px] text-muted-foreground"><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-[#32647b]" /> Answered</span><span className="flex items-center gap-1"><span className="size-2 rounded-full border-2 border-primary" /> Current</span><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-muted" /> Not Answered</span><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-[#e5a952]" /> Bookmarked</span></div>
+      <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground"><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-[#32647b]" /> Answered</span><span className="flex items-center gap-1"><span className="size-2 rounded-full border-2 border-primary" /> Current</span><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-muted" /> Not Answered</span><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-[#e5a952]" /> Bookmarked</span></div>
     </div>
   </div>;
 
   if (paused) {
     return <div className="max-w-6xl"><SectionHeader eyebrow="Daily practice" title="Practice with purpose" />
-      <div className="grid gap-6 lg:grid-cols-[280px_1fr]"><div className="order-2 lg:order-1">{controlPanel}</div><div className="order-1 rounded-3xl border border-border bg-card p-9 text-center lg:order-2"><Clock3 size={28} className="mx-auto text-muted-foreground" /><h2 className="mt-4 font-display text-xl">Session paused</h2><p className="mt-2 text-xs text-muted-foreground">Your progress and timer are on hold. Hit Resume in the panel to keep going.</p></div></div>
+      <div className="grid gap-6 lg:grid-cols-[1fr_280px]"><div className="order-2 rounded-3xl border border-border bg-card p-9 text-center lg:order-1"><Clock3 size={28} className="mx-auto text-muted-foreground" /><h2 className="mt-4 font-display text-xl">Session paused</h2><p className="mt-2 text-xs text-muted-foreground">Your progress and timer are on hold. Hit Resume in the panel to keep going.</p></div><div className="order-1 lg:order-2">{controlPanel}</div></div>
     </div>;
   }
 
@@ -760,10 +765,14 @@ function Practice() {
       {breadcrumbParts.length > 0 && <div className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground" data-testid="text-practice-breadcrumb">{breadcrumbParts.map((part, i) => <span key={i} className="flex items-center gap-1.5">{i > 0 && <ChevronRight size={11} />}<span>{part}</span></span>)}</div>}
       <button onClick={finishSession} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-[11px] font-bold text-muted-foreground hover:bg-muted" data-testid="button-leave-practice"><X size={13} /> Leave</button>
     </div>
-    <SectionHeader eyebrow="Daily practice" title="Practice MCQs" action={<span className="font-mono-app text-[11px] text-muted-foreground">{index + 1} / {mcqs.length}</span>} />
-    <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
-      <div className="order-2 lg:order-1">{controlPanel}</div>
-      <div className="order-1 rounded-3xl border border-border bg-card p-5 sm:p-6 lg:order-2">
+    <div className="flex flex-wrap items-center justify-between gap-2"><h1 className="font-display text-2xl">Practice MCQs</h1><span className="font-mono-app text-[11px] text-muted-foreground">{index + 1} / {mcqs.length}</span></div>
+    {/* Top progress bar — the single biggest whitespace cut vs. before: this
+        replaces a whole separate "Timer" card that used to sit above the
+        question, pushing everything down a full card's height before you
+        even reached the question text. */}
+    <div className="mt-3 mb-5"><Progress value={percentAnswered} /></div>
+    <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
+      <div className="order-1 rounded-3xl border border-border bg-card p-5 sm:p-6">
         <div className="flex items-center justify-between"><Badge tone={difficultyTone(current.difficulty)}>{current.difficulty}</Badge><button onClick={toggleFlag} className={cn('rounded-lg p-1.5', flaggedIds.has(current.id) ? 'text-[#e5a952]' : 'text-muted-foreground hover:text-foreground')} data-testid="button-flag-question"><Flag size={17} fill={flaggedIds.has(current.id) ? 'currentColor' : 'none'} /></button></div>
         <h2 className="mt-4 max-w-2xl text-base font-extrabold leading-6 tracking-[-.025em] sm:text-lg sm:leading-7">{current.question}</h2>
         {/* Compact option rows (py-2.5 instead of p-4, tighter gap) so a
@@ -795,6 +804,7 @@ function Practice() {
           {index + 1 >= mcqs.length ? <button onClick={finishSession} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-finish-session">Finish session <CheckCircle2 size={14} /></button> : <button onClick={() => goTo(index + 1)} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-next-question">Next <ArrowRight size={14} /></button>}
         </div>
       </div>
+      <div className="order-2">{controlPanel}</div>
     </div>
   </div>;
 }
@@ -1021,6 +1031,12 @@ function AiVisualizer() {
   const [spec, setSpec] = useState<VisualizationSpec | null>(null);
   const [stepIndex, setStepIndex] = useState(0);
 
+  // Same AI_VISUALIZER_ENABLED check SideNav uses — this covers someone
+  // navigating here directly by URL while the sidebar link is hidden, or a
+  // tab that was already open on this page when an admin turned it off.
+  const siteContentQ = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get });
+  const aiVisualizerEnabled = siteContentQ.data?.AI_VISUALIZER_ENABLED !== 'false';
+
   const generate = useMutation({
     mutationFn: (p: string) => aiVisualizerApi.generate(p),
     onSuccess: (data) => { setSpec(data.visualization); setStepIndex(0); },
@@ -1032,6 +1048,8 @@ function AiVisualizer() {
 
   const submit = () => { if (prompt.trim().length >= 3) generate.mutate(prompt.trim()); };
   const startOver = () => { setSpec(null); generate.reset(); };
+
+  if (!siteContentQ.isLoading && !aiVisualizerEnabled) return <EmptyState icon={Wand2} title="AI Visualizer is turned off" body="This feature isn't available right now — check back later." />;
 
   return <div className="mx-auto max-w-3xl">
     <div className="mb-5 flex items-start gap-3">
