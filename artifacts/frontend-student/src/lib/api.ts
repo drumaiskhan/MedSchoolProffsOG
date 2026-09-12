@@ -105,7 +105,7 @@ export const DEFAULT_IMPORT_PATTERNS = {
   explanationPattern: "^\\s*(?:Explanation|Rationale|Explain)\\s*[:\\-]\\s*(.+)$",
 };
 
-export const TEAM_CATEGORIES = ['reviewer', 'question_setter', 'ownership'] as const;
+export const TEAM_CATEGORIES = ['ownership', 'reviewer', 'question_setter'] as const;
 export type TeamCategory = typeof TEAM_CATEGORIES[number];
 export const TEAM_CATEGORY_LABELS: Record<TeamCategory, string> = { reviewer: 'Reviewers', question_setter: 'Question setters', ownership: 'Ownership' };
 export interface TeamMember { id: number; name: string; role: string; category: TeamCategory; bio: string; achievementBadge: string; photoPath: string | null; linkedinUrl: string; instagramUrl: string; email: string; active: boolean; displayOrder: number }

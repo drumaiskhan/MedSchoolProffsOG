@@ -671,6 +671,11 @@ router.get("/subjects", requireAuth, async (req, res): Promise<void> => {
     if (params.data.moduleId && !visibleIds.includes(params.data.moduleId)) { res.json([]); return; }
   }
   const rows = await db.select().from(subjectsTable).where(and(
+    // Bug fix: this never excluded archived (soft-deleted) rows, so
+    // clicking Delete on a subject archived it server-side but it kept
+    // sitting right there in the list — looked exactly like the delete
+    // button wasn't working (same class of bug as /admin/mcqs above).
+    eq(subjectsTable.archived, false),
     params.data.moduleId ? eq(subjectsTable.moduleId, params.data.moduleId) : undefined,
     visibleIds ? inArray(subjectsTable.moduleId, visibleIds) : undefined,
   )).orderBy(asc(subjectsTable.displayOrder));
@@ -728,7 +733,13 @@ router.get("/topics", requireAuth, async (req, res): Promise<void> => {
   }
   const rows = await db.select({ id: topicsTable.id, subjectId: topicsTable.subjectId, name: topicsTable.name, moduleId: subjectsTable.moduleId, displayOrder: topicsTable.displayOrder })
     .from(topicsTable).innerJoin(subjectsTable, eq(topicsTable.subjectId, subjectsTable.id))
-    .where(and(subjectFilter, visibleModuleIds ? inArray(subjectsTable.moduleId, visibleModuleIds) : undefined))
+    .where(and(
+      // Same bug/fix as GET /subjects just above: delete never actually
+      // removed a topic from this list, only archived it server-side.
+      eq(topicsTable.archived, false),
+      subjectFilter,
+      visibleModuleIds ? inArray(subjectsTable.moduleId, visibleModuleIds) : undefined,
+    ))
     .orderBy(asc(topicsTable.displayOrder));
   // Real per-topic MCQ count (was hardcoded to 0 — see fix-notes section 2).
   // Grouped in one query rather than N+1'd per topic; filtered to published
@@ -973,6 +984,37 @@ router.post("/flashcards", requireAdmin, async (req, res): Promise<void> => {
   res.status(201).json({ ...row, learned: false });
 });
 
+// Admin-only variant of GET /flashcards that keeps moduleId/subjectId/topicId
+// on the wire (ListFlashcardsResponse strips them, same reason as
+// /admin/mcqs above) — used to group flashcards into the admin's
+// Module -> Subject -> Topic bank tree instead of one flat list.
+router.get("/admin/flashcards", requireAdmin, async (req, res): Promise<void> => {
+  const params = z.object({ moduleId: z.coerce.number().int().optional(), subjectId: z.coerce.number().int().optional(), topicId: z.coerce.number().int().optional(), search: z.string().optional() }).safeParse(req.query);
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  const includeArchived = req.query.includeArchived === "true";
+  const rows = await db.select().from(flashcardsTable).where(and(
+    params.data.search ? or(ilike(flashcardsTable.front, `%${params.data.search}%`), ilike(flashcardsTable.back, `%${params.data.search}%`)) : undefined,
+    params.data.moduleId ? eq(flashcardsTable.moduleId, params.data.moduleId) : undefined,
+    params.data.subjectId ? eq(flashcardsTable.subjectId, params.data.subjectId) : undefined,
+    params.data.topicId ? eq(flashcardsTable.topicId, params.data.topicId) : undefined,
+    includeArchived ? undefined : eq(flashcardsTable.archived, false),
+  )).orderBy(desc(flashcardsTable.createdAt));
+  res.json(rows);
+});
+
+router.patch("/flashcards/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const parsed = z.object({
+    front: z.string().min(1).optional(), back: z.string().min(1).optional(),
+    moduleId: z.number().int().positive().nullable().optional(), subjectId: z.number().int().positive().nullable().optional(), topicId: z.number().int().positive().nullable().optional(),
+    module: z.string().optional(), topic: z.string().optional(),
+  }).safeParse(req.body);
+  if (!parsed.success || Number.isNaN(id)) { res.status(400).json({ error: "Invalid flashcard" }); return; }
+  const [row] = await db.update(flashcardsTable).set(parsed.data).where(eq(flashcardsTable.id, id)).returning();
+  if (!row) { res.status(404).json({ error: "Flashcard not found" }); return; }
+  res.json({ ...row, learned: false });
+});
+
 router.delete("/flashcards/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = Number(req.params.id);
   const [row] = await db.update(flashcardsTable).set({ active: false, archived: true }).where(eq(flashcardsTable.id, id)).returning();
@@ -983,13 +1025,26 @@ router.delete("/flashcards/:id", requireAdmin, async (req, res): Promise<void> =
 // Bulk delete for the Flashcards admin screen's multi-select — mirrors
 // /admin/mcqs/bulk. One request instead of N individual DELETE calls from
 // the frontend. Soft-delete (active:false, archived:true), same as the
-// single-flashcard route above.
-const BulkDeleteFlashcardsBody = z.object({ ids: z.array(z.number().int().positive()).min(1).max(500) });
+// single-flashcard route above. Also accepts {all:true, filters} for the
+// tree view's "delete every card in this module/subject/topic" buttons —
+// same shape as the MCQ bank's scoped bulk delete.
+const BulkDeleteFlashcardsBody = z.union([
+  z.object({ ids: z.array(z.number().int().positive()).min(1).max(500) }),
+  z.object({ all: z.literal(true), filters: z.object({ moduleId: z.number().int().optional(), subjectId: z.number().int().optional(), topicId: z.number().int().optional() }).optional() }),
+]);
 
 router.delete("/admin/flashcards/bulk", requireAdmin, async (req, res): Promise<void> => {
   const parsed = BulkDeleteFlashcardsBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
-  const rows = await db.update(flashcardsTable).set({ active: false, archived: true }).where(inArray(flashcardsTable.id, parsed.data.ids)).returning({ id: flashcardsTable.id });
+  const where = "ids" in parsed.data
+    ? inArray(flashcardsTable.id, parsed.data.ids)
+    : and(
+        eq(flashcardsTable.archived, false),
+        parsed.data.filters?.moduleId ? eq(flashcardsTable.moduleId, parsed.data.filters.moduleId) : undefined,
+        parsed.data.filters?.subjectId ? eq(flashcardsTable.subjectId, parsed.data.filters.subjectId) : undefined,
+        parsed.data.filters?.topicId ? eq(flashcardsTable.topicId, parsed.data.filters.topicId) : undefined,
+      );
+  const rows = await db.update(flashcardsTable).set({ active: false, archived: true }).where(where).returning({ id: flashcardsTable.id });
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "FLASHCARD_BULK_DELETED", entity: "flashcard", entityId: 0, metadata: JSON.stringify({ count: rows.length }) });
   res.json({ ok: true, deleted: rows.length });
 });

@@ -123,7 +123,7 @@ export const DEFAULT_IMPORT_PATTERNS = {
   referencePattern: "^\\s*(?:Reference|Ref|Source|Citation)\\s*[:\\-]\\s*(.+)$",
 };
 
-export const TEAM_CATEGORIES = ['reviewer', 'question_setter', 'ownership'] as const;
+export const TEAM_CATEGORIES = ['ownership', 'reviewer', 'question_setter'] as const;
 export type TeamCategory = typeof TEAM_CATEGORIES[number];
 export const TEAM_CATEGORY_LABELS: Record<TeamCategory, string> = { reviewer: 'Reviewers', question_setter: 'Question setters', ownership: 'Ownership' };
 export interface TeamMember { id: number; name: string; role: string; category: TeamCategory; bio: string; achievementBadge: string; photoPath: string | null; linkedinUrl: string; instagramUrl: string; email: string; active: boolean; displayOrder: number }
@@ -396,8 +396,23 @@ export interface AdminFlashcard { id: number; front: string; back: string; modul
 export const flashcardsAdminApi = {
   create: (body: { front: string; back: string; module: string; topic: string; moduleId?: number; subjectId?: number; topicId?: number }) =>
     request<AdminFlashcard>('/flashcards', { method: 'POST', body: JSON.stringify(body) }),
+  // Admin-only listing that keeps moduleId/subjectId/topicId on the wire (see
+  // GET /admin/flashcards) — used for the Module > Subject > Topic bank tree,
+  // same pattern as mcqAdminApi.list().
+  list: (filters?: { moduleId?: number; subjectId?: number; topicId?: number; search?: string }) => {
+    const q = new URLSearchParams();
+    if (filters?.moduleId) q.set('moduleId', String(filters.moduleId));
+    if (filters?.subjectId) q.set('subjectId', String(filters.subjectId));
+    if (filters?.topicId) q.set('topicId', String(filters.topicId));
+    if (filters?.search) q.set('search', filters.search);
+    const qs = q.toString();
+    return request<AdminFlashcard[]>(`/admin/flashcards${qs ? `?${qs}` : ''}`);
+  },
+  update: (id: number, body: Partial<{ front: string; back: string; module: string; topic: string; moduleId: number | null; subjectId: number | null; topicId: number | null }>) =>
+    request<AdminFlashcard>(`/flashcards/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   remove: (id: number) => request<{ ok: true }>(`/flashcards/${id}`, { method: 'DELETE' }),
-  bulkRemove: (ids: number[]) => request<{ ok: true; deleted: number }>('/admin/flashcards/bulk', { method: 'DELETE', body: JSON.stringify({ ids }) }),
+  bulkRemove: (body: { ids: number[] } | { all: true; filters?: { moduleId?: number; subjectId?: number; topicId?: number } }) =>
+    request<{ ok: true; deleted: number }>('/admin/flashcards/bulk', { method: 'DELETE', body: JSON.stringify(body) }),
 };
 
 // ---------------------------------------------------------------------------

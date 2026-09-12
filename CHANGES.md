@@ -1,3 +1,78 @@
+# Round 6 — what changed, by file
+
+Same verification method/caveat as prior rounds: read end-to-end, `esbuild`
+syntax-checked every touched file (all clean), no live DB/browser.
+
+## Subjects/Topics delete not working + duplicate rows
+**Root cause:** `GET /subjects` and `GET /topics` never excluded archived
+(soft-deleted) rows — clicking Delete correctly archived the row server-side,
+but the list query kept showing it anyway, so the delete button looked
+completely broken. Same bug class already fixed for `/admin/mcqs` in an
+earlier round; it just hadn't been applied here. This also explains
+duplicate-looking subjects in the admin UI (old archived ones sitting
+alongside newly re-added ones with the same name). Fixed by excluding
+`archived = true` rows in both routes (`artifacts/api-server/src/routes/
+medschool.ts`) — applies to both admin and student views, since neither
+currently has any "restore an archived subject/topic" UI to justify keeping
+them visible.
+
+## Team section — Ownership on top
+Reordered `TEAM_CATEGORIES` (`ownership` first) in both frontends'
+`lib/api.ts` — this array's order drives the section order on both the
+student Profile page and the admin's team management screen, so one small
+edit in two files covers both.
+
+## MCQ bank usability (admin)
+- **Sticky delete toolbar** — the flat list's Select-all/Delete-selected bar
+  is now `sticky top-2`, so bulk-selecting deep into a long list (380+
+  questions) doesn't require scrolling back to the top to actually delete.
+- **Clickable explanation-status tiles + search** — the Pending/AI
+  Generated/Reviewed/Approved tiles now filter the flat list on click; added
+  a text search box alongside. Fixed the same underlying "response schema
+  strips fields" bug as Round 4's subjects fix, this time for
+  `useListMcqs()` — the flat list now sources from the same `/admin/mcqs`
+  data the tree view uses, so filtering and the module/subject/topic label
+  line actually have real data to work with.
+- **Per-scope permanent delete in the tree view** — "delete every question
+  in this module/subject/topic" buttons at each tree level (backend already
+  supported the `{all:true, filters}` shape; just wasn't exposed anywhere).
+
+## Institutions — Delete permanently
+Was already implemented and working, just hidden until an institution was
+archived first. Now shown directly on active institutions too — the backend
+already safely refuses if programs/students are still attached, so there's
+no real reason to force the extra archive step first.
+
+## Flashcards — categorized like the MCQ bank
+Brought Flashcards up to the same structure as MCQs: a Module > Subject >
+Topic tree (default view, with a Flat list toggle, same as MCQs) instead of
+one uncategorized list, each card individually editable (front/back — this
+didn't exist before at all) and deletable, plus per-scope "delete all in
+this module/subject/topic" buttons at each tree level.
+- **New `GET /admin/flashcards`** (raw rows incl. moduleId/subjectId/topicId,
+  mirrors `/admin/mcqs`) and **`PATCH /flashcards/:id`** (new — flashcards
+  had no edit route at all before).
+- **`DELETE /admin/flashcards/bulk`** extended to also accept
+  `{all:true, filters}`, not just `{ids}`, for the tree's scoped delete.
+- **`artifacts/frontend-admin/src/lib/api.ts`** — `flashcardsAdminApi` grew
+  `list()`/`update()`, and `bulkRemove` now takes either shape.
+- **`artifacts/frontend-admin/src/App.tsx`** — new `FlashcardBankTree` /
+  `FlashcardTreeModule` / `...Subject` / `...Topic` / `...Row` /
+  `FlashcardBulkDeleteInScope`, mirroring the MCQ tree components exactly.
+  Also switched the module dropdown off the student-facing `useListModules()`
+  hook (which doesn't carry `blockId`) onto `moduleAdminApi.listAll()`, so
+  the new Block grouping actually groups correctly.
+
+## Practice screen — fit one screen without scrolling
+`Practice()` in `artifacts/frontend-student/src/App.tsx`: tightened the
+question card's padding, option-row height (`p-4`→`px-3.5 py-2.5`, smaller
+letter badges), and the spacing around the hint/explain/references row and
+Prev/Next buttons. A 5-option question plus those two rows was taller than
+a typical laptop viewport before; this was the single biggest lever without
+redesigning the layout.
+
+---
+
 # Round 5 — what changed, by file
 
 Same verification method/caveat as Rounds 3-4: read end-to-end, `esbuild`

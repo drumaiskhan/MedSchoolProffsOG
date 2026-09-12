@@ -855,7 +855,7 @@ function AdminTopicsPage() {
   </div>;
 }
 
-function ExplanationCoverage() {
+function ExplanationCoverage({ onSelectStatus }: { onSelectStatus?: (status: ExplanationStatus) => void }) {
   const summaryQ = useQuery({ queryKey: ['explanation-summary'], queryFn: explanationsApi.summary });
   const bulkGenerate = useMutation({
     mutationFn: () => explanationsApi.bulkGenerate({ limit: 25 }),
@@ -863,8 +863,8 @@ function ExplanationCoverage() {
   });
   const s = summaryQ.data;
   const pending = s?.PENDING ?? 0;
-  return <div className="mb-6 rounded-2xl border border-border bg-card p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-sm font-bold">Explanation coverage</h3><p className="mt-1 text-xs text-muted-foreground">Explanations imported or written by hand start as Approved. Missing ones start Pending — generate them with AI, then review.</p></div>{pending > 0 && <button onClick={() => bulkGenerate.mutate()} disabled={bulkGenerate.isPending} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-bulk-generate-explanations"><Sparkles size={13} /> {bulkGenerate.isPending ? 'Generating…' : `Generate up to 25 (${pending} pending)`}</button>}</div>
-    <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{(['PENDING', 'AI_GENERATED', 'REVIEWED', 'APPROVED'] as const).map((status) => <div key={status} className="rounded-xl bg-muted p-3 text-center"><div className="font-display text-xl">{s?.[status] ?? 0}</div><div className="mt-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{status.replace('_', ' ')}</div></div>)}</div>
+  return <div className="mb-6 rounded-2xl border border-border bg-card p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-sm font-bold">Explanation coverage</h3><p className="mt-1 text-xs text-muted-foreground">Explanations imported or written by hand start as Approved. Missing ones start Pending — generate them with AI, then review. Click a number to jump to just those questions.</p></div>{pending > 0 && <button onClick={() => bulkGenerate.mutate()} disabled={bulkGenerate.isPending} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-bulk-generate-explanations"><Sparkles size={13} /> {bulkGenerate.isPending ? 'Generating…' : `Generate up to 25 (${pending} pending)`}</button>}</div>
+    <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{(['PENDING', 'AI_GENERATED', 'REVIEWED', 'APPROVED'] as const).map((status) => <button key={status} type="button" onClick={() => onSelectStatus?.(status)} className="rounded-xl bg-muted p-3 text-center transition-colors hover:bg-primary/10" data-testid={`button-filter-explanation-${status}`}><div className="font-display text-xl">{s?.[status] ?? 0}</div><div className="mt-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{status.replace('_', ' ')}</div></button>)}</div>
   </div>;
 }
 
@@ -939,11 +939,29 @@ function McqTreeRow({ mcq }: { mcq: AdminMcqRow }) {
 }
 
 // Topic level — fetched/expanded on demand; shows the MCQs tagged to it.
+// Small "delete every question in this module/subject/topic" control, reused
+// at all three tree levels — uses the server-side {all:true, filters} bulk
+// delete path (unlike the flat list's explicit-id-list approach) since a
+// whole module can hold far more questions than the client has loaded here.
+function BulkDeleteInScope({ label, count, filters }: { label: string; count: number; filters: { moduleId?: number; subjectId?: number; topicId?: number } }) {
+  const [confirming, setConfirming] = useState(false);
+  const bulkDelete = useMutation({
+    mutationFn: () => mcqAdminApi.bulkRemove({ all: true, filters }),
+    onSuccess: (res) => { queryClient.invalidateQueries({ queryKey: getListMcqsQueryKey() }); queryClient.invalidateQueries({ queryKey: ['admin-mcqs-tree'] }); setConfirming(false); toast({ title: `Deleted ${res.deleted} question${res.deleted === 1 ? '' : 's'}` }); },
+    onError: (err: unknown) => toast({ title: 'Bulk delete failed', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
+  if (!count) return null;
+  return <>
+    <button type="button" onClick={(e) => { e.stopPropagation(); setConfirming(true); }} className="rounded-lg p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-all-in-${label.replace(/\s+/g, '-').toLowerCase()}`} aria-label={`Delete all questions in ${label}`}><Trash2 size={13} /></button>
+    {confirming && <ConfirmDialog title={`Delete all ${count} question${count === 1 ? '' : 's'} in "${label}"?`} body="This permanently removes every question in this scope — there is no undo." confirmLabel={`Delete all ${count}`} onCancel={() => setConfirming(false)} onConfirm={() => bulkDelete.mutate()} pending={bulkDelete.isPending} />}
+  </>;
+}
+
 function McqTreeTopic({ topicId, name, mcqsByTopic }: { topicId: number; name: string; mcqsByTopic: Map<number, AdminMcqRow[]> }) {
   const [open, setOpen] = useState(false);
   const rows = mcqsByTopic.get(topicId) ?? [];
   return <div className="rounded-lg border border-border bg-background">
-    <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-bold" data-testid={`button-tree-topic-${topicId}`}><span className="flex items-center gap-2"><ChevronRight size={13} className={cn('transition-transform', open && 'rotate-90')} />{name}</span><span className="text-[10px] font-normal text-muted-foreground">{rows.length} question{rows.length === 1 ? '' : 's'}</span></button>
+    <div className="flex items-center justify-between px-3 py-2"><button onClick={() => setOpen((v) => !v)} className="flex flex-1 items-center gap-2 text-left text-xs font-bold" data-testid={`button-tree-topic-${topicId}`}><ChevronRight size={13} className={cn('transition-transform', open && 'rotate-90')} />{name}</button><span className="text-[10px] font-normal text-muted-foreground">{rows.length} question{rows.length === 1 ? '' : 's'}</span><BulkDeleteInScope label={name} count={rows.length} filters={{ topicId }} /></div>
     {open && <div className="space-y-2 border-t border-border p-3">{rows.length ? rows.map((m) => <McqTreeRow key={m.id} mcq={m} />) : <p className="text-[11px] text-muted-foreground">No questions in this topic yet.</p>}</div>}
   </div>;
 }
@@ -953,8 +971,9 @@ function McqTreeSubject({ subjectId, name, mcqsByTopic }: { subjectId: number; n
   const [open, setOpen] = useState(false);
   const topicsQ = useQuery({ queryKey: ['admin-topics', subjectId], queryFn: () => topicAdminApi.list(subjectId), enabled: open });
   const topics = topicsQ.data ?? [];
+  const subjectCount = [...mcqsByTopic.entries()].filter(([tId]) => topics.some((t) => t.id === tId)).reduce((sum, [, rows]) => sum + rows.length, 0);
   return <div className="rounded-xl border border-border bg-card">
-    <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between px-4 py-2.5 text-left text-xs font-bold" data-testid={`button-tree-subject-${subjectId}`}><span className="flex items-center gap-2"><ChevronRight size={14} className={cn('transition-transform', open && 'rotate-90')} />{name}</span></button>
+    <div className="flex items-center justify-between px-4 py-2.5"><button onClick={() => setOpen((v) => !v)} className="flex flex-1 items-center gap-2 text-left text-xs font-bold" data-testid={`button-tree-subject-${subjectId}`}><ChevronRight size={14} className={cn('transition-transform', open && 'rotate-90')} />{name}</button>{open && <BulkDeleteInScope label={name} count={subjectCount} filters={{ subjectId }} />}</div>
     {open && <div className="space-y-2 border-t border-border p-3">{topicsQ.isLoading ? <p className="text-[11px] text-muted-foreground">Loading topics…</p> : topics.length ? topics.map((t) => <McqTreeTopic key={t.id} topicId={t.id} name={t.name} mcqsByTopic={mcqsByTopic} />) : <p className="text-[11px] text-muted-foreground">No topics in this subject yet.</p>}</div>}
   </div>;
 }
@@ -965,36 +984,33 @@ function McqTreeModule({ moduleId, name, mcqCount, mcqsByTopic }: { moduleId: nu
   const subjectsQ = useQuery({ queryKey: ['admin-subjects', moduleId], queryFn: () => subjectAdminApi.list(moduleId), enabled: open });
   const subjects = subjectsQ.data ?? [];
   return <div className="rounded-2xl border border-border bg-card">
-    <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between px-5 py-3.5 text-left" data-testid={`button-tree-module-${moduleId}`}><span className="flex items-center gap-2 text-sm font-extrabold"><ChevronRight size={16} className={cn('transition-transform', open && 'rotate-90')} />{name}</span><span className="text-[11px] text-muted-foreground">{mcqCount} question{mcqCount === 1 ? '' : 's'}</span></button>
+    <div className="flex items-center justify-between px-5 py-3.5"><button onClick={() => setOpen((v) => !v)} className="flex flex-1 items-center gap-2 text-left text-sm font-extrabold" data-testid={`button-tree-module-${moduleId}`}><ChevronRight size={16} className={cn('transition-transform', open && 'rotate-90')} />{name}</button><span className="text-[11px] text-muted-foreground">{mcqCount} question{mcqCount === 1 ? '' : 's'}</span><BulkDeleteInScope label={name} count={mcqCount} filters={{ moduleId }} /></div>
     {open && <div className="space-y-2 border-t border-border p-4">{subjectsQ.isLoading ? <p className="text-xs text-muted-foreground">Loading subjects…</p> : subjects.length ? subjects.map((s) => <McqTreeSubject key={s.id} subjectId={s.id} name={s.name} mcqsByTopic={mcqsByTopic} />) : <p className="text-xs text-muted-foreground">No subjects in this module yet.</p>}</div>}
   </div>;
 }
 
+// The main curriculum-tree MCQ bank (module > subject > topic). Exam- and
+// past-paper-owned questions (mcqsTable.examId/pastPaperId set) are
+// deliberately NOT shown here anymore — they're their own separate banks,
+// managed entirely from the Pre-Proffs Exams and Past papers pages
+// (ExamManagePanel's "This exam's questions" / AdminPastPapers' "View
+// questions"). This only ever shows main-bank questions: curriculum-tagged,
+// or truly unassigned (no module AND no exam AND no past paper).
 function McqBankTree({ modules, blocks }: { modules: AdminModule[]; blocks: AdminBlock[] }) {
   const treeQ = useQuery({ queryKey: ['admin-mcqs-tree'], queryFn: mcqAdminApi.list });
-  const examsQ = useQuery({ queryKey: ['admin-exams'], queryFn: examsAdminApi.list });
-  const papersQ = useQuery({ queryKey: ['admin-past-papers'], queryFn: () => pastPapersApi.list() });
   const rows = treeQ.data ?? [];
   const mcqsByTopic = new Map<number, AdminMcqRow[]>();
-  const byExam = new Map<number, AdminMcqRow[]>();
-  const byPaper = new Map<number, AdminMcqRow[]>();
   const trulyUnassigned: AdminMcqRow[] = [];
   for (const row of rows) {
-    if (row.topicId === null) {
-      if (row.examId !== null) { const l = byExam.get(row.examId); if (l) l.push(row); else byExam.set(row.examId, [row]); continue; }
-      if (row.pastPaperId !== null) { const l = byPaper.get(row.pastPaperId); if (l) l.push(row); else byPaper.set(row.pastPaperId, [row]); continue; }
-      trulyUnassigned.push(row);
-      continue;
-    }
+    if (row.examId !== null || row.pastPaperId !== null) continue;
+    if (row.topicId === null) { trulyUnassigned.push(row); continue; }
     const list = mcqsByTopic.get(row.topicId);
     if (list) list.push(row); else mcqsByTopic.set(row.topicId, [row]);
   }
   const countByModule = new Map<number, number>();
-  for (const row of rows) if (row.moduleId !== null) countByModule.set(row.moduleId, (countByModule.get(row.moduleId) ?? 0) + 1);
-  const examTitle = (id: number) => examsQ.data?.find((e) => e.id === id)?.title ?? `Exam #${id}`;
-  const paperTitle = (id: number) => papersQ.data?.find((p) => p.id === id)?.title ?? `Past paper #${id}`;
+  for (const row of rows) if (row.moduleId !== null && row.examId === null && row.pastPaperId === null) countByModule.set(row.moduleId, (countByModule.get(row.moduleId) ?? 0) + 1);
   if (treeQ.isLoading) return <SkeletonPage />;
-  if (!modules.length && !byExam.size && !byPaper.size && !trulyUnassigned.length) return <EmptyState icon={CircleHelp} title="No modules yet" body="Create a module first under Academic content, then come back to browse its questions here." />;
+  if (!modules.length && !trulyUnassigned.length) return <EmptyState icon={CircleHelp} title="No modules yet" body="Create a module first under Academic content, then come back to browse its questions here." />;
   // Group modules under their Block so the bank tree reads Block > Module >
   // Subject > Topic, same grouping level the parser's Block filter below
   // narrows by. Modules with no blockId fall into an "Other modules" group.
@@ -1009,20 +1025,13 @@ function McqBankTree({ modules, blocks }: { modules: AdminModule[]; blocks: Admi
       {blocks.length > 0 && <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground" data-testid={`text-mcq-block-group-${g.key}`}>{g.name}</p>}
       {g.mods.map((m) => <McqTreeModule key={m.id} moduleId={m.id} name={m.name} mcqCount={countByModule.get(m.id) ?? 0} mcqsByTopic={mcqsByTopic} />)}
     </div>)}
-    {(!!byExam.size || !!byPaper.size) && <div className="rounded-2xl border border-border bg-card p-4">
-      <p className="mb-3 text-xs font-extrabold">Exam &amp; past-paper question bank</p>
-      <p className="mb-3 text-[11px] text-muted-foreground">Questions imported for a specific exam or past paper — kept in their own bank instead of the module tree above.</p>
-      <div className="space-y-2">
-        {[...byExam.entries()].map(([examId, list]) => <McqSourceGroup key={`exam-${examId}`} label={`Exam: ${examTitle(examId)}`} icon={ClipboardCheck} rows={list} />)}
-        {[...byPaper.entries()].map(([paperId, list]) => <McqSourceGroup key={`paper-${paperId}`} label={`Past paper: ${paperTitle(paperId)}`} icon={FileStack} rows={list} />)}
-      </div>
-    </div>}
     {!!trulyUnassigned.length && <div className="rounded-2xl border border-dashed border-border bg-card p-4"><p className="mb-3 text-xs font-bold text-muted-foreground">{trulyUnassigned.length} question{trulyUnassigned.length === 1 ? '' : 's'} with no module/subject/topic, exam, or past paper</p><div className="space-y-2">{trulyUnassigned.map((m) => <McqTreeRow key={m.id} mcq={m} />)}</div></div>}
   </div>;
 }
 
 // Collapsible group of MCQs that belong to one exam or past paper (no
-// module/subject/topic) — same row component as the module tree uses.
+// module/subject/topic) — same row component as the module tree uses. Used
+// by ExamManagePanel/AdminPastPapers, not the main bank tree above anymore.
 function McqSourceGroup({ label, icon: Icon, rows }: { label: string; icon: typeof FolderOpen; rows: AdminMcqRow[] }) {
   const [open, setOpen] = useState(false);
   return <div className="rounded-xl border border-border bg-background">
@@ -1032,15 +1041,35 @@ function McqSourceGroup({ label, icon: Icon, rows }: { label: string; icon: type
 }
 
 function AdminMcqs() {
-  const q = useListMcqs();
   const create = useCreateMcq();
-  const mcqs = q.data || [];
+  // Shared with McqBankTree's ['admin-mcqs-tree'] cache — the flat list used
+  // to source from the public useListMcqs() hook, whose response schema
+  // strips moduleId/subjectId/topicId/explanationStatus (see GET /mcqs's
+  // comment), so the explanation badges and the new status filter below
+  // couldn't actually work against it. This is the same admin-only /admin/mcqs
+  // data the tree view already uses, so switching views doesn't refetch.
+  const mcqsTreeQ = useQuery({ queryKey: ['admin-mcqs-tree'], queryFn: mcqAdminApi.list });
+  const allMcqs = mcqsTreeQ.data ?? [];
+  const modulesForNamesQ = useQuery({ queryKey: ['admin-modules'], queryFn: moduleAdminApi.listAll });
+  const subjectsForNamesQ = useQuery({ queryKey: ['admin-subjects-all'], queryFn: () => subjectAdminApi.list() });
+  const topicsForNamesQ = useQuery({ queryKey: ['admin-topics-all'], queryFn: () => topicAdminApi.list() });
+  const moduleName = (id: number | null) => id === null ? '—' : (modulesForNamesQ.data?.find((m) => m.id === id)?.name ?? `Module #${id}`);
+  const subjectName = (id: number | null) => id === null ? '—' : (subjectsForNamesQ.data?.find((s) => s.id === id)?.name ?? `Subject #${id}`);
+  const topicName = (id: number | null) => id === null ? '—' : (topicsForNamesQ.data?.find((t) => t.id === id)?.name ?? `Topic #${id}`);
+  // Flat-list search + explanation-status filter (the latter driven by
+  // clicking a tile in ExplanationCoverage below).
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<ExplanationStatus | null>(null);
+  const mcqs = allMcqs.filter((m) =>
+    (!search.trim() || m.question.toLowerCase().includes(search.trim().toLowerCase())) &&
+    (!statusFilter || m.explanationStatus === statusFilter));
   const [manualOpen, setManualOpen] = useState(false);
   const [bulkAddOpen, setBulkAddOpen] = useState(false);
   const [profilesOpen, setProfilesOpen] = useState(false);
   const [deletingMcqId, setDeletingMcqId] = useState<number | null>(null);
   const [bankView, setBankView] = useState<'tree' | 'flat'>('tree');
-  const removeMcq = useMutation({ mutationFn: mcqAdminApi.remove, onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListMcqsQueryKey() }); setDeletingMcqId(null); }, onError: (err: unknown) => toast({ title: 'Could not delete question', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
+  const invalidateMcqs = () => { queryClient.invalidateQueries({ queryKey: getListMcqsQueryKey() }); queryClient.invalidateQueries({ queryKey: ['admin-mcqs-tree'] }); };
+  const removeMcq = useMutation({ mutationFn: mcqAdminApi.remove, onSuccess: () => { invalidateMcqs(); setDeletingMcqId(null); }, onError: (err: unknown) => toast({ title: 'Could not delete question', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
 
   // Multi-select for bulk actions on the flat list view.
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -1048,8 +1077,12 @@ function AdminMcqs() {
   const toggleSelected = (id: number) => setSelectedIds((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
   const toggleSelectAll = () => setSelectedIds((prev) => prev.size === mcqs.length ? new Set() : new Set(mcqs.map((m) => m.id)));
   const bulkDelete = useMutation({
-    mutationFn: (body: Parameters<typeof mcqAdminApi.bulkRemove>[0]) => mcqAdminApi.bulkRemove(body),
-    onSuccess: (res) => { queryClient.invalidateQueries({ queryKey: getListMcqsQueryKey() }); setSelectedIds(new Set()); setBulkDeleteMode(null); toast({ title: `Deleted ${res.deleted} question${res.deleted === 1 ? '' : 's'}` }); },
+    // Always an explicit id list, even for "delete all in view" — the
+    // server-side {all:true, filters} path doesn't know about the
+    // explanationStatus filter (client-only, see above), so this is the one
+    // approach that reliably matches whatever's actually on screen.
+    mutationFn: (ids: number[]) => mcqAdminApi.bulkRemove({ ids }),
+    onSuccess: (res) => { invalidateMcqs(); setSelectedIds(new Set()); setBulkDeleteMode(null); toast({ title: `Deleted ${res.deleted} question${res.deleted === 1 ? '' : 's'}` }); },
     onError: (err: unknown) => toast({ title: 'Bulk delete failed', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
   const bulkAddRowsInit = () => [{ question: '', a: '', b: '', c: '', d: '', e: '', correct: 'a', explanation: '', ea: '', eb: '', ec: '', ed: '', ee: '', difficulty: 'moderate', showOptionExplanations: false }];
@@ -1197,7 +1230,7 @@ function AdminMcqs() {
       create.mutate({ data: { question: String(f.get('question')), options, correctAnswer: correctAnswer ?? '', explanation: String(f.get('explanation')), reference: '', difficulty: String(f.get('difficulty') || 'moderate'), moduleId: Number(moduleId), subjectId: Number(subjectId), topicId: Number(topicId) } }, { onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListMcqsQueryKey() }); e.currentTarget.reset(); } });
     }} className="mt-6 space-y-3 rounded-2xl border border-border bg-card p-5">{!targetReady && <p className="text-[11px] font-semibold text-[#8a5a12]">Select module/subject/topic above first.</p>}<textarea name="question" required placeholder="Write the question..." className="min-h-20 w-full rounded-xl border border-border bg-background p-3 text-xs" data-testid="input-mcq-question" /><div className="grid gap-3 sm:grid-cols-2">{['a', 'b', 'c', 'd', 'e'].map((x) => <input key={x} name={x} required={x !== 'e'} placeholder={`Option ${x.toUpperCase()}${x === 'e' ? ' (optional)' : ''}`} className="h-10 rounded-xl border border-border bg-background px-3 text-xs" data-testid={`input-mcq-option-${x}`} />)}</div><div className="grid gap-3 sm:grid-cols-2"><label className="flex items-center gap-2 text-xs font-bold">Correct answer<select name="correct" required className="h-9 flex-1 rounded-lg border border-border bg-background px-2 text-xs font-normal" data-testid="select-mcq-correct"><option value="">Select the correct option</option>{['a', 'b', 'c', 'd', 'e'].map((x) => <option key={x} value={x}>{x.toUpperCase()}</option>)}</select></label><label className="flex items-center gap-2 text-xs font-bold">Difficulty<select name="difficulty" defaultValue="moderate" className="h-9 flex-1 rounded-lg border border-border bg-background px-2 text-xs font-normal capitalize" data-testid="select-mcq-difficulty">{['easy', 'moderate', 'hard'].map((x) => <option key={x} value={x}>{x}</option>)}</select></label></div><input name="explanation" placeholder="Explanation shown after answer" className="h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-mcq-explanation" /><button disabled={!targetReady} className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-save-mcq">Save as draft</button></form>}
 
-    <div className="mt-8"><SectionHeader eyebrow="Question bank" title={`${mcqs.length} questions`} action={<div className="flex flex-wrap items-center gap-2"><button onClick={() => setBulkAddOpen((v) => !v)} className="rounded-xl border border-border bg-card px-3 py-2 text-xs font-bold" data-testid="button-toggle-bulk-add">Add multiple</button><div className="flex overflow-hidden rounded-xl border border-border text-xs font-bold"><button onClick={() => setBankView('tree')} className={cn('px-3 py-2', bankView === 'tree' ? 'bg-primary text-primary-foreground' : 'bg-card')} data-testid="button-bank-view-tree">Module tree</button><button onClick={() => setBankView('flat')} className={cn('px-3 py-2', bankView === 'flat' ? 'bg-primary text-primary-foreground' : 'bg-card')} data-testid="button-bank-view-flat">Flat list</button></div></div>} /><ExplanationCoverage />
+    <div className="mt-8"><SectionHeader eyebrow="Question bank" title={`${allMcqs.length} questions`} action={<div className="flex flex-wrap items-center gap-2"><button onClick={() => setBulkAddOpen((v) => !v)} className="rounded-xl border border-border bg-card px-3 py-2 text-xs font-bold" data-testid="button-toggle-bulk-add">Add multiple</button><div className="flex overflow-hidden rounded-xl border border-border text-xs font-bold"><button onClick={() => setBankView('tree')} className={cn('px-3 py-2', bankView === 'tree' ? 'bg-primary text-primary-foreground' : 'bg-card')} data-testid="button-bank-view-tree">Module tree</button><button onClick={() => setBankView('flat')} className={cn('px-3 py-2', bankView === 'flat' ? 'bg-primary text-primary-foreground' : 'bg-card')} data-testid="button-bank-view-flat">Flat list</button></div></div>} /><ExplanationCoverage onSelectStatus={(status) => { setStatusFilter(status); setBankView('flat'); }} />
 
       {bulkAddOpen && <div className="mt-4 space-y-4 rounded-2xl border border-primary/30 bg-[#eef7f1] p-5">
         <div className="flex items-center justify-between"><p className="text-xs font-bold">Add multiple MCQs at once — uses the module/subject/topic selected above.</p><button onClick={() => setBulkRows((rows) => [...rows, ...bulkAddRowsInit()])} className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[11px] font-bold" data-testid="button-add-bulk-row"><Plus size={12} /> Add row</button></div>
@@ -1219,12 +1252,21 @@ function AdminMcqs() {
         <div className="flex gap-2"><button disabled={!targetReady || bulkCreateMutation.isPending} onClick={() => bulkCreateMutation.mutate()} className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-save-bulk-mcqs">{bulkCreateMutation.isPending ? 'Adding…' : `Add ${bulkRows.filter((r) => r.question.trim()).length} questions`}</button><button onClick={() => { setBulkAddOpen(false); setBulkRows(bulkAddRowsInit()); }} className="rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold" data-testid="button-cancel-bulk-mcqs">Cancel</button></div>
       </div>}
 
-      {bankView === 'tree' ? <McqBankTree modules={allModules} blocks={blocks} /> : (mcqs.length ? <div className="space-y-3">
-        <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-2.5"><label className="flex items-center gap-2 text-xs font-bold"><input type="checkbox" checked={selectedIds.size > 0 && selectedIds.size === mcqs.length} onChange={toggleSelectAll} data-testid="checkbox-select-all-mcqs" />{selectedIds.size > 0 ? `${selectedIds.size} selected` : 'Select all'}</label><div className="flex gap-2">{selectedIds.size > 0 && <button onClick={() => setBulkDeleteMode('selected')} className="inline-flex items-center gap-1 rounded-lg border border-destructive/30 px-2.5 py-1.5 text-[11px] font-bold text-destructive" data-testid="button-bulk-delete-selected"><Trash2 size={12} /> Delete selected</button>}<button onClick={() => setBulkDeleteMode('all')} className="inline-flex items-center gap-1 rounded-lg border border-destructive/30 px-2.5 py-1.5 text-[11px] font-bold text-destructive" data-testid="button-bulk-delete-all"><Trash2 size={12} /> Delete all ({mcqs.length})</button></div></div>
-        {mcqs.map((m) => <div key={m.id} className="rounded-2xl border border-border bg-card p-5" data-testid={`card-mcq-${m.id}`}><div className="flex items-center justify-between"><div className="flex items-center gap-2"><input type="checkbox" checked={selectedIds.has(m.id)} onChange={() => toggleSelected(m.id)} data-testid={`checkbox-select-mcq-${m.id}`} /><Badge tone={m.status === 'published' ? 'green' : 'amber'}>{m.status}</Badge></div><div className="flex items-center gap-2"><span className="text-[10px] text-muted-foreground">{m.difficulty}</span><button onClick={() => setDeletingMcqId(m.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-mcq-${m.id}`}><Trash2 size={14} /></button></div></div><p className="mt-4 text-sm font-bold leading-6">{m.question}</p><div className="mt-3 text-xs text-muted-foreground">{m.module} · {m.subject} · {m.topic}</div><McqExplanationRow mcq={m} /></div>)}</div> : <EmptyState icon={CircleHelp} title="Your question bank is quiet" body="Upload a file above to bulk-import questions in seconds." />)}
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <div className="relative max-w-sm flex-1"><Search className="absolute left-3 top-2.5 text-muted-foreground" size={15} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Find a question by text..." className="h-10 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-xs outline-none" data-testid="input-search-mcqs" /></div>
+        {statusFilter && <button onClick={() => setStatusFilter(null)} className="inline-flex items-center gap-1.5 rounded-xl bg-[#eef7f1] px-3 py-2 text-[11px] font-bold text-primary" data-testid="button-clear-explanation-filter">Explanation: {statusFilter.replace('_', ' ')} <X size={12} /></button>}
+        {(search.trim() || statusFilter) && <span className="text-[11px] text-muted-foreground">{mcqs.length} match{mcqs.length === 1 ? '' : 'es'}</span>}
+      </div>
+
+      {bankView === 'tree' ? <McqBankTree modules={allModules} blocks={blocks} /> : (mcqs.length ? <div className="mt-3 space-y-3">
+        {/* Sticky so bulk-selecting deep into a long list (380+ questions)
+            never means scrolling all the way back to the top just to reach
+            the delete action. */}
+        <div className="sticky top-2 z-10 flex items-center justify-between rounded-xl border border-border bg-card px-4 py-2.5 shadow-sm"><label className="flex items-center gap-2 text-xs font-bold"><input type="checkbox" checked={selectedIds.size > 0 && selectedIds.size === mcqs.length} onChange={toggleSelectAll} data-testid="checkbox-select-all-mcqs" />{selectedIds.size > 0 ? `${selectedIds.size} selected` : 'Select all'}</label><div className="flex gap-2">{selectedIds.size > 0 && <button onClick={() => setBulkDeleteMode('selected')} className="inline-flex items-center gap-1 rounded-lg border border-destructive/30 px-2.5 py-1.5 text-[11px] font-bold text-destructive" data-testid="button-bulk-delete-selected"><Trash2 size={12} /> Delete selected</button>}<button onClick={() => setBulkDeleteMode('all')} className="inline-flex items-center gap-1 rounded-lg border border-destructive/30 px-2.5 py-1.5 text-[11px] font-bold text-destructive" data-testid="button-bulk-delete-all"><Trash2 size={12} /> Delete all ({mcqs.length})</button></div></div>
+        {mcqs.map((m) => <div key={m.id} className="rounded-2xl border border-border bg-card p-5" data-testid={`card-mcq-${m.id}`}><div className="flex items-center justify-between"><div className="flex items-center gap-2"><input type="checkbox" checked={selectedIds.has(m.id)} onChange={() => toggleSelected(m.id)} data-testid={`checkbox-select-mcq-${m.id}`} /><Badge tone={m.status === 'published' ? 'green' : 'amber'}>{m.status}</Badge></div><div className="flex items-center gap-2"><span className="text-[10px] text-muted-foreground">{m.difficulty}</span><button onClick={() => setDeletingMcqId(m.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-mcq-${m.id}`}><Trash2 size={14} /></button></div></div><p className="mt-4 text-sm font-bold leading-6">{m.question}</p><div className="mt-3 text-xs text-muted-foreground">{moduleName(m.moduleId)} · {subjectName(m.subjectId)} · {topicName(m.topicId)}</div><McqExplanationRow mcq={m} /></div>)}</div> : <EmptyState icon={CircleHelp} title={search.trim() || statusFilter ? 'No questions match' : 'Your question bank is quiet'} body={search.trim() || statusFilter ? 'Try a different search term or clear the explanation filter above.' : 'Upload a file above to bulk-import questions in seconds.'} />)}
       {deletingMcqId !== null && <ConfirmDialog title="Delete this question?" body="It will be removed from the bank and from any draft exams using it." onCancel={() => setDeletingMcqId(null)} onConfirm={() => removeMcq.mutate(deletingMcqId)} pending={removeMcq.isPending} />}
-      {bulkDeleteMode === 'selected' && <ConfirmDialog title={`Delete ${selectedIds.size} selected question${selectedIds.size === 1 ? '' : 's'}?`} body="They'll be removed from the bank and from any draft exams using them." confirmLabel="Delete selected" onCancel={() => setBulkDeleteMode(null)} onConfirm={() => bulkDelete.mutate({ ids: Array.from(selectedIds) })} pending={bulkDelete.isPending} />}
-      {bulkDeleteMode === 'all' && <ConfirmDialog title={`Delete all ${mcqs.length} questions in this view?`} body="This removes every question currently loaded in the flat list. There is no undo." confirmLabel={`Delete all ${mcqs.length}`} onCancel={() => setBulkDeleteMode(null)} onConfirm={() => bulkDelete.mutate({ all: true })} pending={bulkDelete.isPending} />}
+      {bulkDeleteMode === 'selected' && <ConfirmDialog title={`Delete ${selectedIds.size} selected question${selectedIds.size === 1 ? '' : 's'}?`} body="They'll be removed from the bank and from any draft exams using them." confirmLabel="Delete selected" onCancel={() => setBulkDeleteMode(null)} onConfirm={() => bulkDelete.mutate(Array.from(selectedIds))} pending={bulkDelete.isPending} />}
+      {bulkDeleteMode === 'all' && <ConfirmDialog title={`Delete all ${mcqs.length} questions in this view?`} body="This removes every question currently loaded in the flat list (matching your search/filter, if any). There is no undo." confirmLabel={`Delete all ${mcqs.length}`} onCancel={() => setBulkDeleteMode(null)} onConfirm={() => bulkDelete.mutate(mcqs.map((m) => m.id))} pending={bulkDelete.isPending} />}
       </div>
   </div>;
 }
@@ -1502,7 +1544,11 @@ function AdminInstitutionsList({ selectedId, onSelect }: { selectedId: number | 
         {renamingId !== i.id && <div className="flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
           <button type="button" onClick={() => { setRenamingId(i.id); setRenameValue(i.name); }} className="text-[10px] font-bold text-primary" data-testid={`button-rename-institution-${i.id}`}>Rename</button>
           <button type="button" onClick={() => toggleInstitution.mutate({ id: i.id, active: !i.active })} className="text-[10px] font-bold text-primary" data-testid={`button-toggle-institution-${i.id}`}>{i.active ? 'Archive' : 'Activate'}</button>
-          {!i.active && <button type="button" onClick={() => setDeletingPermanentId(i.id)} className="text-[10px] font-bold text-destructive" data-testid={`button-delete-permanent-institution-${i.id}`}>Delete permanently</button>}
+          {/* No longer gated behind "archived first" — the backend already
+              safely refuses (with a clear error) if programs/students are
+              still attached, so there's no need to force admins through
+              Archive before they can even attempt a permanent delete. */}
+          <button type="button" onClick={() => setDeletingPermanentId(i.id)} className="text-[10px] font-bold text-destructive" data-testid={`button-delete-permanent-institution-${i.id}`}>Delete permanently</button>
         </div>}
       </div>)}
       {!institutions.data?.length && <p className="text-xs text-muted-foreground">No institutions yet — add one below.</p>}
@@ -1900,6 +1946,7 @@ function AdminPastPapers() {
   const removePermanent = useMutation({ mutationFn: pastPapersApi.removePermanent, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['admin-past-papers'] }); setDeletingId(null); }, onError: (err: unknown) => toast({ title: 'Could not delete paper', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
   const [open, setOpen] = useState(false);
   const [uploadingId, setUploadingId] = useState<number | null>(null);
+  const [viewingId, setViewingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [formProgramId, setFormProgramId] = useState('');
   const programsQ = useQuery({ queryKey: ['admin-programs-flat'], queryFn: () => academicApi.programs(undefined, true) });
@@ -1911,11 +1958,25 @@ function AdminPastPapers() {
       <select name="academicYearId" disabled={!formProgramId} className="h-10 rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-paper-academic-year"><option value="">All years</option>{(academicYearsQ.data || []).map((y) => <option key={y.id} value={y.id}>{y.label}</option>)}</select>
       <input name="level" placeholder="Level label, e.g. 3rd Year MBBS (display only)" className="h-10 rounded-xl border border-border bg-card px-3 text-xs md:col-span-2" data-testid="input-paper-level" /><div className="flex gap-2"><button className="rounded-xl bg-primary px-4 text-xs font-bold text-primary-foreground" data-testid="button-save-paper">Save</button><button type="button" onClick={() => setOpen(false)} className="rounded-xl border border-border bg-card px-4 text-xs font-bold" data-testid="button-cancel-paper">Cancel</button></div></form>}
     <div className="rounded-2xl border border-border bg-card">{(papers.data || []).map((p) => <div key={p.id} className="border-b border-border p-5 last:border-0" data-testid={`row-admin-paper-${p.id}`}>
-      <div className="flex items-center gap-4"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#dceaf1] text-[#32647b]"><FileStack size={17} /></div><div className="flex-1"><div className="text-sm font-bold">{p.title}</div><div className="mt-1 text-xs text-muted-foreground">{[p.examBoard, p.year, p.level].filter(Boolean).join(' · ')} · {p.mcqCount} MCQs linked</div></div><button onClick={() => setUploadingId(uploadingId === p.id ? null : p.id)} className={cn('inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold', uploadingId === p.id ? 'bg-[#eef7f1] text-primary' : 'border border-border text-muted-foreground hover:bg-muted')} data-testid={`button-upload-paper-${p.id}`}><UploadCloud size={12} /> Upload questions</button><button onClick={() => toggle.mutate({ id: p.id, active: !p.active })} className={cn('rounded-lg px-3 py-1.5 text-[11px] font-bold', p.active ? 'bg-[#d7eee4] text-[#164b4b]' : 'bg-muted text-muted-foreground')} data-testid={`button-toggle-paper-${p.id}`}>{p.active ? 'Published' : 'Hidden'}</button><button onClick={() => setDeletingId(p.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-paper-${p.id}`}><Trash2 size={15} /></button></div>
+      <div className="flex items-center gap-4"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#dceaf1] text-[#32647b]"><FileStack size={17} /></div><div className="flex-1"><div className="text-sm font-bold">{p.title}</div><div className="mt-1 text-xs text-muted-foreground">{[p.examBoard, p.year, p.level].filter(Boolean).join(' · ')} · {p.mcqCount} MCQs linked</div></div><button onClick={() => setViewingId(viewingId === p.id ? null : p.id)} className={cn('inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold', viewingId === p.id ? 'bg-[#eef7f1] text-primary' : 'border border-border text-muted-foreground hover:bg-muted')} data-testid={`button-view-paper-questions-${p.id}`}><CircleHelp size={12} /> View questions</button><button onClick={() => setUploadingId(uploadingId === p.id ? null : p.id)} className={cn('inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold', uploadingId === p.id ? 'bg-[#eef7f1] text-primary' : 'border border-border text-muted-foreground hover:bg-muted')} data-testid={`button-upload-paper-${p.id}`}><UploadCloud size={12} /> Upload questions</button><button onClick={() => toggle.mutate({ id: p.id, active: !p.active })} className={cn('rounded-lg px-3 py-1.5 text-[11px] font-bold', p.active ? 'bg-[#d7eee4] text-[#164b4b]' : 'bg-muted text-muted-foreground')} data-testid={`button-toggle-paper-${p.id}`}>{p.active ? 'Published' : 'Hidden'}</button><button onClick={() => setDeletingId(p.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-paper-${p.id}`}><Trash2 size={15} /></button></div>
+      {viewingId === p.id && <div className="mt-4 border-t border-border pt-4"><PastPaperQuestionsList pastPaperId={p.id} /></div>}
       {uploadingId === p.id && <div className="mt-4 border-t border-border pt-4"><PastPaperUploader pastPaperId={p.id} onImported={() => setUploadingId(null)} /></div>}
     </div>)}{!papers.data?.length && <EmptyState icon={FileStack} title="No past papers yet" body="Add a paper, then upload its questions or attach them from the MCQ bank." />}</div>
     {deletingId !== null && <ConfirmDialog title="Permanently delete this past paper?" body="This erases the paper for good — MCQs already linked to it stay in the bank but lose the paper tag. There is no undo." confirmLabel="Delete forever" onCancel={() => setDeletingId(null)} onConfirm={() => removePermanent.mutate(deletingId)} pending={removePermanent.isPending} />}
   </div>;
+}
+
+// This paper's own question bank — MCQs with pastPaperId set are exclusively
+// owned by their paper (no junction table like exams have), so this is a
+// straight filter of the same admin MCQ list the main bank tree uses,
+// reusing McqTreeRow for edit/delete so it behaves identically to editing a
+// question there.
+function PastPaperQuestionsList({ pastPaperId }: { pastPaperId: number }) {
+  const treeQ = useQuery({ queryKey: ['admin-mcqs-tree'], queryFn: mcqAdminApi.list });
+  const rows = (treeQ.data ?? []).filter((m) => m.pastPaperId === pastPaperId);
+  if (treeQ.isLoading) return <p className="text-[11px] text-muted-foreground">Loading…</p>;
+  if (!rows.length) return <p className="text-[11px] text-muted-foreground">No questions yet — upload some below.</p>;
+  return <div className="max-h-96 space-y-2 overflow-y-auto pr-1">{rows.map((m) => <McqTreeRow key={m.id} mcq={m} />)}</div>;
 }
 
 // Compact bulk-import widget scoped to one past paper — parses a file into
@@ -1964,9 +2025,112 @@ function PastPaperUploader({ pastPaperId, onImported }: { pastPaperId: number; o
   </div>;
 }
 
+// Editable row for one flashcard — front/back text, inline edit, delete.
+// Mirrors McqTreeRow's shape (edit form replaces the display on click).
+function FlashcardTreeRow({ card }: { card: AdminFlashcard }) {
+  const [editing, setEditing] = useState(false);
+  const [front, setFront] = useState(card.front);
+  const [back, setBack] = useState(card.back);
+  const [deleting, setDeleting] = useState(false);
+  const invalidate = () => { queryClient.invalidateQueries({ queryKey: ['admin-flashcards-tree'] }); queryClient.invalidateQueries({ queryKey: getListFlashcardsQueryKey() }); };
+  const update = useMutation({ mutationFn: () => flashcardsAdminApi.update(card.id, { front: front.trim(), back: back.trim() }), onSuccess: () => { invalidate(); setEditing(false); }, onError: (err: unknown) => toast({ title: 'Could not save flashcard', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
+  const remove = useMutation({ mutationFn: () => flashcardsAdminApi.remove(card.id), onSuccess: () => { invalidate(); setDeleting(false); }, onError: (err: unknown) => toast({ title: 'Could not delete flashcard', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
+
+  if (editing) return <div className="rounded-xl border border-primary/30 bg-[#eef7f1] p-3" data-testid={`row-edit-flashcard-${card.id}`}>
+    <textarea value={front} onChange={(e) => setFront(e.target.value)} placeholder="Front" className="min-h-14 w-full rounded-lg border border-border bg-card p-2 text-xs" data-testid={`input-edit-flashcard-front-${card.id}`} />
+    <textarea value={back} onChange={(e) => setBack(e.target.value)} placeholder="Back" className="mt-2 min-h-14 w-full rounded-lg border border-border bg-card p-2 text-xs" data-testid={`input-edit-flashcard-back-${card.id}`} />
+    <div className="mt-2 flex gap-2"><button type="button" disabled={update.isPending || !front.trim() || !back.trim()} onClick={() => update.mutate()} className="rounded-lg bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground disabled:opacity-50" data-testid={`button-save-flashcard-${card.id}`}>Save</button><button type="button" onClick={() => { setEditing(false); setFront(card.front); setBack(card.back); }} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold text-muted-foreground" data-testid={`button-cancel-edit-flashcard-${card.id}`}>Cancel</button></div>
+  </div>;
+  return <div className="rounded-xl border border-border bg-card p-3" data-testid={`row-flashcard-${card.id}`}>
+    <div className="flex items-start justify-between gap-2"><p className="text-xs font-bold leading-5">{card.front}</p><div className="flex shrink-0 items-center gap-1"><button type="button" onClick={() => setEditing(true)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" data-testid={`button-edit-flashcard-${card.id}`}><Pencil size={13} /></button><button type="button" onClick={() => setDeleting(true)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-flashcard-${card.id}`}><Trash2 size={13} /></button></div></div>
+    <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{card.back}</p>
+    {deleting && <ConfirmDialog title="Delete this flashcard?" body="This cannot be undone." onCancel={() => setDeleting(false)} onConfirm={() => remove.mutate()} pending={remove.isPending} />}
+  </div>;
+}
+
+// "Delete every flashcard in this scope" — mirrors BulkDeleteInScope for MCQs.
+function FlashcardBulkDeleteInScope({ label, count, filters }: { label: string; count: number; filters: { moduleId?: number; subjectId?: number; topicId?: number } }) {
+  const [confirming, setConfirming] = useState(false);
+  const bulkDelete = useMutation({
+    mutationFn: () => flashcardsAdminApi.bulkRemove({ all: true, filters }),
+    onSuccess: (res) => { queryClient.invalidateQueries({ queryKey: ['admin-flashcards-tree'] }); queryClient.invalidateQueries({ queryKey: getListFlashcardsQueryKey() }); setConfirming(false); toast({ title: `Deleted ${res.deleted} flashcard${res.deleted === 1 ? '' : 's'}` }); },
+    onError: (err: unknown) => toast({ title: 'Bulk delete failed', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
+  if (!count) return null;
+  return <>
+    <button type="button" onClick={(e) => { e.stopPropagation(); setConfirming(true); }} className="rounded-lg p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-all-flashcards-in-${label.replace(/\s+/g, '-').toLowerCase()}`} aria-label={`Delete all flashcards in ${label}`}><Trash2 size={13} /></button>
+    {confirming && <ConfirmDialog title={`Delete all ${count} flashcard${count === 1 ? '' : 's'} in "${label}"?`} body="This removes every flashcard in this scope — there is no undo." confirmLabel={`Delete all ${count}`} onCancel={() => setConfirming(false)} onConfirm={() => bulkDelete.mutate()} pending={bulkDelete.isPending} />}
+  </>;
+}
+
+function FlashcardTreeTopic({ topicId, name, cardsByTopic }: { topicId: number; name: string; cardsByTopic: Map<number, AdminFlashcard[]> }) {
+  const [open, setOpen] = useState(false);
+  const rows = cardsByTopic.get(topicId) ?? [];
+  return <div className="rounded-lg border border-border bg-background">
+    <div className="flex items-center justify-between px-3 py-2"><button onClick={() => setOpen((v) => !v)} className="flex flex-1 items-center gap-2 text-left text-xs font-bold" data-testid={`button-flashcard-tree-topic-${topicId}`}><ChevronRight size={13} className={cn('transition-transform', open && 'rotate-90')} />{name}</button><span className="text-[10px] font-normal text-muted-foreground">{rows.length} card{rows.length === 1 ? '' : 's'}</span><FlashcardBulkDeleteInScope label={name} count={rows.length} filters={{ topicId }} /></div>
+    {open && <div className="space-y-2 border-t border-border p-3">{rows.length ? rows.map((c) => <FlashcardTreeRow key={c.id} card={c} />) : <p className="text-[11px] text-muted-foreground">No flashcards in this topic yet.</p>}</div>}
+  </div>;
+}
+
+function FlashcardTreeSubject({ subjectId, name, cardsByTopic }: { subjectId: number; name: string; cardsByTopic: Map<number, AdminFlashcard[]> }) {
+  const [open, setOpen] = useState(false);
+  const topicsQ = useQuery({ queryKey: ['admin-topics', subjectId], queryFn: () => topicAdminApi.list(subjectId), enabled: open });
+  const topics = topicsQ.data ?? [];
+  const subjectCount = [...cardsByTopic.entries()].filter(([tId]) => topics.some((t) => t.id === tId)).reduce((sum, [, rows]) => sum + rows.length, 0);
+  return <div className="rounded-xl border border-border bg-card">
+    <div className="flex items-center justify-between px-4 py-2.5"><button onClick={() => setOpen((v) => !v)} className="flex flex-1 items-center gap-2 text-left text-xs font-bold" data-testid={`button-flashcard-tree-subject-${subjectId}`}><ChevronRight size={14} className={cn('transition-transform', open && 'rotate-90')} />{name}</button>{open && <FlashcardBulkDeleteInScope label={name} count={subjectCount} filters={{ subjectId }} />}</div>
+    {open && <div className="space-y-2 border-t border-border p-3">{topicsQ.isLoading ? <p className="text-[11px] text-muted-foreground">Loading topics…</p> : topics.length ? topics.map((t) => <FlashcardTreeTopic key={t.id} topicId={t.id} name={t.name} cardsByTopic={cardsByTopic} />) : <p className="text-[11px] text-muted-foreground">No topics in this subject yet.</p>}</div>}
+  </div>;
+}
+
+function FlashcardTreeModule({ moduleId, name, cardCount, cardsByTopic }: { moduleId: number; name: string; cardCount: number; cardsByTopic: Map<number, AdminFlashcard[]> }) {
+  const [open, setOpen] = useState(false);
+  const subjectsQ = useQuery({ queryKey: ['admin-subjects', moduleId], queryFn: () => subjectAdminApi.list(moduleId), enabled: open });
+  const subjects = subjectsQ.data ?? [];
+  return <div className="rounded-2xl border border-border bg-card">
+    <div className="flex items-center justify-between px-5 py-3.5"><button onClick={() => setOpen((v) => !v)} className="flex flex-1 items-center gap-2 text-left text-sm font-extrabold" data-testid={`button-flashcard-tree-module-${moduleId}`}><ChevronRight size={16} className={cn('transition-transform', open && 'rotate-90')} />{name}</button><span className="text-[11px] text-muted-foreground">{cardCount} card{cardCount === 1 ? '' : 's'}</span><FlashcardBulkDeleteInScope label={name} count={cardCount} filters={{ moduleId }} /></div>
+    {open && <div className="space-y-2 border-t border-border p-4">{subjectsQ.isLoading ? <p className="text-xs text-muted-foreground">Loading subjects…</p> : subjects.length ? subjects.map((s) => <FlashcardTreeSubject key={s.id} subjectId={s.id} name={s.name} cardsByTopic={cardsByTopic} />) : <p className="text-xs text-muted-foreground">No subjects in this module yet.</p>}</div>}
+  </div>;
+}
+
+// Flashcard bank tree (module > subject > topic) — mirrors McqBankTree so
+// flashcards get the same "not all crammed onto one screen" browsing and the
+// same per-scope permanent delete as the MCQ bank.
+function FlashcardBankTree({ modules, blocks }: { modules: AdminModule[]; blocks: AdminBlock[] }) {
+  const treeQ = useQuery({ queryKey: ['admin-flashcards-tree'], queryFn: () => flashcardsAdminApi.list() });
+  const rows = treeQ.data ?? [];
+  const cardsByTopic = new Map<number, AdminFlashcard[]>();
+  const trulyUnassigned: AdminFlashcard[] = [];
+  for (const row of rows) {
+    if (row.topicId == null) { trulyUnassigned.push(row); continue; }
+    const list = cardsByTopic.get(row.topicId);
+    if (list) list.push(row); else cardsByTopic.set(row.topicId, [row]);
+  }
+  const countByModule = new Map<number, number>();
+  for (const row of rows) if (row.moduleId != null) countByModule.set(row.moduleId, (countByModule.get(row.moduleId) ?? 0) + 1);
+  if (treeQ.isLoading) return <SkeletonPage />;
+  if (!modules.length && !trulyUnassigned.length) return <EmptyState icon={Zap} title="No modules yet" body="Create a module first under Academic content, then come back to browse its flashcards here." />;
+  const modulesByBlock = new Map<number | 'other', AdminModule[]>();
+  for (const m of modules) { const key = m.blockId ?? 'other'; const list = modulesByBlock.get(key); if (list) list.push(m); else modulesByBlock.set(key, [m]); }
+  const blockGroups: Array<{ key: number | 'other'; name: string; mods: AdminModule[] }> = [
+    ...blocks.filter((b) => modulesByBlock.has(b.id)).map((b) => ({ key: b.id, name: b.name, mods: modulesByBlock.get(b.id)! })),
+    ...(modulesByBlock.has('other') ? [{ key: 'other' as const, name: 'Other modules', mods: modulesByBlock.get('other')! }] : []),
+  ];
+  return <div className="space-y-5">
+    {blockGroups.map((g) => <div key={g.key} className="space-y-3">
+      {blocks.length > 0 && <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground" data-testid={`text-flashcard-block-group-${g.key}`}>{g.name}</p>}
+      {g.mods.map((m) => <FlashcardTreeModule key={m.id} moduleId={m.id} name={m.name} cardCount={countByModule.get(m.id) ?? 0} cardsByTopic={cardsByTopic} />)}
+    </div>)}
+    {!!trulyUnassigned.length && <div className="rounded-2xl border border-dashed border-border bg-card p-4"><p className="mb-3 text-xs font-bold text-muted-foreground">{trulyUnassigned.length} flashcard{trulyUnassigned.length === 1 ? '' : 's'} with no module/subject/topic</p><div className="space-y-2">{trulyUnassigned.map((c) => <FlashcardTreeRow key={c.id} card={c} />)}</div></div>}
+  </div>;
+}
+
 function AdminFlashcards() {
-  const modulesQ = useListModules();
-  const allModules = (modulesQ.data ?? []) as unknown as AdminModule[];
+  // moduleAdminApi.listAll() (not the student-facing useListModules()) so
+  // blockId is actually populated — needed for the Block > Module grouping
+  // in FlashcardBankTree below, same as the MCQ bank tree.
+  const modulesQ = useQuery({ queryKey: ['admin-modules'], queryFn: moduleAdminApi.listAll });
+  const allModules = modulesQ.data ?? [];
   // Round 3, item 9 — Block filter ahead of Module, same cascading pattern
   // as Module -> Subject -> Topic: picking a Block narrows the Module
   // dropdown to that block's modules. Purely a filter — flashcards
@@ -1980,11 +2144,16 @@ function AdminFlashcards() {
   const [subjectId, setSubjectId] = useState('');
   const topicsQ = useListTopics(subjectId ? { subjectId: Number(subjectId) } : undefined);
   const [topicId, setTopicId] = useState('');
-  const cardsQ = useListFlashcards();
-  const cards = (cardsQ.data ?? []) as unknown as AdminFlashcard[];
+  // Shared with FlashcardBankTree's ['admin-flashcards-tree'] cache — same
+  // reasoning as AdminMcqs switching off the public useListFlashcards() hook:
+  // that response strips moduleId/subjectId/topicId, so the flat list
+  // couldn't support edit or the module/subject/topic display either.
+  const [bankView, setBankView] = useState<'tree' | 'flat'>('tree');
+  const cardsQ = useQuery({ queryKey: ['admin-flashcards-tree'], queryFn: () => flashcardsAdminApi.list() });
+  const cards = cardsQ.data ?? [];
   const [open, setOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: getListFlashcardsQueryKey() });
+  const invalidate = () => { queryClient.invalidateQueries({ queryKey: getListFlashcardsQueryKey() }); queryClient.invalidateQueries({ queryKey: ['admin-flashcards-tree'] }); };
   const create = useMutation({
     mutationFn: flashcardsAdminApi.create,
     onSuccess: () => invalidate(),
@@ -2002,7 +2171,7 @@ function AdminFlashcards() {
   const toggleSelected = (id: number) => setSelectedIds((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
   const toggleSelectAll = () => setSelectedIds((prev) => prev.size === cards.length ? new Set() : new Set(cards.map((c) => c.id)));
   const bulkDelete = useMutation({
-    mutationFn: (ids: number[]) => flashcardsAdminApi.bulkRemove(ids),
+    mutationFn: (ids: number[]) => flashcardsAdminApi.bulkRemove({ ids }),
     onSuccess: (res) => { invalidate(); setSelectedIds(new Set()); setBulkDeleteOpen(false); toast({ title: `Deleted ${res.deleted} flashcard${res.deleted === 1 ? '' : 's'}` }); },
     onError: (err: unknown) => toast({ title: 'Bulk delete failed', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
@@ -2063,15 +2232,18 @@ function AdminFlashcards() {
       <textarea name="back" required placeholder="Back of card — the answer" className="min-h-16 w-full rounded-xl border border-border bg-card p-3 text-xs" data-testid="input-flashcard-back" />
       <button disabled={!targetReady || create.isPending} className="rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-save-flashcard">{create.isPending ? 'Saving…' : 'Save flashcard'}</button>
     </form>}
-    {cardsQ.isLoading ? <SkeletonPage /> : cards.length ? <div className="space-y-3">
-      <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-2.5"><label className="flex items-center gap-2 text-xs font-bold"><input type="checkbox" checked={selectedIds.size > 0 && selectedIds.size === cards.length} onChange={toggleSelectAll} data-testid="checkbox-select-all-flashcards" />{selectedIds.size > 0 ? `${selectedIds.size} selected` : 'Select all'}</label>{selectedIds.size > 0 && <button onClick={() => setBulkDeleteOpen(true)} className="inline-flex items-center gap-1 rounded-lg border border-destructive/30 px-2.5 py-1.5 text-[11px] font-bold text-destructive" data-testid="button-bulk-delete-flashcards"><Trash2 size={12} /> Delete selected</button>}</div>
-      <div className="rounded-2xl border border-border bg-card">{cards.map((c) => <div key={c.id} className="flex items-start gap-4 border-b border-border p-5 last:border-0" data-testid={`row-flashcard-${c.id}`}>
-        <input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelected(c.id)} className="mt-1" data-testid={`checkbox-select-flashcard-${c.id}`} />
-        <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#f3e8d7] text-[#8a5a12]"><Zap size={17} /></div>
-        <div className="flex-1"><div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{c.module}{c.topic ? ` · ${c.topic}` : ''}</div><div className="mt-1 text-sm font-bold">{c.front}</div><div className="mt-1 text-xs leading-5 text-muted-foreground">{c.back}</div></div>
-        <button onClick={() => setDeletingId(c.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-flashcard-${c.id}`}><Trash2 size={15} /></button>
-      </div>)}</div>
-    </div> : <EmptyState icon={Zap} title="No flashcards yet" body="Add your first flashcard above — students can study them from their Flashcards tab." />}
+    {cardsQ.isLoading ? <SkeletonPage /> : <div className="mt-2">
+      <div className="mb-3 flex items-center justify-between"><h3 className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">{cards.length} flashcards</h3><div className="flex overflow-hidden rounded-xl border border-border text-xs font-bold"><button onClick={() => setBankView('tree')} className={cn('px-3 py-2', bankView === 'tree' ? 'bg-primary text-primary-foreground' : 'bg-card')} data-testid="button-flashcard-view-tree">Module tree</button><button onClick={() => setBankView('flat')} className={cn('px-3 py-2', bankView === 'flat' ? 'bg-primary text-primary-foreground' : 'bg-card')} data-testid="button-flashcard-view-flat">Flat list</button></div></div>
+      {bankView === 'tree' ? <FlashcardBankTree modules={allModules} blocks={blocks} /> : (cards.length ? <div className="space-y-3">
+        <div className="sticky top-2 z-10 flex items-center justify-between rounded-xl border border-border bg-card px-4 py-2.5 shadow-sm"><label className="flex items-center gap-2 text-xs font-bold"><input type="checkbox" checked={selectedIds.size > 0 && selectedIds.size === cards.length} onChange={toggleSelectAll} data-testid="checkbox-select-all-flashcards" />{selectedIds.size > 0 ? `${selectedIds.size} selected` : 'Select all'}</label>{selectedIds.size > 0 && <button onClick={() => setBulkDeleteOpen(true)} className="inline-flex items-center gap-1 rounded-lg border border-destructive/30 px-2.5 py-1.5 text-[11px] font-bold text-destructive" data-testid="button-bulk-delete-flashcards"><Trash2 size={12} /> Delete selected</button>}</div>
+        <div className="rounded-2xl border border-border bg-card">{cards.map((c) => <div key={c.id} className="flex items-start gap-4 border-b border-border p-5 last:border-0" data-testid={`row-flashcard-${c.id}`}>
+          <input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => toggleSelected(c.id)} className="mt-1" data-testid={`checkbox-select-flashcard-${c.id}`} />
+          <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#f3e8d7] text-[#8a5a12]"><Zap size={17} /></div>
+          <div className="flex-1"><div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{c.module}{c.topic ? ` · ${c.topic}` : ''}</div><div className="mt-1 text-sm font-bold">{c.front}</div><div className="mt-1 text-xs leading-5 text-muted-foreground">{c.back}</div></div>
+          <button onClick={() => setDeletingId(c.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-flashcard-${c.id}`}><Trash2 size={15} /></button>
+        </div>)}</div>
+      </div> : <EmptyState icon={Zap} title="No flashcards yet" body="Add your first flashcard above — students can study them from their Flashcards tab." />)}
+    </div>}
     {deletingId !== null && <ConfirmDialog title="Delete this flashcard?" body="This cannot be undone." onCancel={() => setDeletingId(null)} onConfirm={() => remove.mutate(deletingId)} pending={remove.isPending} />}
     {bulkDeleteOpen && <ConfirmDialog title={`Delete ${selectedIds.size} selected flashcard${selectedIds.size === 1 ? '' : 's'}?`} body="This cannot be undone." confirmLabel="Delete selected" onCancel={() => setBulkDeleteOpen(false)} onConfirm={() => bulkDelete.mutate(Array.from(selectedIds))} pending={bulkDelete.isPending} />}
   </div>;
@@ -2566,6 +2738,18 @@ function ExamManagePanel({ exam, autoOpenUpload }: { exam: AdminExam; autoOpenUp
           <button disabled={commitToExam.isPending} onClick={() => commitToExam.mutate()} className="rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid={`button-commit-exam-candidates-${exam.id}`}>{commitToExam.isPending ? 'Adding…' : replaceExisting ? `Replace paper with these ${candidates.length} questions` : `Add these ${candidates.length} questions to the exam`}</button>
         </div>}
       </div>}
+    </div>
+    <div>
+      <div className="flex items-center justify-between"><div className="text-xs font-bold">This exam's questions ({existingQuestionsQ.data?.length ?? 0})</div></div>
+      <p className="mt-1 text-[11px] text-muted-foreground">The exam's actual paper — whether attached by upload, pasted ID, or set-questions above. Removing one here takes it off this exam's paper only; it stays in whichever bank it came from.</p>
+      <div className="mt-2 max-h-72 space-y-1.5 overflow-y-auto pr-1">
+        {(existingQuestionsQ.data ?? []).map((q) => <div key={q.id} className="flex items-start justify-between gap-2 rounded-lg bg-muted px-2.5 py-1.5 text-xs" data-testid={`row-exam-question-${q.id}`}>
+          <span className="line-clamp-2">{q.question}</span>
+          <button onClick={() => setQuestions.mutate((existingQuestionsQ.data ?? []).filter((x) => x.id !== q.id).map((x) => x.id))} disabled={setQuestions.isPending} className="shrink-0 text-[11px] font-bold text-destructive" data-testid={`button-remove-exam-question-${q.id}`}>Remove</button>
+        </div>)}
+        {existingQuestionsQ.isLoading && <p className="text-[11px] text-muted-foreground">Loading…</p>}
+        {!existingQuestionsQ.isLoading && !existingQuestionsQ.data?.length && <p className="text-[11px] text-muted-foreground">No questions attached yet — upload a file or paste IDs above.</p>}
+      </div>
     </div>
     <div><div className="text-xs font-bold">Attempts &amp; results</div><div className="mt-2 overflow-x-auto rounded-xl border border-border"><table className="w-full min-w-[620px] text-left text-[11px]"><thead className="bg-muted uppercase tracking-wide text-muted-foreground"><tr><th className="px-3 py-2">Student</th><th className="px-3 py-2">Institution</th><th className="px-3 py-2">Score</th><th className="px-3 py-2">%</th><th className="px-3 py-2">Status</th><th className="px-3 py-2"></th></tr></thead><tbody>{(attemptsQ.data || []).map((a) => <tr key={a.id} className="border-t border-border" data-testid={`row-exam-attempt-${a.id}`}><td className="px-3 py-2 font-bold">{a.studentName}</td><td className="px-3 py-2 text-muted-foreground">{a.institution}</td><td className="px-3 py-2">{a.score}</td><td className="px-3 py-2">{a.percentage}%</td><td className="px-3 py-2">{a.status}</td><td className="px-3 py-2">{a.status !== 'in_progress' && !a.resultsReleasedAt && <button onClick={() => examsAdminApi.releaseOne(a.id)} className="text-primary font-bold" data-testid={`button-release-attempt-${a.id}`}>Release</button>}</td></tr>)}{!attemptsQ.data?.length && <tr><td colSpan={6} className="px-3 py-4 text-center text-muted-foreground">No attempts yet.</td></tr>}</tbody></table></div></div>
   </div>;
