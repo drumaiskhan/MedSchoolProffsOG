@@ -53,6 +53,18 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, 'dist/public'),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // Splits the big, slow-changing dependencies into their own chunk,
+        // separate from app code. Browsers fetch chunks in parallel (faster
+        // than one giant bundle) and, since this chunk's content barely
+        // changes between deploys, it stays cached across app updates
+        // instead of being re-downloaded every time app code changes.
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'wouter', '@tanstack/react-query'],
+        },
+      },
+    },
   },
   server: {
     port,

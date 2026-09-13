@@ -9,7 +9,7 @@ import {
   TrendingUp, Users, X, Zap, Bell, SlidersHorizontal, FileStack, NotebookPen, Bookmark,
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
   GraduationCap, CalendarDays, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
-  RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Wand2, Loader2, Activity, Layers, BarChart3, GraduationCap
+  RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Wand2, Loader2, Activity, Layers, BarChart3, GraduationCap, ToggleLeft
 } from 'lucide-react';
 import { applyThemeVars, DEFAULT_THEME, readableForegroundHsl } from '@/lib/theme';
 import {
@@ -112,11 +112,17 @@ const adminGroups: Array<{ label: string; items: NavItem[] }> = [
   { label: 'Payments', items: [
     ['/admin/plans', 'Subscription plans', CreditCard], ['/admin/payments', 'Payments & collection', ReceiptText],
   ] },
-  { label: 'Content', items: [
-    ['/admin/academic-structure', 'Colleges & courses', FolderOpen], ['/admin/content', 'Academic content', Library], ['/admin/subjects', 'Subjects', BookOpen], ['/admin/topics', 'Topics', CircleHelp], ['/admin/mcqs', 'MCQ bank', CircleHelp], ['/admin/flashcards', 'Flashcards', Zap], ['/admin/books', 'Books library', BookOpen], ['/admin/past-papers', 'Past papers', FileStack], ['/admin/exams', 'Pre-Proffs Exams', ClipboardCheck],
+  { label: 'Curriculum', items: [
+    ['/admin/academic-structure', 'Colleges & courses', FolderOpen], ['/admin/content', 'Academic content', Library], ['/admin/subjects', 'Subjects', BookOpen], ['/admin/topics', 'Topics', CircleHelp],
   ] },
-  { label: 'Community', items: [
-    ['/admin/feedback', 'Feedback inbox', MessageSquare], ['/admin/ai-visualizer-logs', 'AI Visualizer activity', Wand2], ['/admin/team', 'Academic team', Users], ['/admin/site-content', 'Site content', Landmark],
+  { label: 'Question banks', items: [
+    ['/admin/mcqs', 'MCQ bank', CircleHelp], ['/admin/flashcards', 'Flashcards', Zap], ['/admin/books', 'Books library', BookOpen], ['/admin/past-papers', 'Past papers', FileStack], ['/admin/exams', 'Pre-Proffs Exams', ClipboardCheck],
+  ] },
+  { label: 'Site & team', items: [
+    ['/admin/team', 'Academic team', Users], ['/admin/site-content', 'Site content', Landmark],
+  ] },
+  { label: 'Activity', items: [
+    ['/admin/feedback', 'Feedback inbox', MessageSquare], ['/admin/ai-visualizer-logs', 'AI Visualizer activity', Wand2],
   ] },
   { label: 'Workspace', items: [
     ['/admin/settings', 'Platform settings', Settings],
@@ -170,10 +176,24 @@ function Shell({ children }: { children: ReactNode }) {
     }
   }, [user, userQuery.isLoading, setLocation]);
 
-  if (userQuery.isLoading || !user || user.role !== 'admin') return <div className="grid min-h-[100dvh] place-items-center bg-background"><SkeletonPage /></div>;
+  if (userQuery.isLoading) return <BrandedLoadingScreen />;
+  if (!user || user.role !== 'admin') return <div className="grid min-h-[100dvh] place-items-center bg-background"><SkeletonPage /></div>;
 
   const title = location.slice(1).split('/').map((part) => part.replaceAll('-', ' ')).join(' / ') || 'Overview';
   return <div className="admin-shell flex min-h-[100dvh] bg-background"><div className={cn(menuOpen ? 'block' : 'hidden', 'fixed inset-0 z-30 bg-[#102c37]/40 md:hidden')} onClick={() => setMenuOpen(false)} />{(menuOpen || !isMobile) && <SideNav user={user} onClose={() => setMenuOpen(false)} />}<main className="admin-main min-w-0 flex-1"><header className="admin-header sticky top-0 z-20 flex h-[72px] items-center justify-between border-b border-border/70 bg-background/90 px-5 backdrop-blur-md md:px-10"><div className="flex items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} data-testid="button-open-menu"><Menu size={20} /></button><div><div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-muted-foreground">MedschoolProffs / Admin</div><h1 className="mt-1 text-[17px] font-bold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="flex items-center gap-2"><span className="hidden items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-[10px] font-semibold text-muted-foreground sm:inline-flex"><span className="size-1.5 rounded-full bg-primary" />Workspace live</span><Link href="/notifications" className="relative grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted" data-testid="link-notifications"><Bell size={17} /></Link><Link href="/profile" className="ml-1 grid size-9 place-items-center rounded-full bg-[#d7eee4] text-xs font-extrabold text-[#164b4b]" data-testid="link-header-profile">{initials(user.name)}</Link></div></header><div className="admin-content page-enter px-5 py-7 md:px-10 md:py-9">{children}</div></main></div>;
+}
+
+function BrandedLoadingScreen() {
+  return <div className="grid min-h-[100dvh] place-items-center" style={{ background: '#0e2a38' }}>
+    <style>{`
+      @keyframes boot-wave-draw { 0% { stroke-dashoffset: 190; opacity: .55; } 55% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: -190; opacity: .55; } }
+      @keyframes boot-fade { 0%, 100% { opacity: .6; } 50% { opacity: 1; } }
+    `}</style>
+    <div className="flex flex-col items-center gap-3.5">
+      <svg width="64" height="40" viewBox="0 0 64 40" aria-hidden="true"><path d="M2 20 H14 L19 6 L27 34 L33 12 L38 20 H62" fill="none" stroke="#2dd9c4" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" style={{ strokeDasharray: 190, strokeDashoffset: 190, animation: 'boot-wave-draw 1.7s ease-in-out infinite' }} /></svg>
+      <div className="font-display text-xl font-bold tracking-[-.01em]" style={{ color: '#eaf6f4', animation: 'boot-fade 1.7s ease-in-out infinite' }}>MedschoolProffs</div>
+    </div>
+  </div>;
 }
 
 function SkeletonPage() { return <div className="space-y-5"><div className="skeleton h-8 w-56 rounded-lg" /><div className="grid gap-4 md:grid-cols-3"><div className="skeleton h-32 rounded-2xl" /><div className="skeleton h-32 rounded-2xl" /><div className="skeleton h-32 rounded-2xl" /></div><div className="skeleton h-72 rounded-2xl" /></div>; }
@@ -238,7 +258,7 @@ function TeamSection() {
   const q = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get });
   const team = q.data?.team || [];
   if (!team.length) return null;
-  const card = (m: TeamMember) => <div key={m.id} className="rounded-2xl border border-border bg-card p-5" data-testid={`card-team-${m.id}`}><div className="flex items-center gap-3">{m.photoPath ? <img src={resolveUploadUrl(m.photoPath)!} alt={m.name} className="size-14 rounded-full border border-border object-cover" /> : <div className="grid size-14 place-items-center rounded-full bg-[#d7eee4] text-sm font-extrabold text-[#164b4b]">{initials(m.name)}</div>}<div><div className="text-sm font-bold">{m.name}</div><div className="text-xs text-primary">{m.role}</div></div></div>{m.achievementBadge && <span className="mt-3 inline-flex items-center gap-1 rounded-full bg-[#fdeecb] px-2.5 py-1 text-[10px] font-bold text-[#8a5a12]"><Trophy size={11} /> {m.achievementBadge}</span>}{m.bio && <p className="mt-3 text-xs leading-5 text-muted-foreground">{m.bio}</p>}{(m.linkedinUrl || m.instagramUrl || m.email) && <div className="mt-3 flex gap-2">{m.linkedinUrl && <a href={m.linkedinUrl} target="_blank" rel="noreferrer" className="grid size-7 place-items-center rounded-full bg-muted text-[10px] font-bold hover:bg-primary/10 hover:text-primary">in</a>}{m.instagramUrl && <a href={m.instagramUrl} target="_blank" rel="noreferrer" className="grid size-7 place-items-center rounded-full bg-muted text-[10px] font-bold hover:bg-primary/10 hover:text-primary">ig</a>}{m.email && <a href={`mailto:${m.email}`} className="grid size-7 place-items-center rounded-full bg-muted hover:bg-primary/10 hover:text-primary"><Mail size={12} /></a>}</div>}</div>;
+  const card = (m: TeamMember) => <div key={m.id} className="rounded-2xl border border-border bg-card p-5" data-testid={`card-team-${m.id}`}><div className="flex items-center gap-3">{m.photoPath ? <img src={resolveUploadUrl(m.photoPath)!} alt={m.name} loading="lazy" decoding="async" className="size-14 rounded-full border border-border object-cover" /> : <div className="grid size-14 place-items-center rounded-full bg-[#d7eee4] text-sm font-extrabold text-[#164b4b]">{initials(m.name)}</div>}<div><div className="text-sm font-bold">{m.name}</div><div className="text-xs text-primary">{m.role}</div></div></div>{m.achievementBadge && <span className="mt-3 inline-flex items-center gap-1 rounded-full bg-[#fdeecb] px-2.5 py-1 text-[10px] font-bold text-[#8a5a12]"><Trophy size={11} /> {m.achievementBadge}</span>}{m.bio && <p className="mt-3 text-xs leading-5 text-muted-foreground">{m.bio}</p>}{(m.linkedinUrl || m.instagramUrl || m.email) && <div className="mt-3 flex gap-2">{m.linkedinUrl && <a href={m.linkedinUrl} target="_blank" rel="noreferrer" className="grid size-7 place-items-center rounded-full bg-muted text-[10px] font-bold hover:bg-primary/10 hover:text-primary">in</a>}{m.instagramUrl && <a href={m.instagramUrl} target="_blank" rel="noreferrer" className="grid size-7 place-items-center rounded-full bg-muted text-[10px] font-bold hover:bg-primary/10 hover:text-primary">ig</a>}{m.email && <a href={`mailto:${m.email}`} className="grid size-7 place-items-center rounded-full bg-muted hover:bg-primary/10 hover:text-primary"><Mail size={12} /></a>}</div>}</div>;
   return <div className="mt-9"><SectionHeader eyebrow="Behind the platform" title="Our Academic Team" />
     {TEAM_CATEGORIES.map((cat) => { const inCat = team.filter((m) => (m.category ?? 'reviewer') === cat); if (!inCat.length) return null; return <div key={cat} className="mb-6 last:mb-0"><div className="mb-3 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{TEAM_CATEGORY_LABELS[cat]}</div><div className="grid gap-4 sm:grid-cols-2">{inCat.map(card)}</div></div>; })}
   </div>;
@@ -352,7 +372,7 @@ function PaymentProofsTab() {
   const isImage = (url: string) => /\.(png|jpe?g|webp)$/i.test(url);
 
   return <div><div className="mb-4 flex justify-end"><div className="flex rounded-xl border border-border bg-card p-1">{FILTERS.map((f) => <button key={f.key} onClick={() => setFilter(f.key)} className={cn('rounded-lg px-3 py-1.5 text-[11px] font-bold capitalize', filter === f.key && 'bg-muted text-primary')} data-testid={`button-payment-filter-${f.label}`}>{f.label}</button>)}</div></div>{q.isLoading ? <SkeletonPage /> : <div className="space-y-3">{payments.map((p) => <div key={p.id} className="rounded-2xl border border-border bg-card p-5" data-testid={`card-payment-review-${p.id}`}><div className="flex flex-col gap-4 md:flex-row md:items-start"><div className="grid size-11 shrink-0 place-items-center rounded-xl bg-[#fff0cb] text-[#94651c]"><ReceiptText size={19} /></div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="text-sm font-bold">{p.studentName}</span><Badge tone={paymentStatusTone(p.status)}>{paymentStatusLabel(p.status)}</Badge></div><div className="mt-1 text-xs text-muted-foreground">{p.institution} · {p.program} · {p.planName}</div><div className="mt-2 font-mono-app text-[10px] text-muted-foreground">{p.method} · {p.reference} · {p.paymentDate}</div></div><div className="flex items-center gap-4"><div className="text-right"><div className="font-display text-2xl">{money(p.amount, p.currency)}</div><div className="text-[10px] text-muted-foreground">Submitted {p.submittedAt.slice(0, 10)}</div></div><div className="flex gap-2">{p.status === 'PAYMENT_PENDING_REVIEW' && <><button onClick={() => setRejectingId(rejectingId === p.id ? null : p.id)} className="grid size-9 place-items-center rounded-xl border border-border text-[#a34c3e] hover:bg-[#fff1ed]" data-testid={`button-reject-payment-${p.id}`}><X size={16} /></button><button onClick={() => doApprove(p)} className="grid size-9 place-items-center rounded-xl bg-primary text-primary-foreground hover:opacity-90" data-testid={`button-approve-payment-${p.id}`}><Check size={16} /></button></>}<button onClick={() => setDeletingId(p.id)} className="grid size-9 place-items-center rounded-xl border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-payment-${p.id}`}><Trash2 size={16} /></button></div></div></div>
-    {p.proofPath && (() => { const url = resolveUploadUrl(p.proofPath)!; return <div className="mt-4 border-t border-border pt-4">{isImage(p.proofPath!) ? <a href={url} target="_blank" rel="noreferrer" data-testid={`link-proof-${p.id}`}><img src={url} alt="Payment proof" className="max-h-64 rounded-xl border border-border object-contain" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; const fallback = e.currentTarget.nextElementSibling as HTMLElement | null; if (fallback) fallback.style.display = 'flex'; }} /></a> : <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-xl border border-border bg-muted px-3 py-2 text-xs font-bold" data-testid={`link-proof-${p.id}`}><FileText size={14} /> View payment proof</a>}{isImage(p.proofPath!) && <div style={{ display: 'none' }} className="hidden max-h-64 items-center gap-2 rounded-xl border border-dashed border-border bg-muted px-3 py-4 text-xs font-semibold text-muted-foreground"><FileText size={14} /> Couldn't load the proof image — <a href={url} target="_blank" rel="noreferrer" className="text-primary underline">open it directly</a> instead.</div>}</div>; })()}
+    {p.proofPath && (() => { const url = resolveUploadUrl(p.proofPath)!; return <div className="mt-4 border-t border-border pt-4">{isImage(p.proofPath!) ? <a href={url} target="_blank" rel="noreferrer" data-testid={`link-proof-${p.id}`}><img src={url} alt="Payment proof" loading="lazy" decoding="async" className="max-h-64 rounded-xl border border-border object-contain" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; const fallback = e.currentTarget.nextElementSibling as HTMLElement | null; if (fallback) fallback.style.display = 'flex'; }} /></a> : <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-xl border border-border bg-muted px-3 py-2 text-xs font-bold" data-testid={`link-proof-${p.id}`}><FileText size={14} /> View payment proof</a>}{isImage(p.proofPath!) && <div style={{ display: 'none' }} className="hidden max-h-64 items-center gap-2 rounded-xl border border-dashed border-border bg-muted px-3 py-4 text-xs font-semibold text-muted-foreground"><FileText size={14} /> Couldn't load the proof image — <a href={url} target="_blank" rel="noreferrer" className="text-primary underline">open it directly</a> instead.</div>}</div>; })()}
     {rejectingId === p.id && <div className="mt-4 flex gap-2 border-t border-border pt-4"><input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason for rejection (shown to student)" className="h-9 flex-1 rounded-lg border border-border bg-background px-3 text-xs" data-testid={`input-reject-reason-${p.id}`} /><button onClick={() => doReject(p)} disabled={!reason.trim()} className="rounded-lg bg-destructive px-4 text-xs font-bold text-destructive-foreground disabled:opacity-50" data-testid={`button-confirm-reject-${p.id}`}>Confirm reject</button></div>}
   </div>)}{!payments.length && <EmptyState icon={ReceiptText} title="Queue is clear" body="No payment submissions match this filter." />}</div>}{deletingId !== null && <ConfirmDialog title="Permanently delete this payment?" body="This erases the submission for good. If it already activated a membership, that membership itself is not revoked automatically." confirmLabel="Delete forever" onCancel={() => setDeletingId(null)} onConfirm={() => removePaymentPermanent.mutate(deletingId)} pending={removePaymentPermanent.isPending} />}</div>;
 }
@@ -396,7 +416,7 @@ function ModuleRow({ m, canMoveUp, canMoveDown, onReorder, update, curriculumId,
         <button onClick={() => onReorder('up')} disabled={!canMoveUp || update.isPending} className="rounded p-0.5 text-muted-foreground disabled:opacity-25 hover:bg-muted" data-testid={`button-module-move-up-${m.id}`}><ChevronUp size={13} /></button>
         <button onClick={() => onReorder('down')} disabled={!canMoveDown || update.isPending} className="rounded p-0.5 text-muted-foreground disabled:opacity-25 hover:bg-muted" data-testid={`button-module-move-down-${m.id}`}><ChevronDown size={13} /></button>
       </div>
-      <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-xl bg-[#d7eee4] text-primary">{m.iconUrl ? <img src={m.iconUrl} alt="" className="size-full object-cover" /> : <BookOpen size={18} />}</div>
+      <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-xl bg-[#d7eee4] text-primary">{m.iconUrl ? <img src={m.iconUrl} alt="" loading="lazy" decoding="async" className="size-full object-cover" /> : <BookOpen size={18} />}</div>
       <div className="flex-1"><div className="text-sm font-bold">{m.name}</div><div className="mt-1 text-xs text-muted-foreground">{m.subjectCount} subjects · {m.topicCount} topics</div></div>
       <button onClick={() => update.mutate({ id: m.id, body: { active: !m.active } })} disabled={update.isPending} data-testid={`button-toggle-published-${m.id}`}><Badge tone={m.active ? 'green' : 'neutral'}>{m.active ? 'published' : 'draft'}</Badge></button>
       <span className="rounded-full bg-muted px-2.5 py-1 text-[10px] font-bold text-muted-foreground" data-testid={`text-targeting-${m.id}`}>{m.targetingLabel || 'All Programs + All Years'}</span>
@@ -533,7 +553,7 @@ function AdminContent() {
         return <div key={b.id} className="rounded-2xl border border-border bg-card" data-testid={`section-block-${b.id}`}>
           <div className="flex items-center gap-3 p-4">
             <button onClick={() => setCollapsed((s) => { const next = new Set(s); if (next.has(b.id)) next.delete(b.id); else next.add(b.id); return next; })} className="rounded-lg p-1 text-muted-foreground hover:bg-muted" data-testid={`button-toggle-block-${b.id}`}><ChevronRight size={16} className={cn('transition-transform', !isCollapsed && 'rotate-90')} /></button>
-            <div className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-xl bg-[#eef7f1] text-primary">{b.iconUrl ? <img src={b.iconUrl} alt="" className="size-full object-cover" /> : <Library size={16} />}</div>
+            <div className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-xl bg-[#eef7f1] text-primary">{b.iconUrl ? <img src={b.iconUrl} alt="" loading="lazy" decoding="async" className="size-full object-cover" /> : <Library size={16} />}</div>
             <div className="flex-1"><div className="text-sm font-extrabold" data-testid={`text-block-name-${b.id}`}>{b.name}</div>{b.subtitle && <div className="text-xs text-muted-foreground">{b.subtitle}</div>}</div>
             <span className="text-[11px] text-muted-foreground">{list.length} module{list.length === 1 ? '' : 's'}</span>
             <div className="flex flex-col gap-0.5"><button onClick={() => reorderBlock(b, 'up')} disabled={bi === 0} className="rounded p-0.5 text-muted-foreground disabled:opacity-25 hover:bg-muted" data-testid={`button-block-move-up-${b.id}`}><ChevronUp size={13} /></button><button onClick={() => reorderBlock(b, 'down')} disabled={bi === blocks.length - 1} className="rounded p-0.5 text-muted-foreground disabled:opacity-25 hover:bg-muted" data-testid={`button-block-move-down-${b.id}`}><ChevronDown size={13} /></button></div>
@@ -619,7 +639,7 @@ function SubjectsTopicsManager({ moduleId, breadcrumb }: { moduleId: number; bre
           <button type="button" disabled={i === 0 || reorderSubjects.isPending} onClick={() => moveSubject(i, -1)} className="grid size-4 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-30" data-testid={`button-move-up-subject-${s.id}`} aria-label="Move up"><ChevronUp size={12} /></button>
           <button type="button" disabled={i === subjects.length - 1 || reorderSubjects.isPending} onClick={() => moveSubject(i, 1)} className="grid size-4 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-30" data-testid={`button-move-down-subject-${s.id}`} aria-label="Move down"><ChevronDown size={12} /></button>
         </div>
-        {s.iconUrl && <img src={resolveUploadUrl(s.iconUrl)} alt="" className="size-8 shrink-0 rounded-lg object-cover" data-testid={`img-subject-thumbnail-${s.id}`} />}
+        {s.iconUrl && <img src={resolveUploadUrl(s.iconUrl)} alt="" loading="lazy" decoding="async" className="size-8 shrink-0 rounded-lg object-cover" data-testid={`img-subject-thumbnail-${s.id}`} />}
         <button onClick={() => setExpandedSubjectId(expandedSubjectId === s.id ? null : s.id)} className="flex flex-1 items-center gap-2 text-left text-xs font-bold" data-testid={`row-subject-${s.id}`}><ChevronRight size={13} className={cn('transition-transform', expandedSubjectId === s.id && 'rotate-90')} /> {s.name} <span className="font-normal text-muted-foreground">· {s.topicCount} topics</span></button>
         <button onClick={() => startEditSubject(s)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" data-testid={`button-edit-subject-${s.id}`}><Pencil size={13} /></button>
         <button onClick={() => setDeletingSubjectId(s.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-subject-${s.id}`}><Trash2 size={13} /></button>
@@ -753,7 +773,7 @@ function AdminSubjectsPage() {
             <button type="button" disabled={i === 0 || reorderSubjects.isPending} onClick={() => moveSubject(moduleId, i, -1)} className="grid size-4 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-30" data-testid={`button-move-up-subject-${s.id}`} aria-label="Move up"><ChevronUp size={12} /></button>
             <button type="button" disabled={i === list.length - 1 || reorderSubjects.isPending} onClick={() => moveSubject(moduleId, i, 1)} className="grid size-4 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-30" data-testid={`button-move-down-subject-${s.id}`} aria-label="Move down"><ChevronDown size={12} /></button>
           </div>
-          {s.iconUrl && <img src={resolveUploadUrl(s.iconUrl)} alt="" className="size-8 shrink-0 rounded-lg object-cover" data-testid={`img-subject-thumbnail-${s.id}`} />}
+          {s.iconUrl && <img src={resolveUploadUrl(s.iconUrl)} alt="" loading="lazy" decoding="async" className="size-8 shrink-0 rounded-lg object-cover" data-testid={`img-subject-thumbnail-${s.id}`} />}
           <div className="flex-1 text-xs font-bold">{s.name} <span className="font-normal text-muted-foreground">· {s.topicCount} topics</span></div>
           <button onClick={() => startEditSubject(s)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" data-testid={`button-edit-subject-${s.id}`}><Pencil size={13} /></button>
           <button onClick={() => setDeletingSubjectId(s.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-subject-${s.id}`}><Trash2 size={13} /></button>
@@ -1105,11 +1125,11 @@ function AnalysisStats({ rows }: { rows: AdminMcqRow[] }) {
 // existing Block > Module > Subject > Topic tree under. Blocks with no
 // targeting set (the common case until an admin tags them via BlockForm)
 // fall into "Unspecified program" / "All years", not hidden or dropped.
-function groupByProgramYear<T extends { key: number | 'other'; block?: AdminBlock }>(groups: T[]): Array<{ programLabel: string; yearLabel: string; groups: T[] }> {
+function groupByProgramYear<T extends { key: string | number; program: string | null; year: number | null }>(groups: T[]): Array<{ programLabel: string; yearLabel: string; groups: T[] }> {
   const buckets = new Map<string, { program: string; year: number | null; groups: T[] }>();
   for (const g of groups) {
-    const program = g.block?.programTargetKind || '';
-    const year = g.block?.yearTargetNumber ?? null;
+    const program = g.program || '';
+    const year = g.year ?? null;
     const key = `${program}|${year ?? ''}`;
     const existing = buckets.get(key);
     if (existing) existing.groups.push(g); else buckets.set(key, { program, year, groups: [g] });
@@ -1142,26 +1162,31 @@ function McqBankTree({ modules, blocks }: { modules: AdminModule[]; blocks: Admi
   if (!modules.length && !trulyUnassigned.length) return <EmptyState icon={CircleHelp} title="No modules yet" body="Create a module first under Academic content, then come back to browse its questions here." />;
   // Group modules under their Block so the bank tree reads Block > Module >
   // Subject > Topic, same grouping level the parser's Block filter below
-  // narrows by. Modules with no blockId fall into an "Other modules" group,
-  // shown after the program/year sections since it has no block to tag with
-  // a program/year in the first place.
+  // narrows by.
   const modulesByBlock = new Map<number | 'other', AdminModule[]>();
   for (const m of modules) { const key = m.blockId ?? 'other'; const list = modulesByBlock.get(key); if (list) list.push(m); else modulesByBlock.set(key, [m]); }
-  const blockGroups: Array<{ key: number | 'other'; name: string; mods: AdminModule[]; block?: AdminBlock }> = blocks.filter((b) => modulesByBlock.has(b.id)).map((b) => ({ key: b.id, name: b.name, mods: modulesByBlock.get(b.id)!, block: b }));
-  const otherMods = modulesByBlock.get('other');
-  const programYearGroups = groupByProgramYear(blockGroups);
+  // Every block/module becomes one "leaf" with an effective program/year,
+  // then groupByProgramYear buckets all of them together — this is what
+  // makes "I tagged my modules as MBBS Year 1 but never touched the block"
+  // still land under MBBS > Year 1 instead of Unspecified: a block with no
+  // targeting of its own falls back to whatever its modules say, and a
+  // module with no block at all is grouped by its own targeting directly
+  // instead of being dumped in an undifferentiated "other" bucket.
+  const blockLeaves = blocks.filter((b) => modulesByBlock.has(b.id)).map((b) => {
+    const mods = modulesByBlock.get(b.id)!;
+    const fallback = mods.find((m) => m.programTargetKind || m.yearTargetNumber);
+    return { key: `block-${b.id}`, name: b.name, mods, program: b.programTargetKind || fallback?.programTargetKind || null, year: b.yearTargetNumber ?? fallback?.yearTargetNumber ?? null };
+  });
+  const standaloneLeaves = (modulesByBlock.get('other') ?? []).map((m) => ({ key: `module-${m.id}`, name: m.name, mods: [m], program: m.programTargetKind || null, year: m.yearTargetNumber ?? null }));
+  const programYearGroups = groupByProgramYear([...blockLeaves, ...standaloneLeaves]);
   return <div className="space-y-7">
     {programYearGroups.map(({ programLabel, yearLabel, groups }) => <div key={`${programLabel}-${yearLabel}`} className="space-y-5">
-      {blocks.length > 0 && <div className="flex items-center gap-2 border-b border-border pb-2"><GraduationCap size={14} className="text-primary" /><h3 className="text-xs font-extrabold" data-testid={`text-program-year-group-${programLabel}-${yearLabel}`}>{programLabel} <span className="font-normal text-muted-foreground">· {yearLabel}</span></h3></div>}
+      {(blocks.length > 0 || standaloneLeaves.length > 0) && <div className="flex items-center gap-2 border-b border-border pb-2"><GraduationCap size={14} className="text-primary" /><h3 className="text-xs font-extrabold" data-testid={`text-program-year-group-${programLabel}-${yearLabel}`}>{programLabel} <span className="font-normal text-muted-foreground">· {yearLabel}</span></h3></div>}
       {groups.map((g) => { const blockRows = rows.filter((r) => r.moduleId != null && g.mods.some((m) => m.id === r.moduleId)); return <div key={g.key} className="space-y-3">
-        {blocks.length > 0 && <div className="flex flex-wrap items-center justify-between gap-1"><p className="text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground" data-testid={`text-mcq-block-group-${g.key}`}>{g.name}</p>{!!blockRows.length && <BlockAnalysisToggle rows={blockRows} />}</div>}
+        <div className="flex flex-wrap items-center justify-between gap-1"><p className="text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground" data-testid={`text-mcq-block-group-${g.key}`}>{g.name}</p>{!!blockRows.length && <BlockAnalysisToggle rows={blockRows} />}</div>
         {g.mods.map((m) => <McqTreeModule key={m.id} moduleId={m.id} name={m.name} mcqCount={countByModule.get(m.id) ?? 0} mcqsByTopic={mcqsByTopic} />)}
       </div>; })}
     </div>)}
-    {!!otherMods?.length && <div className="space-y-3">
-      <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground">Other modules (not in a block)</p>
-      {otherMods.map((m) => <McqTreeModule key={m.id} moduleId={m.id} name={m.name} mcqCount={countByModule.get(m.id) ?? 0} mcqsByTopic={mcqsByTopic} />)}
-    </div>}
     {!!trulyUnassigned.length && <div className="rounded-2xl border border-dashed border-border bg-card p-4"><p className="mb-3 text-xs font-bold text-muted-foreground">{trulyUnassigned.length} question{trulyUnassigned.length === 1 ? '' : 's'} with no module/subject/topic, exam, or past paper</p><div className="space-y-2">{trulyUnassigned.map((m) => <McqTreeRow key={m.id} mcq={m} />)}</div></div>}
   </div>;
 }
@@ -1518,11 +1543,12 @@ function AdminSettings() {
     onError: (err: unknown) => toast({ title: 'Could not run the test', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
   const set = (key: string, value: string) => setForm({ ...values, [key]: value });
-  const [tab, setTab] = useState<'general' | 'branding' | 'ai' | 'storage' | 'security' | 'notifications'>('general');
+  const [tab, setTab] = useState<'general' | 'features' | 'branding' | 'ai' | 'storage' | 'security' | 'notifications'>('general');
   const storageIssue = values.CLOUDINARY_CONFIGURED !== 'true';
 
   const TABS: Array<{ id: typeof tab; label: string; icon: typeof Sparkles; badge?: boolean }> = [
     { id: 'general', label: 'General', icon: Settings },
+    { id: 'features', label: 'Features', icon: ToggleLeft },
     { id: 'branding', label: 'Branding', icon: ImageOff },
     { id: 'ai', label: 'AI', icon: Sparkles },
     { id: 'storage', label: 'Storage', icon: UploadCloud, badge: storageIssue },
@@ -1542,6 +1568,14 @@ function AdminSettings() {
           <label className="text-xs font-bold sm:col-span-2">Tagline<input value={values.PLATFORM_TAGLINE || ''} onChange={(e) => set('PLATFORM_TAGLINE', e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-platform-tagline" /></label>
           <label className="text-xs font-bold sm:col-span-2">Announcement banner (blank to hide)<input value={values.ANNOUNCEMENT_BANNER || ''} onChange={(e) => set('ANNOUNCEMENT_BANNER', e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-announcement-banner" /></label>
         </div></div>
+      </>}
+
+      {/* Split out from General — this is every site-wide on/off switch in
+          one place, instead of scattered one-per-card wherever a feature
+          happened to land when it was built (Registration and AI Visualizer
+          were both dropped into General before this). New feature toggles
+          belong here going forward. */}
+      {tab === 'features' && <>
         <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">Registration</h3><div className="mt-5 grid gap-4 sm:grid-cols-2">
           <label className="flex items-center justify-between text-xs font-bold">Open student registration<input type="checkbox" checked={values.REGISTRATION_ENABLED !== 'false'} onChange={(e) => set('REGISTRATION_ENABLED', e.target.checked ? 'true' : 'false')} className="size-4 accent-[#287058]" data-testid="checkbox-registration-enabled" /></label>
         </div><p className="mt-3 text-[11px] text-muted-foreground">Payment methods, bank accounts, and collection details have moved to <Link href="/admin/payments" className="font-bold text-primary">Payments &amp; collection</Link>.</p></div>
@@ -1732,7 +1766,13 @@ function AdminAcademicStructure() {
   const academicYears = useQuery({ queryKey: ['admin-academic-years', programId], queryFn: () => academicApi.academicYears(programId!), enabled: !!programId });
   const batches = useQuery({ queryKey: ['admin-batches', academicYearId], queryFn: () => academicApi.batches(academicYearId!), enabled: !!academicYearId });
 
-  const invalidate = (key: string) => queryClient.invalidateQueries({ queryKey: [key] });
+  // Programs/years feed two different caches: this page's own drill-down
+  // (['admin-programs', institutionId]) and the flat, unfiltered lists the
+  // Past Papers "Add paper" form uses (['admin-programs-flat'], etc). Only
+  // invalidating the first meant creating a program here never refreshed
+  // that form's dropdown — it looked empty/broken even right after adding
+  // one, until a full page reload. Invalidating both closes that gap.
+  const invalidate = (key: string) => { queryClient.invalidateQueries({ queryKey: [key] }); queryClient.invalidateQueries({ queryKey: [`${key}-flat`] }); };
   const createProgram = useMutation({ mutationFn: academicApi.createProgram, onSuccess: () => invalidate('admin-programs'), onError: (err: unknown) => toast({ title: 'Could not create program', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
   const toggleProgram = useMutation({ mutationFn: ({ id, active }: { id: number; active: boolean }) => academicApi.updateProgram(id, { active }), onSuccess: () => invalidate('admin-programs') });
   const createYear = useMutation({ mutationFn: academicApi.createAcademicYear, onSuccess: () => invalidate('admin-academic-years'), onError: (err: unknown) => toast({ title: 'Could not create academic year', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
@@ -2281,21 +2321,21 @@ function FlashcardBankTree({ modules, blocks }: { modules: AdminModule[]; blocks
   if (!modules.length && !trulyUnassigned.length) return <EmptyState icon={Zap} title="No modules yet" body="Create a module first under Academic content, then come back to browse its flashcards here." />;
   const modulesByBlock = new Map<number | 'other', AdminModule[]>();
   for (const m of modules) { const key = m.blockId ?? 'other'; const list = modulesByBlock.get(key); if (list) list.push(m); else modulesByBlock.set(key, [m]); }
-  const blockGroups: Array<{ key: number | 'other'; name: string; mods: AdminModule[]; block?: AdminBlock }> = blocks.filter((b) => modulesByBlock.has(b.id)).map((b) => ({ key: b.id, name: b.name, mods: modulesByBlock.get(b.id)!, block: b }));
-  const otherMods = modulesByBlock.get('other');
-  const programYearGroups = groupByProgramYear(blockGroups);
+  const blockLeaves = blocks.filter((b) => modulesByBlock.has(b.id)).map((b) => {
+    const mods = modulesByBlock.get(b.id)!;
+    const fallback = mods.find((m) => m.programTargetKind || m.yearTargetNumber);
+    return { key: `block-${b.id}`, name: b.name, mods, program: b.programTargetKind || fallback?.programTargetKind || null, year: b.yearTargetNumber ?? fallback?.yearTargetNumber ?? null };
+  });
+  const standaloneLeaves = (modulesByBlock.get('other') ?? []).map((m) => ({ key: `module-${m.id}`, name: m.name, mods: [m], program: m.programTargetKind || null, year: m.yearTargetNumber ?? null }));
+  const programYearGroups = groupByProgramYear([...blockLeaves, ...standaloneLeaves]);
   return <div className="space-y-7">
     {programYearGroups.map(({ programLabel, yearLabel, groups }) => <div key={`${programLabel}-${yearLabel}`} className="space-y-5">
-      {blocks.length > 0 && <div className="flex items-center gap-2 border-b border-border pb-2"><GraduationCap size={14} className="text-primary" /><h3 className="text-xs font-extrabold" data-testid={`text-flashcard-program-year-group-${programLabel}-${yearLabel}`}>{programLabel} <span className="font-normal text-muted-foreground">· {yearLabel}</span></h3></div>}
+      {(blocks.length > 0 || standaloneLeaves.length > 0) && <div className="flex items-center gap-2 border-b border-border pb-2"><GraduationCap size={14} className="text-primary" /><h3 className="text-xs font-extrabold" data-testid={`text-flashcard-program-year-group-${programLabel}-${yearLabel}`}>{programLabel} <span className="font-normal text-muted-foreground">· {yearLabel}</span></h3></div>}
       {groups.map((g) => <div key={g.key} className="space-y-3">
-        {blocks.length > 0 && <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground" data-testid={`text-flashcard-block-group-${g.key}`}>{g.name}</p>}
+        <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground" data-testid={`text-flashcard-block-group-${g.key}`}>{g.name}</p>
         {g.mods.map((m) => <FlashcardTreeModule key={m.id} moduleId={m.id} name={m.name} cardCount={countByModule.get(m.id) ?? 0} cardsByTopic={cardsByTopic} />)}
       </div>)}
     </div>)}
-    {!!otherMods?.length && <div className="space-y-3">
-      <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground">Other modules (not in a block)</p>
-      {otherMods.map((m) => <FlashcardTreeModule key={m.id} moduleId={m.id} name={m.name} cardCount={countByModule.get(m.id) ?? 0} cardsByTopic={cardsByTopic} />)}
-    </div>}
     {!!trulyUnassigned.length && <div className="rounded-2xl border border-dashed border-border bg-card p-4"><p className="mb-3 text-xs font-bold text-muted-foreground">{trulyUnassigned.length} flashcard{trulyUnassigned.length === 1 ? '' : 's'} with no module/subject/topic</p><div className="space-y-2">{trulyUnassigned.map((c) => <FlashcardTreeRow key={c.id} card={c} />)}</div></div>}
   </div>;
 }
@@ -2487,7 +2527,7 @@ function AdminBooks() {
       <button type="submit" disabled={create.isPending || !title.trim() || !file} className="rounded-xl bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-submit-book">{create.isPending ? 'Uploading…' : 'Add book'}</button>
     </form>}
     {books.length ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{books.map((b) => <div key={b.id} className="rounded-2xl border border-border bg-card p-4" data-testid={`card-book-${b.id}`}>
-      {b.coverImagePath && <img src={resolveUploadUrl(b.coverImagePath) ?? undefined} alt="" className="mb-3 h-32 w-full rounded-lg object-cover" />}
+      {b.coverImagePath && <img src={resolveUploadUrl(b.coverImagePath) ?? undefined} alt="" loading="lazy" decoding="async" className="mb-3 h-32 w-full rounded-lg object-cover" />}
       <p className="text-sm font-bold leading-5">{b.title}</p>{b.author && <p className="mt-1 text-xs text-muted-foreground">{b.author}</p>}
       <div className="mt-3 flex items-center justify-between">{resolveUploadUrl(b.storagePath) ? <a href={resolveUploadUrl(b.storagePath)!} target="_blank" rel="noreferrer" className="text-xs font-bold text-primary" data-testid={`link-open-book-${b.id}`}>Open PDF <ArrowRight size={12} className="ml-1 inline" /></a> : <span className="text-[11px] font-bold text-destructive" data-testid={`text-book-unavailable-${b.id}`}>Link broken — try "Fix broken links"</span>}<button onClick={() => setDeletingId(b.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-book-${b.id}`}><Trash2 size={14} /></button></div>
     </div>)}</div> : <EmptyState icon={BookOpen} title="No books yet" body="Upload a PDF above — students can browse and open it from their Books tab." />}
@@ -2712,7 +2752,7 @@ function TeamPhoto({ member }: { member: TeamMember }) {
   const [broken, setBroken] = useState(false);
   const url = member.photoPath ? resolveUploadUrl(member.photoPath) : null;
   if (!url || broken) return <div className="grid size-11 shrink-0 place-items-center rounded-full bg-[#d7eee4] text-xs font-extrabold text-[#164b4b]">{initials(member.name)}</div>;
-  return <img src={url} alt={member.name} className="size-11 shrink-0 rounded-full object-cover" onError={() => setBroken(true)} />;
+  return <img src={url} alt={member.name} loading="lazy" decoding="async" className="size-11 shrink-0 rounded-full object-cover" onError={() => setBroken(true)} />;
 }
 
 // Full edit — every field the create form sets, pre-filled, so admins

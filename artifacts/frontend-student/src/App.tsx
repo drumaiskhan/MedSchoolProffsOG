@@ -226,7 +226,8 @@ function Shell({ children }: { children: ReactNode }) {
     }
   }, [user, userQuery.isLoading, setLocation]);
 
-  if (userQuery.isLoading || !user) return <div className="grid min-h-[100dvh] place-items-center bg-background"><SkeletonPage /></div>;
+  if (userQuery.isLoading) return <BrandedLoadingScreen />;
+  if (!user) return <div className="grid min-h-[100dvh] place-items-center bg-background"><SkeletonPage /></div>;
   // Admin accounts are allowed to browse the student portal too (e.g. to see
   // what students see) — the reverse is not true, see the equivalent check
   // in frontend-admin/src/App.tsx's Shell, which still blocks students.
@@ -262,6 +263,25 @@ function Shell({ children }: { children: ReactNode }) {
         : <header className="sticky top-0 z-20 flex h-[66px] items-center justify-between border-b border-border/70 bg-background/92 px-4 backdrop-blur-md md:px-8"><div className="flex min-w-0 items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} data-testid="button-open-menu"><Menu size={20} /></button><div className="min-w-0"><div className="font-mono-app text-[9px] uppercase tracking-[.16em] text-muted-foreground">{today}</div><h1 className="mt-1 truncate text-[16px] font-bold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="relative flex items-center gap-2"><button onClick={() => { setQuickJumpOpen((current) => !current); setQuickJumpValue(''); }} className="hidden h-9 w-[220px] items-center gap-2 rounded-lg border border-border bg-card px-3 text-left text-[11px] text-muted-foreground shadow-sm hover:border-primary/50 sm:flex md:w-[340px]" data-testid="button-open-quick-jump"><Search size={14} /><span className="truncate">Search modules, topics, MCQs...</span><span className="ml-auto rounded border border-border px-1 text-[9px]">⌘K</span></button><Link href="/notifications" className="relative grid size-9 place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:bg-muted" data-testid="link-notifications"><Bell size={16} /></Link><Link href="/profile" className="ml-1 grid size-8 place-items-center rounded-full bg-[#cdebf0] text-[10px] font-extrabold text-[#0d5267]" data-testid="link-header-profile">{initials(user.name)}</Link><QuickJump open={quickJumpOpen} value={quickJumpValue} onChange={setQuickJumpValue} onClose={() => setQuickJumpOpen(false)} /></div></header>}
       <div className={cn('page-enter', focusMode ? 'px-5 py-6 md:px-10 md:py-8' : 'px-4 py-6 md:px-8 md:py-8')}>{children}</div>
     </main>
+  </div>;
+}
+
+// Branded full-screen loader — same wave-draw look as the static one in
+// index.html (which covers the gap before JS loads at all), used here for
+// the session-restore loading state once React has taken over. Self-
+// contained <style> tag rather than a Tailwind config change, matching how
+// index.html does it, so the two stay visually identical without needing
+// to share a build step.
+function BrandedLoadingScreen() {
+  return <div className="grid min-h-[100dvh] place-items-center" style={{ background: '#0e2a38' }}>
+    <style>{`
+      @keyframes boot-wave-draw { 0% { stroke-dashoffset: 190; opacity: .55; } 55% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: -190; opacity: .55; } }
+      @keyframes boot-fade { 0%, 100% { opacity: .6; } 50% { opacity: 1; } }
+    `}</style>
+    <div className="flex flex-col items-center gap-3.5">
+      <svg width="64" height="40" viewBox="0 0 64 40" aria-hidden="true"><path d="M2 20 H14 L19 6 L27 34 L33 12 L38 20 H62" fill="none" stroke="#2dd9c4" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" style={{ strokeDasharray: 190, strokeDashoffset: 190, animation: 'boot-wave-draw 1.7s ease-in-out infinite' }} /></svg>
+      <div className="font-display text-xl font-bold tracking-[-.01em]" style={{ color: '#eaf6f4', animation: 'boot-fade 1.7s ease-in-out infinite' }}>MedschoolProffs</div>
+    </div>
   </div>;
 }
 
@@ -440,7 +460,7 @@ function ModuleCard({ m, i }: { m: Module; i: number }) {
   const iconUrl = (m as Module & { iconUrl?: string | null }).iconUrl;
   if (iconUrl) {
     return <Link href={`/modules/${m.id}`} key={m.id} className="card-lift group relative flex min-h-[220px] flex-col justify-end overflow-hidden rounded-2xl border border-border bg-card p-6 text-white" data-testid={`card-module-${m.id}`}>
-      <img src={iconUrl} alt="" className="absolute inset-0 size-full object-cover transition-transform duration-300 group-hover:scale-105" />
+      <img src={iconUrl} alt="" loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover transition-transform duration-300 group-hover:scale-105" />
       <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/25 to-transparent" />
       <div className="relative">
         <h3 className="text-lg font-extrabold tracking-[-.03em] drop-shadow-sm">{m.name}</h3>
@@ -483,7 +503,7 @@ function useModulesGrouping() {
 // than the old small icon-tile + label row.
 function BlockHeroCard({ href, name, iconUrl, moduleCount, muted }: { href: string; name: string; iconUrl?: string | null; moduleCount: number; muted?: boolean }) {
   return <Link href={href} className="card-lift group relative flex min-h-[180px] flex-col justify-end overflow-hidden rounded-3xl border border-border bg-card p-6 text-white" data-testid={`card-block-${href.split('/').pop()}`}>
-    {iconUrl ? <img src={iconUrl} alt="" className="absolute inset-0 size-full object-cover transition-transform duration-300 group-hover:scale-105" /> : <div className={cn('absolute inset-0', muted ? 'bg-muted-foreground/30' : 'bg-gradient-to-br from-[#287058] to-[#164b4b]')} />}
+    {iconUrl ? <img src={iconUrl} alt="" loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover transition-transform duration-300 group-hover:scale-105" /> : <div className={cn('absolute inset-0', muted ? 'bg-muted-foreground/30' : 'bg-gradient-to-br from-[#287058] to-[#164b4b]')} />}
     <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/20 to-transparent" />
     <div className="relative">
       <h3 className="font-display text-2xl tracking-[-.02em] drop-shadow-sm">{name}</h3>
@@ -569,7 +589,7 @@ function Subjects({ topics = false }: { topics?: boolean }) {
     ? (subjectId != null ? `Subjects / ${subjectName ?? '…'}` : undefined)
     : (moduleId != null ? `Modules / ${moduleName ?? '…'}` : undefined));
   if (topics) return <div><SectionHeader eyebrow="Choose a topic" title="Topics" action={<Link href="/blocks" className="text-xs font-bold text-primary" data-testid="link-back-modules"><ArrowLeft size={13} className="mr-1 inline" /> Blocks</Link>} /><div className="space-y-3">{topicsList.map((t) => <Link href={`/practice?topic=${t.id}`} key={t.id} className="card-lift flex items-center gap-4 rounded-2xl border border-border bg-card p-4" data-testid={`row-topic-${t.id}`}><div className={cn('grid size-10 place-items-center rounded-xl', t.completed ? 'bg-[#d7eee4] text-[#287058]' : 'bg-muted text-muted-foreground')}>{t.completed ? <Check size={17} /> : <Target size={17} />}</div><div className="flex-1"><div className="text-sm font-bold">{t.name}</div><div className="mt-1 text-xs text-muted-foreground">{t.questionCount} practice questions</div></div><span className="text-xs font-bold text-primary">{t.completed ? 'Review' : 'Start'} <ArrowRight size={13} className="ml-1 inline" /></span></Link>)}{!topicsList.length && <EmptyState icon={Target} title="No topics yet" body="Your academic team hasn't published topics for this subject yet." />}</div></div>;
-  return <div><SectionHeader eyebrow="Curriculum map" title="Subjects" action={<Link href="/blocks" className="text-xs font-bold text-primary" data-testid="link-subjects-back"><ArrowLeft size={13} className="mr-1 inline" /> Blocks</Link>} /><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{subjects.map((s, i) => <Link href={`/subjects/${s.id}`} key={s.id} className="card-lift rounded-2xl border border-border bg-card p-5" data-testid={`card-subject-${s.id}`}><div className="flex items-center justify-between">{s.iconUrl ? <img src={s.iconUrl} alt="" className="size-9 rounded-xl object-cover" /> : <span className="font-mono-app text-[10px] text-muted-foreground">0{i + 1}</span>}<ChevronRight size={16} className="text-muted-foreground" /></div><h3 className="mt-8 font-display text-2xl">{s.name}</h3><p className="mt-1 text-xs text-muted-foreground">{s.topicCount} topics to explore</p></Link>)}{!subjects.length && <EmptyState icon={BookOpen} title="No subjects yet" body="Your academic team hasn't published subjects for this module yet." />}</div></div>;
+  return <div><SectionHeader eyebrow="Curriculum map" title="Subjects" action={<Link href="/blocks" className="text-xs font-bold text-primary" data-testid="link-subjects-back"><ArrowLeft size={13} className="mr-1 inline" /> Blocks</Link>} /><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{subjects.map((s, i) => <Link href={`/subjects/${s.id}`} key={s.id} className="card-lift rounded-2xl border border-border bg-card p-5" data-testid={`card-subject-${s.id}`}><div className="flex items-center justify-between">{s.iconUrl ? <img src={s.iconUrl} alt="" loading="lazy" decoding="async" className="size-9 rounded-xl object-cover" /> : <span className="font-mono-app text-[10px] text-muted-foreground">0{i + 1}</span>}<ChevronRight size={16} className="text-muted-foreground" /></div><h3 className="mt-8 font-display text-2xl">{s.name}</h3><p className="mt-1 text-xs text-muted-foreground">{s.topicCount} topics to explore</p></Link>)}{!subjects.length && <EmptyState icon={BookOpen} title="No subjects yet" body="Your academic team hasn't published subjects for this module yet." />}</div></div>;
 }
 
 function Practice() {
@@ -759,18 +779,20 @@ function Practice() {
   // Breadcrumb (Module > Subject > Topic) + a "Leave" exit action, matching
   // the reference design's Practice MCQs header — Mcq already carries the
   // module/subject/topic names, so no extra fetch is needed.
+  // Breadcrumb (Module > Subject > Topic) — Mcq already carries the
+  // module/subject/topic names, so no extra fetch is needed. The focus-mode
+  // header above already has its own "Exit" back-link (see Shell), so this
+  // page doesn't need a second exit affordance duplicating it — "Exit &
+  // submit" in the side panel is the one deliberate way to leave mid-set.
   const breadcrumbParts = [current.module, current.subject, current.topic].filter(Boolean);
   return <div className="max-w-6xl">
-    <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-      {breadcrumbParts.length > 0 && <div className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground" data-testid="text-practice-breadcrumb">{breadcrumbParts.map((part, i) => <span key={i} className="flex items-center gap-1.5">{i > 0 && <ChevronRight size={11} />}<span>{part}</span></span>)}</div>}
-      <button onClick={finishSession} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-[11px] font-bold text-muted-foreground hover:bg-muted" data-testid="button-leave-practice"><X size={13} /> Leave</button>
-    </div>
+    {breadcrumbParts.length > 0 && <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground" data-testid="text-practice-breadcrumb">{breadcrumbParts.map((part, i) => <span key={i} className="flex items-center gap-1.5">{i > 0 && <ChevronRight size={11} />}<span>{part}</span></span>)}</div>}
     <div className="flex flex-wrap items-center justify-between gap-2"><h1 className="font-display text-2xl">Practice MCQs</h1><span className="font-mono-app text-[11px] text-muted-foreground">{index + 1} / {mcqs.length}</span></div>
     {/* Top progress bar — the single biggest whitespace cut vs. before: this
         replaces a whole separate "Timer" card that used to sit above the
         question, pushing everything down a full card's height before you
         even reached the question text. */}
-    <div className="mt-3 mb-5"><Progress value={percentAnswered} /></div>
+    <div className="mt-2.5 mb-4"><Progress value={percentAnswered} /></div>
     <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
       <div className="order-1 rounded-3xl border border-border bg-card p-5 sm:p-6">
         <div className="flex items-center justify-between"><Badge tone={difficultyTone(current.difficulty)}>{current.difficulty}</Badge><button onClick={toggleFlag} className={cn('rounded-lg p-1.5', flaggedIds.has(current.id) ? 'text-[#e5a952]' : 'text-muted-foreground hover:text-foreground')} data-testid="button-flag-question"><Flag size={17} fill={flaggedIds.has(current.id) ? 'currentColor' : 'none'} /></button></div>
@@ -1133,7 +1155,7 @@ function Books() {
 
   return <div><SectionHeader eyebrow="Library" title="Books" action={<div className="relative"><Search className="absolute left-3 top-2.5 text-muted-foreground" size={15} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search books" className="h-9 w-44 rounded-xl border border-border bg-card pl-9 pr-3 text-xs outline-none focus:ring-2 focus:ring-primary/20" data-testid="input-search-books" /></div>} />
     {filtered.length ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{filtered.map((b) => { const url = resolveUploadUrl(b.storagePath); const Card = url ? 'a' : 'div'; return <Card key={b.id} {...(url ? { href: url, target: '_blank', rel: 'noreferrer' } : {})} className={cn('card-lift rounded-2xl border border-border bg-card p-4', !url && 'opacity-60')} data-testid={`row-book-${b.id}`}>
-      {b.coverImagePath ? <img src={resolveUploadUrl(b.coverImagePath) ?? undefined} alt="" className="mb-3 h-36 w-full rounded-lg object-cover" /> : <div className="mb-3 grid h-36 w-full place-items-center rounded-lg bg-[#eef7f1]"><BookOpen size={26} className="text-primary" /></div>}
+      {b.coverImagePath ? <img src={resolveUploadUrl(b.coverImagePath) ?? undefined} alt="" loading="lazy" decoding="async" className="mb-3 h-36 w-full rounded-lg object-cover" /> : <div className="mb-3 grid h-36 w-full place-items-center rounded-lg bg-[#eef7f1]"><BookOpen size={26} className="text-primary" /></div>}
       <h3 className="text-sm font-bold leading-5">{b.title}</h3>{b.author && <p className="mt-1 text-xs text-muted-foreground">{b.author}</p>}
       {!url && <p className="mt-1.5 text-[10px] font-bold text-destructive">Unavailable right now — ask your admin to re-upload this book.</p>}
     </Card>; })}</div> : <EmptyState icon={BookOpen} title="No books yet" body="Your admin hasn't added any books to the library yet." />}
@@ -1200,7 +1222,7 @@ function PaymentDestinationCard({ pd }: { pd?: PaymentDetails }) {
       {pd.PAYMENT_RAAST_ID && <CopyRow label="Raast ID" value={pd.PAYMENT_RAAST_ID} />}
       {pd.PAYMENT_WALLET_NUMBER && <CopyRow label={pd.PAYMENT_WALLET_PROVIDER || 'Wallet'} value={pd.PAYMENT_WALLET_NUMBER} />}
     </div>}
-    {pd.PAYMENT_QR_CODE_URL && <div className="mt-3 flex justify-center border-t border-border pt-3"><img src={pd.PAYMENT_QR_CODE_URL} alt="Payment QR code" className="max-h-32 rounded-lg border border-border object-contain" /></div>}
+    {pd.PAYMENT_QR_CODE_URL && <div className="mt-3 flex justify-center border-t border-border pt-3"><img src={pd.PAYMENT_QR_CODE_URL} alt="Payment QR code" loading="lazy" decoding="async" className="max-h-32 rounded-lg border border-border object-contain" /></div>}
   </div>;
 }
 
@@ -1274,7 +1296,7 @@ function TeamPhoto({ member }: { member: TeamMember }) {
   const [broken, setBroken] = useState(false);
   const url = member.photoPath ? resolveUploadUrl(member.photoPath) : null;
   if (!url || broken) return <div className="grid size-14 shrink-0 place-items-center rounded-full bg-[#d7eee4] text-sm font-extrabold text-[#164b4b]">{initials(member.name)}</div>;
-  return <img src={url} alt={member.name} className="size-14 shrink-0 rounded-full border border-border object-cover" onError={() => setBroken(true)} />;
+  return <img src={url} alt={member.name} loading="lazy" decoding="async" className="size-14 shrink-0 rounded-full border border-border object-cover" onError={() => setBroken(true)} />;
 }
 
 function Profile() {

@@ -57,6 +57,16 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, 'dist/public'),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // Same reasoning as frontend-student's vite.config.ts — splits
+        // slow-changing deps into their own cacheable chunk, separate from
+        // app code that changes on every deploy.
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'wouter', '@tanstack/react-query'],
+        },
+      },
+    },
   },
   server: {
     port,

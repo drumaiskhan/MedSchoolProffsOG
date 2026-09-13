@@ -1,3 +1,97 @@
+# Round 9 — what changed, by file
+
+Same method/caveat as prior rounds: read end-to-end, `esbuild` syntax-checked
+every touched file (clean), no live DB/browser.
+
+## Organized the whole admin section
+Two layers, both in `artifacts/frontend-admin/src/App.tsx`:
+
+**Sidebar nav (`adminGroups`)** — the old "Content" group had grown to 9
+unrelated items (colleges/courses down to individual MCQs) and "Community"
+mixed feedback/AI-activity logs in with team/site-content, which don't
+really relate. Split into:
+- **Curriculum**: Colleges & courses, Academic content, Subjects, Topics
+- **Question banks**: MCQ bank, Flashcards, Books library, Past papers,
+  Pre-Proffs Exams
+- **Site & team**: Academic team, Site content
+- **Activity**: Feedback inbox, AI Visualizer activity
+
+Overview, Payments, and Workspace (Platform settings) groups are unchanged.
+
+**Platform settings page tabs** — Registration and AI Visualizer's on/off
+toggles had both landed in the General tab's "Platform profile" card over
+the last two rounds, next to unrelated text fields (platform name, support
+email, etc.) just because General was the tab that existed when each was
+built. Pulled both into a new **Features** tab — a dedicated home for
+site-wide on/off switches, so the next feature toggle has somewhere to go
+that isn't "wherever fits." General now holds only the platform-profile
+fields it was originally for.
+
+---
+
+# Round 8 — what changed, by file
+
+Same method/caveat as prior rounds: read end-to-end, `esbuild` syntax-checked
+every touched file (all clean, including both `vite.config.ts` files and
+both `index.html` files' tag balance), no live DB/browser.
+
+## Practice screen — removed the redundant "Leave" button, tightened top gap
+The focus-mode header (`Shell` in `frontend-student/src/App.tsx`) already
+has its own "← Exit" back-link above the page — the "Leave" button I'd
+added to `Practice()` a couple of rounds ago sat right below it doing
+almost the same thing, which is exactly the duplication in the screenshot.
+Removed it; the breadcrumb (when present) now sits directly above the
+"Practice MCQs" heading with no button crowding it, and the progress bar's
+margins were trimmed slightly further.
+
+## Past papers Program/Year dropdowns — found the actual bug this time
+Previous round concluded (correctly, but incompletely) that the dropdowns
+were empty because no Program had been created yet. The part that was
+still broken: **creating one didn't fix it**. Root cause —
+`frontend-admin/src/App.tsx`'s `AdminAcademicStructure` invalidates the
+query key `['admin-programs']` after creating/editing a program, but the
+Past Papers form's dropdown reads from a *different* cached query,
+`['admin-programs-flat']` (same split for academic years). Those are two
+distinct cache entries — invalidating one never refreshed the other, so
+the "Add paper" form kept showing its stale empty list until a full page
+reload, no matter how many programs got added. Fixed by having every
+program/year mutation invalidate both the drill-down cache and the
+`-flat` one.
+
+## Animated branded loading screen (wave + MedschoolProffs)
+Added in two layers per app:
+- **`index.html`** (both `frontend-student` and `frontend-admin`) — a
+  static, JS-free version rendered directly in `#root`'s initial HTML, so
+  there's no blank white flash during the gap before React/JS has even
+  downloaded. Plain CSS `@keyframes` (a `stroke-dashoffset` sweep on an
+  SVG pulse-line path, echoing the logo, plus a fading wordmark) — no
+  animation library needed.
+- **`BrandedLoadingScreen`** (new component, both apps' `App.tsx`) — the
+  same look rendered as JSX, swapped in for the top-level
+  `userQuery.isLoading` gate (session-restore loading state), so the visual
+  doesn't change between the pre-JS and post-JS loading moments.
+
+## Performance: lazy-loaded images + vendor chunk splitting
+- Added `loading="lazy" decoding="async"` to every content `<img>` across
+  both apps (block/module/subject thumbnails, book covers, team photos,
+  payment QR/proof images) — skipped only the couple of file-upload preview
+  images (those are the user's own just-picked file, showing immediately
+  is the right call there).
+- Both `vite.config.ts` files now split `react`/`react-dom`/`wouter`/
+  `@tanstack/react-query` into a separate `vendor` build chunk — these
+  barely change between deploys, so once cached they don't need
+  re-downloading just because app code changed.
+- **Honest scope note:** true route-level code-splitting (only loading a
+  page's JS when you navigate to it) isn't done here, and doing it properly
+  would mean restructuring the single ~2,600-line (admin) / ~1,900-line
+  (student) `App.tsx` into separate per-route files — every component in
+  each currently lives in one file with a lot of shared inline helpers, so
+  splitting it safely is a real refactor, not a config change, and isn't
+  something to attempt piecemeal without being able to test it. Flagging
+  this as a distinct, larger follow-up rather than quietly skipping it.
+
+---
+
 # Round 7 — what changed, by file
 
 Same method/caveat as prior rounds: read end-to-end, `esbuild` syntax-checked
@@ -70,6 +164,18 @@ the left) with all its buttons made more compact.
 - Program/year grouping is applied above the tree structure, not (yet)
   wired into any bulk-delete or AI-classify scope — those still operate at
   block/module/subject/topic, same as before.
+
+## Addendum — program/year grouping now falls back module-level too
+Follow-up within the same round: the grouping above only checked a
+*Block's* own `programTargetKind`/`yearTargetNumber`, so a block with none
+set (the common case for content uploaded before this feature existed)
+landed everything in it under "Unspecified program." Now, for each
+block-group, if the block itself has no targeting, it falls back to the
+first of its modules that does — and modules with no block at all are
+grouped by their own targeting individually instead of one undifferentiated
+"Other modules" bucket. This means tagging just the Block (via `BlockForm`)
+is enough to move all its modules' worth of already-uploaded MCQs/
+flashcards under the right Program/Year — no need to edit every module.
 
 ---
 
