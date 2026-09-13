@@ -9,7 +9,7 @@ import {
   TrendingUp, Users, X, Zap, Bell, SlidersHorizontal, FileStack, NotebookPen, Bookmark,
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
   GraduationCap, CalendarDays, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
-  RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Wand2, Loader2, Activity, Layers, BarChart3, GraduationCap, ToggleLeft
+  RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Wand2, Activity, Layers, BarChart3, GraduationCap, ToggleLeft
 } from 'lucide-react';
 import { applyThemeVars, DEFAULT_THEME, readableForegroundHsl } from '@/lib/theme';
 import {
@@ -196,7 +196,19 @@ function BrandedLoadingScreen() {
   </div>;
 }
 
-function SkeletonPage() { return <div className="space-y-5"><div className="skeleton h-8 w-56 rounded-lg" /><div className="grid gap-4 md:grid-cols-3"><div className="skeleton h-32 rounded-2xl" /><div className="skeleton h-32 rounded-2xl" /><div className="skeleton h-32 rounded-2xl" /></div><div className="skeleton h-72 rounded-2xl" /></div>; }
+// Small reusable brand mark used anywhere the app needs an inline
+// "loading" indicator — replaces plain spinners / bare "Loading…" text so
+// every loading state (not just the full-screen boot one) carries the
+// MedschoolProffs wave mark instead of defaulting to blank white.
+function BrandSpinner({ size = 16, className = '' }: { size?: number; className?: string }) {
+  return <svg width={size} height={size * 0.625} viewBox="0 0 64 40" aria-hidden="true" role="status" aria-label="Loading" className={cn('brand-spinner shrink-0', className)}>
+    <path d="M2 20 H14 L19 6 L27 34 L33 12 L38 20 H62" fill="none" stroke="currentColor" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>;
+}
+function InlineLoading({ label = 'Loading…', size = 13 }: { label?: string; size?: number }) {
+  return <div className="flex items-center gap-2 py-2 text-[11px] font-semibold text-primary"><BrandSpinner size={size} />{label}</div>;
+}
+function SkeletonPage() { return <div className="space-y-5"><div className="flex items-center gap-2 text-primary"><BrandSpinner size={22} /><span className="text-[11px] font-bold uppercase tracking-[.1em]">Loading</span></div><div className="skeleton h-8 w-56 rounded-lg" /><div className="grid gap-4 md:grid-cols-3"><div className="skeleton h-32 rounded-2xl" /><div className="skeleton h-32 rounded-2xl" /><div className="skeleton h-32 rounded-2xl" /></div><div className="skeleton h-72 rounded-2xl" /></div>; }
 function EmptyState({ icon: Icon = FolderOpen, title, body, action }: { icon?: typeof FolderOpen; title: string; body: string; action?: ReactNode }) { return <div className="grid min-h-[260px] place-items-center rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center"><div><div className="mx-auto mb-4 grid size-12 place-items-center rounded-2xl bg-muted text-primary"><Icon size={22} /></div><h3 className="font-bold">{title}</h3><p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted-foreground">{body}</p>{action && <div className="mt-5">{action}</div>}</div></div>; }
 function ErrorState({ retry }: { retry?: () => void }) { return <div className="rounded-2xl border border-[#efc7bc] bg-[#fff5f0] p-6 text-sm text-[#9e4c39]"><div className="flex items-center gap-2 font-bold"><CircleHelp size={17} /> We couldn't load this view.</div><p className="mt-2 text-[#a96a5b]">Check your connection, then try again.</p>{retry && <button onClick={retry} className="mt-4 rounded-lg bg-[#a9533f] px-3 py-2 text-xs font-bold text-white" data-testid="button-retry">Try again</button>}</div>; }
 function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'green' | 'amber' | 'red' | 'blue' }) { return <span className={cn('inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold capitalize', tone === 'green' && 'bg-[#d7eee4] text-[#287058]', tone === 'amber' && 'bg-[#fff0cb] text-[#8d6420]', tone === 'red' && 'bg-[#f9ddd6] text-[#a34c3e]', tone === 'blue' && 'bg-[#dceaf1] text-[#32647b]', tone === 'neutral' && 'bg-muted text-muted-foreground')}>{children}</span>; }
@@ -307,7 +319,7 @@ function AdminOverview() {
     : '#dceaf1 0% 100%';
   return <div><SectionHeader eyebrow="Command center" title="Good morning, academic team" action={<span className="inline-flex items-center gap-1.5 rounded-full bg-[#d7eee4] px-3 py-1.5 text-[10px] font-bold text-[#164b4b]" data-testid="text-live-indicator"><span className="size-1.5 rounded-full bg-[#287058]" /> Live · refreshes every 15s</span>} /><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{stats.map(([label, value, Icon, color, href], i) => { const card = <div className={cn('rounded-2xl border border-border bg-card p-5', href && 'card-lift cursor-pointer transition hover:border-primary/40')}><div className="flex items-center justify-between"><span className="text-xs font-semibold text-muted-foreground">{label}</span><div className={cn('grid size-9 place-items-center rounded-xl', color)}><Icon size={17} /></div></div><div className="mt-5 font-display text-4xl">{String(value)}</div><div className="mt-2 text-[11px] text-muted-foreground">{i === 2 ? 'Needs review today' : i === 3 ? 'Across active memberships' : 'Registered on the platform'}</div></div>; return href ? <Link key={String(label)} href={href} data-testid={`link-stat-${label.toLowerCase().replace(/[^a-z]+/g, '-')}`}>{card}</Link> : <div key={String(label)}>{card}</div>; })}</div><div className="mt-8 grid gap-6 lg:grid-cols-[1.5fr_1fr]"><div><SectionHeader eyebrow="Needs attention" title="Recent payments" action={<Link href="/admin/payments" className="text-xs font-bold text-primary" data-testid="link-admin-payments">View queue <ArrowRight size={13} className="ml-1 inline" /></Link>} />{d.recentPayments.length ? <div className="overflow-x-auto rounded-2xl border border-border bg-card"><table className="w-full min-w-[580px] text-left text-xs"><thead className="bg-muted text-[10px] uppercase tracking-[.12em] text-muted-foreground"><tr><th className="px-5 py-3">Student</th><th className="px-5 py-3">Plan</th><th className="px-5 py-3">Amount</th><th className="px-5 py-3">Status</th></tr></thead><tbody>{d.recentPayments.slice(0, 4).map((p) => <tr key={p.id} className="border-t border-border" data-testid={`row-admin-payment-${p.id}`}><td className="px-5 py-4 font-bold">{p.studentName}</td><td className="px-5 py-4 text-muted-foreground">{p.planName}</td><td className="px-5 py-4 font-mono-app text-[11px]">{money(p.amount, p.currency)}</td><td className="px-5 py-4"><Badge tone={paymentStatusTone(p.status)}>{paymentStatusLabel(p.status)}</Badge></td></tr>)}</tbody></table></div> : <EmptyState icon={ReceiptText} title="No payments yet" body="Payment submissions will show up here as students pay." />}</div><div><SectionHeader eyebrow="Membership health" title="Student status" /><div className="rounded-2xl border border-border bg-card p-6"><div className="flex items-center justify-center"><div className="relative grid size-44 place-items-center rounded-full" style={{ background: `conic-gradient(${gradientStops})` }}><div className="grid size-32 place-items-center rounded-full bg-card"><span className="font-display text-4xl">{d.activeMembers}</span><span className="text-[10px] text-muted-foreground">active</span></div></div></div><div className="mt-5 space-y-3">{statusEntries.map(([status, count], i) => <Link key={status} href={`/admin/students?status=${encodeURIComponent(status)}`} className="flex items-center justify-between text-xs transition hover:opacity-70" data-testid={`link-status-${status.toLowerCase()}`}><span className="flex items-center gap-2 capitalize"><span className="size-2 rounded-full" style={{ background: donutColors[i % donutColors.length] }} />{status}</span><span className="font-mono-app">{count}</span></Link>)}</div></div></div></div>
     <div className="mt-8"><SectionHeader eyebrow="What's happened lately" title="Recent activity" action={<Link href="/admin/team" className="text-xs font-bold text-primary" data-testid="link-admin-audit">Full history <ArrowRight size={13} className="ml-1 inline" /></Link>} />
-      <div className="rounded-2xl border border-border bg-card p-2">{activity.isLoading ? <div className="p-4 text-xs text-muted-foreground">Loading…</div> : activity.data?.length ? activity.data.map((entry, i) => <div key={entry.id} className={cn('flex items-center gap-3 px-4 py-3', i > 0 && 'border-t border-border')} data-testid={`row-activity-${entry.id}`}><span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[#dceaf1] text-[#2c6a8f]"><ClipboardCheck size={14} /></span><div className="min-w-0 flex-1"><div className="truncate text-xs font-bold">{humanizeAuditAction(entry.action)}</div><div className="truncate text-[11px] text-muted-foreground">{entry.actorName}{entry.entity ? ` · ${entry.entity}${entry.entityId ? ` #${entry.entityId}` : ''}` : ''}</div></div><span className="shrink-0 text-[10px] text-muted-foreground">{timeAgo(entry.createdAt)}</span></div>) : <div className="p-4 text-xs text-muted-foreground">No activity recorded yet.</div>}</div>
+      <div className="rounded-2xl border border-border bg-card p-2">{activity.isLoading ? <div className="p-4"><InlineLoading /></div> : activity.data?.length ? activity.data.map((entry, i) => <div key={entry.id} className={cn('flex items-center gap-3 px-4 py-3', i > 0 && 'border-t border-border')} data-testid={`row-activity-${entry.id}`}><span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[#dceaf1] text-[#2c6a8f]"><ClipboardCheck size={14} /></span><div className="min-w-0 flex-1"><div className="truncate text-xs font-bold">{humanizeAuditAction(entry.action)}</div><div className="truncate text-[11px] text-muted-foreground">{entry.actorName}{entry.entity ? ` · ${entry.entity}${entry.entityId ? ` #${entry.entityId}` : ''}` : ''}</div></div><span className="shrink-0 text-[10px] text-muted-foreground">{timeAgo(entry.createdAt)}</span></div>) : <div className="p-4 text-xs text-muted-foreground">No activity recorded yet.</div>}</div>
     </div>
   </div>;
 }
@@ -328,7 +340,7 @@ function StudentDrawer({ id, onClose }: { id: number; onClose: () => void }) {
   const s: StudentDetail | undefined = detail.data;
   return <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={onClose}><div onClick={(e) => e.stopPropagation()} className="h-full w-full max-w-md overflow-y-auto bg-card p-6 shadow-2xl">
     <div className="flex items-center justify-between"><h3 className="text-lg font-extrabold">Student profile</h3><button onClick={onClose} className="rounded-lg p-2 hover:bg-muted" data-testid="button-close-drawer"><X size={16} /></button></div>
-    {!s ? <div className="mt-8 text-xs text-muted-foreground">Loading…</div> : <div className="mt-6 space-y-6">
+    {!s ? <div className="mt-8"><InlineLoading /></div> : <div className="mt-6 space-y-6">
       <div className="flex items-center gap-3"><div className="grid size-12 place-items-center rounded-full bg-[#d7eee4] text-sm font-extrabold text-[#164b4b]">{initials(s.name)}</div><div><div className="font-bold">{s.name}</div><div className="text-xs text-muted-foreground">{s.email}</div></div></div>
       <div className="grid grid-cols-2 gap-3 text-xs"><div><div className="text-muted-foreground">Phone</div><div className="mt-0.5 font-bold">{s.phone || '—'}</div></div><div><div className="text-muted-foreground">Roll number</div><div className="mt-0.5 font-bold">{s.rollNumber || '—'}</div></div><div><div className="text-muted-foreground">Institution</div><div className="mt-0.5 font-bold">{s.institution || '—'}</div></div><div><div className="text-muted-foreground">Programme</div><div className="mt-0.5 font-bold">{s.program || '—'}</div></div><div><div className="text-muted-foreground">Year / batch</div><div className="mt-0.5 font-bold">{s.academicYear || '—'} · {s.batch || '—'}</div></div><div><div className="text-muted-foreground">Streak</div><div className="mt-0.5 font-bold">{s.currentStreak}d (best {s.longestStreak}d)</div></div><div><div className="text-muted-foreground">Joined</div><div className="mt-0.5 font-bold">{new Date(s.joinedAt).toLocaleDateString()}</div></div><div><div className="text-muted-foreground">Email verified</div>{s.emailVerified ? <div className="mt-0.5 font-bold text-primary">Yes</div> : <button onClick={() => verifyEmail.mutate()} disabled={verifyEmail.isPending} className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-extrabold text-destructive underline disabled:opacity-50" data-testid="button-verify-email">{verifyEmail.isPending ? 'Verifying…' : 'No · verify now'}</button>}</div></div>
       {s.activeMembership && <div className="rounded-xl bg-[#eef7f1] p-3 text-xs font-semibold text-primary">Active membership until {new Date(s.activeMembership.expiresAt).toLocaleDateString()}</div>}
@@ -1075,7 +1087,7 @@ function McqTreeSubject({ moduleId, subjectId, name, mcqsByTopic }: { moduleId: 
   const subjectRows = [...mcqsByTopic.entries()].filter(([tId]) => topics.some((t) => t.id === tId)).flatMap(([, rows]) => rows);
   return <div className="rounded-xl border border-border bg-card">
     <div className="flex flex-wrap items-center justify-between gap-1 px-4 py-2.5"><button onClick={() => setOpen((v) => !v)} className="flex flex-1 items-center gap-2 text-left text-xs font-bold" data-testid={`button-tree-subject-${subjectId}`}><ChevronRight size={14} className={cn('transition-transform', open && 'rotate-90')} />{name}</button>{open && <><AnalysisToggle rows={subjectRows} label={name} filters={{ subjectId }} /><BulkDeleteInScope label={name} count={subjectRows.length} filters={{ subjectId }} /></>}</div>
-    {open && <div className="space-y-2 border-t border-border p-3">{topicsQ.isLoading ? <p className="text-[11px] text-muted-foreground">Loading topics…</p> : topics.length ? topics.map((t) => <McqTreeTopic key={t.id} moduleId={moduleId} subjectId={subjectId} topicId={t.id} name={t.name} mcqsByTopic={mcqsByTopic} />) : <p className="text-[11px] text-muted-foreground">No topics in this subject yet.</p>}</div>}
+    {open && <div className="space-y-2 border-t border-border p-3">{topicsQ.isLoading ? <InlineLoading label="Loading topics…" /> : topics.length ? topics.map((t) => <McqTreeTopic key={t.id} moduleId={moduleId} subjectId={subjectId} topicId={t.id} name={t.name} mcqsByTopic={mcqsByTopic} />) : <p className="text-[11px] text-muted-foreground">No topics in this subject yet.</p>}</div>}
   </div>;
 }
 
@@ -1087,7 +1099,7 @@ function McqTreeModule({ moduleId, name, mcqCount, mcqsByTopic }: { moduleId: nu
   const moduleRows = [...mcqsByTopic.values()].flat().filter((r) => r.moduleId === moduleId);
   return <div className="rounded-2xl border border-border bg-card">
     <div className="flex flex-wrap items-center justify-between gap-1 px-5 py-3.5"><button onClick={() => setOpen((v) => !v)} className="flex flex-1 items-center gap-2 text-left text-sm font-extrabold" data-testid={`button-tree-module-${moduleId}`}><ChevronRight size={16} className={cn('transition-transform', open && 'rotate-90')} />{name}</button><span className="text-[11px] text-muted-foreground">{mcqCount} question{mcqCount === 1 ? '' : 's'}</span><AnalysisToggle rows={moduleRows} label={name} filters={{ moduleId }} /><BulkDeleteInScope label={name} count={mcqCount} filters={{ moduleId }} /></div>
-    {open && <div className="space-y-2 border-t border-border p-4">{subjectsQ.isLoading ? <p className="text-xs text-muted-foreground">Loading subjects…</p> : subjects.length ? subjects.map((s) => <McqTreeSubject key={s.id} moduleId={moduleId} subjectId={s.id} name={s.name} mcqsByTopic={mcqsByTopic} />) : <p className="text-xs text-muted-foreground">No subjects in this module yet.</p>}</div>}
+    {open && <div className="space-y-2 border-t border-border p-4">{subjectsQ.isLoading ? <InlineLoading label="Loading subjects…" /> : subjects.length ? subjects.map((s) => <McqTreeSubject key={s.id} moduleId={moduleId} subjectId={s.id} name={s.name} mcqsByTopic={mcqsByTopic} />) : <p className="text-xs text-muted-foreground">No subjects in this module yet.</p>}</div>}
   </div>;
 }
 
@@ -1875,7 +1887,7 @@ function Login() {
     <label className="block text-xs font-bold">Password<div className="relative mt-2"><LockKeyhole size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><input required name="password" type={showPassword ? 'text' : 'password'} autoComplete="current-password" placeholder="At least 8 characters" className="h-12 w-full rounded-xl border border-border bg-card pl-10 pr-11 text-sm outline-none transition-shadow focus:border-primary/40 focus:ring-2 focus:ring-primary/20" data-testid="input-login-password" /><button type="button" tabIndex={-1} onClick={() => setShowPassword((v) => !v)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground" data-testid="button-toggle-login-password">{showPassword ? <EyeOff size={15} /> : <Eye size={15} />}</button></div></label>
     <div className="flex justify-end"><Link href="/forgot-password" className="text-xs font-bold text-primary hover:underline" data-testid="button-forgot-password">Forgot password?</Link></div>
     {error && <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs font-semibold text-destructive" data-testid="text-login-error">{error}</div>}
-    <button disabled={login.isPending} className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-xs font-extrabold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-sm" data-testid="button-login-submit">{login.isPending && <Loader2 size={14} className="animate-spin" />}{login.isPending ? 'Signing in…' : 'Sign in'}</button>
+    <button disabled={login.isPending} className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-xs font-extrabold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-sm" data-testid="button-login-submit">{login.isPending && <BrandSpinner size={14} />}{login.isPending ? 'Signing in…' : 'Sign in'}</button>
   </form><p className="mt-7 text-center text-xs text-muted-foreground">Admin accounts are invite-only.</p></div></AuthLayout>;
 }
 function Stepper({ step }: { step: 1 | 2 }) {
@@ -1928,7 +1940,7 @@ function AdminSignup() {
     <label className="block text-xs font-bold">Password<div className="relative mt-2"><LockKeyhole size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><input required minLength={10} type={showPassword ? 'text' : 'password'} name="password" className="h-11 w-full rounded-xl border border-border bg-card pl-10 pr-11 text-sm outline-none transition-shadow focus:border-primary/40 focus:ring-2 focus:ring-primary/20" data-testid="input-admin-signup-password" /><button type="button" tabIndex={-1} onClick={() => setShowPassword((v) => !v)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground" data-testid="button-toggle-admin-signup-password">{showPassword ? <EyeOff size={15} /> : <Eye size={15} />}</button></div></label>
     <label className="block text-xs font-bold">Invite code<div className="relative mt-2"><ShieldCheck size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><input required name="inviteCode" defaultValue={codeFromUrl} className="h-11 w-full rounded-xl border border-border bg-card pl-10 pr-3 text-sm font-mono-app tracking-wider outline-none transition-shadow focus:border-primary/40 focus:ring-2 focus:ring-primary/20" data-testid="input-admin-signup-code" /></div></label>
     {error && <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs font-semibold text-destructive" data-testid="text-admin-signup-error">{error}</div>}
-    <button disabled={register.isPending} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-xs font-extrabold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-sm" data-testid="button-admin-signup-submit">{register.isPending && <Loader2 size={14} className="animate-spin" />}{register.isPending ? 'Creating account…' : 'Create admin account'}</button>
+    <button disabled={register.isPending} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-xs font-extrabold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-sm" data-testid="button-admin-signup-submit">{register.isPending && <BrandSpinner size={14} />}{register.isPending ? 'Creating account…' : 'Create admin account'}</button>
   </form></div></AuthLayout>;
 }
 
@@ -1949,7 +1961,7 @@ function ResetPassword() {
 function VerifyEmail() {
   const token = new URLSearchParams(window.location.search).get('token') || '';
   const verify = useQuery({ queryKey: ['verify-email', token], queryFn: () => authApi.verifyEmail(token), enabled: !!token, retry: false });
-  return <AuthLayout><div className="w-full text-center">{!token ? <p className="text-sm text-muted-foreground">Missing verification token.</p> : verify.isLoading ? <p className="text-sm text-muted-foreground">Verifying your email…</p> : verify.isError ? <p className="text-sm text-destructive">This link is invalid or has expired.</p> : <div><div className="mx-auto mb-5 grid size-14 place-items-center rounded-full bg-[#d7eee4] text-[#164b4b]"><CheckCircle2 size={26} /></div><h1 className="font-display text-3xl tracking-[-.04em]">Email verified</h1><p className="mt-3 text-sm text-muted-foreground">You can now sign in.</p></div>}<Link href="/login" className="mt-7 inline-block rounded-xl bg-primary px-6 py-3 text-xs font-extrabold text-primary-foreground" data-testid="link-verify-login">Go to sign in</Link></div></AuthLayout>;
+  return <AuthLayout><div className="w-full text-center">{!token ? <p className="text-sm text-muted-foreground">Missing verification token.</p> : verify.isLoading ? <InlineLoading label="Verifying your email…" size={16} /> : verify.isError ? <p className="text-sm text-destructive">This link is invalid or has expired.</p> : <div><div className="mx-auto mb-5 grid size-14 place-items-center rounded-full bg-[#d7eee4] text-[#164b4b]"><CheckCircle2 size={26} /></div><h1 className="font-display text-3xl tracking-[-.04em]">Email verified</h1><p className="mt-3 text-sm text-muted-foreground">You can now sign in.</p></div>}<Link href="/login" className="mt-7 inline-block rounded-xl bg-primary px-6 py-3 text-xs font-extrabold text-primary-foreground" data-testid="link-verify-login">Go to sign in</Link></div></AuthLayout>;
 }
 
 // ── Payments & collection: shared types for the JSON-array settings ──
@@ -2140,6 +2152,12 @@ function AdminPaymentsHub({ initialTab }: { initialTab?: (typeof PAYMENT_TABS)[n
   </div>;
 }
 
+const DEGREE_OPTIONS = ['MBBS', 'BDS'] as const;
+const DEGREE_YEAR_OPTIONS: Record<string, string[]> = {
+  MBBS: ['1st Year', '2nd Year', '3rd Year', '4th Year', 'Final Year'],
+  BDS: ['1st Year', '2nd Year', '3rd Year', 'Final Year'],
+};
+
 function AdminPastPapers() {
   const papers = useQuery({ queryKey: ['admin-past-papers'], queryFn: () => pastPapersApi.list() });
   const create = useMutation({ mutationFn: pastPapersApi.create, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-past-papers'] }) });
@@ -2150,24 +2168,68 @@ function AdminPastPapers() {
   const [viewingId, setViewingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [formProgramId, setFormProgramId] = useState('');
+  const [formDegree, setFormDegree] = useState('');
+  const [formStudyYear, setFormStudyYear] = useState('');
   const programsQ = useQuery({ queryKey: ['admin-programs-flat'], queryFn: () => academicApi.programs(undefined, true) });
   const academicYearsQ = useQuery({ queryKey: ['admin-academic-years-flat', formProgramId], queryFn: () => academicApi.academicYears(formProgramId ? Number(formProgramId) : undefined, true) });
+  const resetForm = () => { setOpen(false); setFormProgramId(''); setFormDegree(''); setFormStudyYear(''); };
+  const composedLevel = [formDegree, formStudyYear].filter(Boolean).join(' - ');
 
-  return <div><SectionHeader eyebrow="Content" title="Past papers" action={<button onClick={() => setOpen(true)} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-create-paper"><Plus size={15} /> Add paper</button>} />
-    {open && <form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); const programId = f.get('programId') ? Number(f.get('programId')) : undefined; const academicYearId = f.get('academicYearId') ? Number(f.get('academicYearId')) : undefined; create.mutate({ title: String(f.get('title')), examBoard: String(f.get('examBoard') || ''), year: String(f.get('year') || ''), level: String(f.get('level') || ''), programId, academicYearId, active: true }, { onSuccess: () => { setOpen(false); setFormProgramId(''); } }); }} className="mb-5 grid gap-3 rounded-2xl border border-primary/30 bg-[#eef7f1] p-5 md:grid-cols-4"><input required name="title" placeholder="Paper title, e.g. KMU 2024 G" className="h-10 rounded-xl border border-border bg-card px-3 text-xs md:col-span-2" data-testid="input-paper-title" /><input name="examBoard" placeholder="Exam board" className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-paper-board" /><input name="year" placeholder="Year" className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-paper-year" />
-      <select name="programId" value={formProgramId} onChange={(e) => setFormProgramId(e.target.value)} className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-paper-program"><option value="">All programs</option>{(programsQ.data || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-      <select name="academicYearId" disabled={!formProgramId} className="h-10 rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-paper-academic-year"><option value="">All years</option>{(academicYearsQ.data || []).map((y) => <option key={y.id} value={y.id}>{y.label}</option>)}</select>
+  return <div><SectionHeader eyebrow="Content" title="Past papers" action={<button onClick={() => setOpen(true)} className="btn-pop inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground shadow-sm sm:w-auto" data-testid="button-create-paper"><Plus size={15} /> Add paper</button>} />
+    {open && <form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); const programId = f.get('programId') ? Number(f.get('programId')) : undefined; const academicYearId = f.get('academicYearId') ? Number(f.get('academicYearId')) : undefined; const level = String(f.get('level') || '') || composedLevel; create.mutate({ title: String(f.get('title')), examBoard: String(f.get('examBoard') || ''), year: String(f.get('year') || ''), level, programId, academicYearId, active: true }, { onSuccess: resetForm }); }} className="mb-5 grid gap-3 rounded-2xl border border-primary/30 bg-[#eef7f1] p-4 sm:p-5 md:grid-cols-4">
+      <input required name="title" placeholder="Paper title, e.g. KMU 2024 G" className="h-11 rounded-xl border border-border bg-card px-3 text-xs outline-none transition-shadow focus:ring-2 focus:ring-primary/25 md:col-span-2" data-testid="input-paper-title" />
+      <input name="examBoard" placeholder="Exam board" className="h-11 rounded-xl border border-border bg-card px-3 text-xs outline-none transition-shadow focus:ring-2 focus:ring-primary/25" data-testid="input-paper-board" />
+      <input name="year" placeholder="Year, e.g. 2024" className="h-11 rounded-xl border border-border bg-card px-3 text-xs outline-none transition-shadow focus:ring-2 focus:ring-primary/25" data-testid="input-paper-year" />
+
+      {/* Priority fields: a proper MBBS/BDS degree selector plus a matching
+          study-year selector, so admins aren't stuck typing a free-text
+          level label. These two combine into the Level field below
+          automatically (e.g. "MBBS - 3rd Year"), which is what's shown to
+          students and used for filtering — no academic structure setup
+          required first. */}
+      <div className="rounded-xl border-2 border-primary/40 bg-card/70 p-3 md:col-span-4">
+        <p className="mb-2.5 text-[10px] font-extrabold uppercase tracking-[.08em] text-primary">Degree &amp; year (shown to students)</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block">
+            <span className="mb-1.5 block text-[11px] font-bold text-muted-foreground">Degree</span>
+            <select name="degree" value={formDegree} onChange={(e) => { setFormDegree(e.target.value); setFormStudyYear(''); }} className="h-11 w-full rounded-xl border border-border bg-card px-3 text-xs font-semibold outline-none transition-shadow focus:ring-2 focus:ring-primary/25" data-testid="select-paper-degree">
+              <option value="">Select degree…</option>
+              {DEGREE_OPTIONS.map((d) => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-1.5 block text-[11px] font-bold text-muted-foreground">Year</span>
+            <select value={formStudyYear} onChange={(e) => setFormStudyYear(e.target.value)} disabled={!formDegree} className="h-11 w-full rounded-xl border border-border bg-card px-3 text-xs font-semibold outline-none transition-shadow focus:ring-2 focus:ring-primary/25 disabled:opacity-50" data-testid="select-paper-study-year">
+              <option value="">{formDegree ? 'Select year…' : 'Pick a degree first'}</option>
+              {(DEGREE_YEAR_OPTIONS[formDegree] || []).map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <select name="programId" value={formProgramId} onChange={(e) => setFormProgramId(e.target.value)} className="h-11 rounded-xl border border-border bg-card px-3 text-xs outline-none transition-shadow focus:ring-2 focus:ring-primary/25 md:col-span-2" data-testid="select-paper-program"><option value="">All programs (advanced targeting, optional)</option>{(programsQ.data || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+      <select name="academicYearId" disabled={!formProgramId} className="h-11 rounded-xl border border-border bg-card px-3 text-xs outline-none transition-shadow focus:ring-2 focus:ring-primary/25 disabled:opacity-50 md:col-span-2" data-testid="select-paper-academic-year"><option value="">All years</option>{(academicYearsQ.data || []).map((y) => <option key={y.id} value={y.id}>{y.label}</option>)}</select>
       {/* This dropdown only lists MBBS/BDS-type Programs that have actually
           been added under an institution in Colleges & courses — it isn't
           pre-seeded with MBBS/BDS, since a Program has to belong to a
-          specific institution. Both selects here are optional targeting
-          (narrows which students see the paper); the free-text Level field
-          below already covers just labeling a paper "3rd Year MBBS"
-          without needing this set up at all. */}
-      {!programsQ.isLoading && !programsQ.data?.length && <p className="text-[11px] font-semibold text-[#8a5a12] md:col-span-4">No programs set up yet, so this list is empty — that's expected, not a bug. Add one (e.g. "MBBS") under <Link href="/admin/academic-structure" className="underline">Colleges &amp; courses</Link> if you want to target papers by program/year, or just use the Level field below instead.</p>}
-      <input name="level" placeholder="Level label, e.g. 3rd Year MBBS (display only)" className="h-10 rounded-xl border border-border bg-card px-3 text-xs md:col-span-2" data-testid="input-paper-level" /><div className="flex gap-2"><button className="rounded-xl bg-primary px-4 text-xs font-bold text-primary-foreground" data-testid="button-save-paper">Save</button><button type="button" onClick={() => setOpen(false)} className="rounded-xl border border-border bg-card px-4 text-xs font-bold" data-testid="button-cancel-paper">Cancel</button></div></form>}
+          specific institution. Both selects here are optional extra
+          targeting (narrows which students see the paper); the Degree +
+          Year picker above already covers labeling and student-facing
+          display without needing this set up at all. */}
+      {!programsQ.isLoading && !programsQ.data?.length && <p className="text-[11px] font-semibold text-[#8a5a12] md:col-span-4">No programs set up yet — that's expected, not a bug. The Degree/Year fields above already label and display the paper correctly. Only add a program under <Link href="/admin/academic-structure" className="underline">Colleges &amp; courses</Link> if you also want to restrict who can see it.</p>}
+      <input name="level" defaultValue="" value={composedLevel} onChange={() => {}} placeholder="Level label (auto-filled from Degree + Year above)" className="h-11 rounded-xl border border-border bg-card px-3 text-xs outline-none transition-shadow focus:ring-2 focus:ring-primary/25 md:col-span-2" data-testid="input-paper-level" readOnly />
+      <div className="flex flex-col gap-2 sm:flex-row md:col-span-2">
+        <button className="btn-pop flex-1 rounded-xl bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground shadow-sm sm:flex-none" data-testid="button-save-paper">{create.isPending ? <span className="inline-flex items-center gap-2"><BrandSpinner size={13} /> Saving…</span> : 'Save'}</button>
+        <button type="button" onClick={resetForm} className="btn-pop flex-1 rounded-xl border border-border bg-card px-4 py-2.5 text-xs font-bold hover:bg-muted sm:flex-none" data-testid="button-cancel-paper">Cancel</button>
+      </div>
+    </form>}
     <div className="rounded-2xl border border-border bg-card">{(papers.data || []).map((p) => <div key={p.id} className="border-b border-border p-5 last:border-0" data-testid={`row-admin-paper-${p.id}`}>
-      <div className="flex items-center gap-4"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#dceaf1] text-[#32647b]"><FileStack size={17} /></div><div className="flex-1"><div className="text-sm font-bold">{p.title}</div><div className="mt-1 text-xs text-muted-foreground">{[p.examBoard, p.year, p.level].filter(Boolean).join(' · ')} · {p.mcqCount} MCQs linked</div></div><button onClick={() => setViewingId(viewingId === p.id ? null : p.id)} className={cn('inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold', viewingId === p.id ? 'bg-[#eef7f1] text-primary' : 'border border-border text-muted-foreground hover:bg-muted')} data-testid={`button-view-paper-questions-${p.id}`}><CircleHelp size={12} /> View questions</button><button onClick={() => setUploadingId(uploadingId === p.id ? null : p.id)} className={cn('inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold', uploadingId === p.id ? 'bg-[#eef7f1] text-primary' : 'border border-border text-muted-foreground hover:bg-muted')} data-testid={`button-upload-paper-${p.id}`}><UploadCloud size={12} /> Upload questions</button><button onClick={() => toggle.mutate({ id: p.id, active: !p.active })} className={cn('rounded-lg px-3 py-1.5 text-[11px] font-bold', p.active ? 'bg-[#d7eee4] text-[#164b4b]' : 'bg-muted text-muted-foreground')} data-testid={`button-toggle-paper-${p.id}`}>{p.active ? 'Published' : 'Hidden'}</button><button onClick={() => setDeletingId(p.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-paper-${p.id}`}><Trash2 size={15} /></button></div>
+      <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap sm:gap-4"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#dceaf1] text-[#32647b]"><FileStack size={17} /></div><div className="min-w-[160px] flex-1"><div className="text-sm font-bold">{p.title}</div><div className="mt-1 text-xs text-muted-foreground">{[p.examBoard, p.year, p.level].filter(Boolean).join(' · ')} · {p.mcqCount} MCQs linked</div></div><div className="flex flex-wrap items-center gap-2">
+        <button onClick={() => setViewingId(viewingId === p.id ? null : p.id)} className={cn('btn-pop inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold', viewingId === p.id ? 'bg-[#eef7f1] text-primary' : 'border border-border text-muted-foreground hover:bg-muted')} data-testid={`button-view-paper-questions-${p.id}`}><CircleHelp size={12} /> View questions</button>
+        <button onClick={() => setUploadingId(uploadingId === p.id ? null : p.id)} className={cn('btn-pop inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold', uploadingId === p.id ? 'bg-[#eef7f1] text-primary' : 'border border-border text-muted-foreground hover:bg-muted')} data-testid={`button-upload-paper-${p.id}`}><UploadCloud size={12} /> Upload questions</button>
+        <button onClick={() => toggle.mutate({ id: p.id, active: !p.active })} className={cn('btn-pop rounded-lg px-3 py-1.5 text-[11px] font-bold', p.active ? 'bg-[#d7eee4] text-[#164b4b]' : 'bg-muted text-muted-foreground')} data-testid={`button-toggle-paper-${p.id}`}>{p.active ? 'Published' : 'Hidden'}</button>
+        <button onClick={() => setDeletingId(p.id)} className="btn-pop rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-paper-${p.id}`}><Trash2 size={15} /></button>
+      </div></div>
       {viewingId === p.id && <div className="mt-4 border-t border-border pt-4"><PastPaperQuestionsList pastPaperId={p.id} /></div>}
       {uploadingId === p.id && <div className="mt-4 border-t border-border pt-4"><PastPaperUploader pastPaperId={p.id} onImported={() => setUploadingId(null)} /></div>}
     </div>)}{!papers.data?.length && <EmptyState icon={FileStack} title="No past papers yet" body="Add a paper, then upload its questions or attach them from the MCQ bank." />}</div>
@@ -2183,7 +2245,7 @@ function AdminPastPapers() {
 function PastPaperQuestionsList({ pastPaperId }: { pastPaperId: number }) {
   const treeQ = useQuery({ queryKey: ['admin-mcqs-tree'], queryFn: mcqAdminApi.list });
   const rows = (treeQ.data ?? []).filter((m) => m.pastPaperId === pastPaperId);
-  if (treeQ.isLoading) return <p className="text-[11px] text-muted-foreground">Loading…</p>;
+  if (treeQ.isLoading) return <InlineLoading />;
   if (!rows.length) return <p className="text-[11px] text-muted-foreground">No questions yet — upload some below.</p>;
   return <div className="max-h-96 space-y-2 overflow-y-auto pr-1">{rows.map((m) => <McqTreeRow key={m.id} mcq={m} />)}</div>;
 }
@@ -2288,7 +2350,7 @@ function FlashcardTreeSubject({ subjectId, name, cardsByTopic }: { subjectId: nu
   const subjectCount = [...cardsByTopic.entries()].filter(([tId]) => topics.some((t) => t.id === tId)).reduce((sum, [, rows]) => sum + rows.length, 0);
   return <div className="rounded-xl border border-border bg-card">
     <div className="flex items-center justify-between px-4 py-2.5"><button onClick={() => setOpen((v) => !v)} className="flex flex-1 items-center gap-2 text-left text-xs font-bold" data-testid={`button-flashcard-tree-subject-${subjectId}`}><ChevronRight size={14} className={cn('transition-transform', open && 'rotate-90')} />{name}</button>{open && <FlashcardBulkDeleteInScope label={name} count={subjectCount} filters={{ subjectId }} />}</div>
-    {open && <div className="space-y-2 border-t border-border p-3">{topicsQ.isLoading ? <p className="text-[11px] text-muted-foreground">Loading topics…</p> : topics.length ? topics.map((t) => <FlashcardTreeTopic key={t.id} topicId={t.id} name={t.name} cardsByTopic={cardsByTopic} />) : <p className="text-[11px] text-muted-foreground">No topics in this subject yet.</p>}</div>}
+    {open && <div className="space-y-2 border-t border-border p-3">{topicsQ.isLoading ? <InlineLoading label="Loading topics…" /> : topics.length ? topics.map((t) => <FlashcardTreeTopic key={t.id} topicId={t.id} name={t.name} cardsByTopic={cardsByTopic} />) : <p className="text-[11px] text-muted-foreground">No topics in this subject yet.</p>}</div>}
   </div>;
 }
 
@@ -2298,7 +2360,7 @@ function FlashcardTreeModule({ moduleId, name, cardCount, cardsByTopic }: { modu
   const subjects = subjectsQ.data ?? [];
   return <div className="rounded-2xl border border-border bg-card">
     <div className="flex items-center justify-between px-5 py-3.5"><button onClick={() => setOpen((v) => !v)} className="flex flex-1 items-center gap-2 text-left text-sm font-extrabold" data-testid={`button-flashcard-tree-module-${moduleId}`}><ChevronRight size={16} className={cn('transition-transform', open && 'rotate-90')} />{name}</button><span className="text-[11px] text-muted-foreground">{cardCount} card{cardCount === 1 ? '' : 's'}</span><FlashcardBulkDeleteInScope label={name} count={cardCount} filters={{ moduleId }} /></div>
-    {open && <div className="space-y-2 border-t border-border p-4">{subjectsQ.isLoading ? <p className="text-xs text-muted-foreground">Loading subjects…</p> : subjects.length ? subjects.map((s) => <FlashcardTreeSubject key={s.id} subjectId={s.id} name={s.name} cardsByTopic={cardsByTopic} />) : <p className="text-xs text-muted-foreground">No subjects in this module yet.</p>}</div>}
+    {open && <div className="space-y-2 border-t border-border p-4">{subjectsQ.isLoading ? <InlineLoading label="Loading subjects…" /> : subjects.length ? subjects.map((s) => <FlashcardTreeSubject key={s.id} subjectId={s.id} name={s.name} cardsByTopic={cardsByTopic} />) : <p className="text-xs text-muted-foreground">No subjects in this module yet.</p>}</div>}
   </div>;
 }
 
@@ -2544,7 +2606,7 @@ function FeedbackThread({ feedbackId }: { feedbackId: number }) {
     onError: (err: unknown) => toast({ title: 'Could not send reply', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
   return <div className="mt-4 space-y-3 border-t border-border pt-4">
-    {repliesQ.isLoading ? <p className="text-xs text-muted-foreground">Loading replies…</p> : (repliesQ.data || []).map((r) => <div key={r.id} className={cn('max-w-[85%] rounded-xl p-3 text-xs', r.authorRole === 'admin' ? 'ml-auto bg-[#eef7f1]' : 'bg-muted')} data-testid={`row-feedback-reply-${r.id}`}><div className="mb-1 text-[10px] font-bold text-muted-foreground">{r.authorRole === 'admin' ? 'Academic team' : 'Student'} · {new Date(r.createdAt).toLocaleString()}</div>{r.message}</div>)}
+    {repliesQ.isLoading ? <InlineLoading label="Loading replies…" /> : (repliesQ.data || []).map((r) => <div key={r.id} className={cn('max-w-[85%] rounded-xl p-3 text-xs', r.authorRole === 'admin' ? 'ml-auto bg-[#eef7f1]' : 'bg-muted')} data-testid={`row-feedback-reply-${r.id}`}><div className="mb-1 text-[10px] font-bold text-muted-foreground">{r.authorRole === 'admin' ? 'Academic team' : 'Student'} · {new Date(r.createdAt).toLocaleString()}</div>{r.message}</div>)}
     {!repliesQ.isLoading && !repliesQ.data?.length && <p className="text-xs text-muted-foreground">No replies yet — be the first to respond.</p>}
     <div className="flex gap-2"><textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Write a reply…" className="min-h-16 flex-1 rounded-xl border border-border bg-background p-2 text-xs" data-testid={`input-feedback-reply-${feedbackId}`} /><button onClick={() => message.trim() && reply.mutate()} disabled={reply.isPending || !message.trim()} className="self-end rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid={`button-send-feedback-reply-${feedbackId}`}>{reply.isPending ? 'Sending…' : 'Reply'}</button></div>
   </div>;
@@ -2962,7 +3024,7 @@ function ExamManagePanel({ exam, autoOpenUpload }: { exam: AdminExam; autoOpenUp
           <span className="line-clamp-2">{q.question}</span>
           <button onClick={() => setQuestions.mutate((existingQuestionsQ.data ?? []).filter((x) => x.id !== q.id).map((x) => x.id))} disabled={setQuestions.isPending} className="shrink-0 text-[11px] font-bold text-destructive" data-testid={`button-remove-exam-question-${q.id}`}>Remove</button>
         </div>)}
-        {existingQuestionsQ.isLoading && <p className="text-[11px] text-muted-foreground">Loading…</p>}
+        {existingQuestionsQ.isLoading && <InlineLoading />}
         {!existingQuestionsQ.isLoading && !existingQuestionsQ.data?.length && <p className="text-[11px] text-muted-foreground">No questions attached yet — upload a file or paste IDs above.</p>}
       </div>
     </div>

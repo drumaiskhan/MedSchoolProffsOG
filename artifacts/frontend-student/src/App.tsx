@@ -10,7 +10,7 @@ import {
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
   GraduationCap, CalendarDays, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
   RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Link2 as LinkIcon, Lightbulb,
-  LayoutGrid, Presentation, Wand2, Loader2, Crown, Globe, Star, Activity
+  LayoutGrid, Presentation, Wand2, Crown, Globe, Star, Activity
 } from 'lucide-react';
 import { applyThemeVars } from '@/lib/theme';
 import {
@@ -285,7 +285,19 @@ function BrandedLoadingScreen() {
   </div>;
 }
 
-function SkeletonPage() { return <div className="space-y-5"><div className="skeleton h-8 w-56 rounded-lg" /><div className="grid gap-4 md:grid-cols-3"><div className="skeleton h-32 rounded-2xl" /><div className="skeleton h-32 rounded-2xl" /><div className="skeleton h-32 rounded-2xl" /></div><div className="skeleton h-72 rounded-2xl" /></div>; }
+// Small reusable brand mark used anywhere the app needs an inline
+// "loading" indicator — replaces plain spinners / bare "Loading…" text so
+// every loading state (not just the full-screen boot one) carries the
+// MedschoolProffs wave mark instead of defaulting to blank white.
+function BrandSpinner({ size = 16, className = '' }: { size?: number; className?: string }) {
+  return <svg width={size} height={size * 0.625} viewBox="0 0 64 40" aria-hidden="true" role="status" aria-label="Loading" className={cn('brand-spinner shrink-0', className)}>
+    <path d="M2 20 H14 L19 6 L27 34 L33 12 L38 20 H62" fill="none" stroke="currentColor" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>;
+}
+function InlineLoading({ label = 'Loading…', size = 13 }: { label?: string; size?: number }) {
+  return <div className="flex items-center gap-2 py-2 text-[11px] font-semibold text-primary"><BrandSpinner size={size} />{label}</div>;
+}
+function SkeletonPage() { return <div className="space-y-5"><div className="flex items-center gap-2 text-primary"><BrandSpinner size={22} /><span className="text-[11px] font-bold uppercase tracking-[.1em]">Loading</span></div><div className="skeleton h-8 w-56 rounded-lg" /><div className="grid gap-4 md:grid-cols-3"><div className="skeleton h-32 rounded-2xl" /><div className="skeleton h-32 rounded-2xl" /><div className="skeleton h-32 rounded-2xl" /></div><div className="skeleton h-72 rounded-2xl" /></div>; }
 function EmptyState({ icon: Icon = FolderOpen, title, body, action }: { icon?: typeof FolderOpen; title: string; body: string; action?: ReactNode }) { return <div className="grid min-h-[260px] place-items-center rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center"><div><div className="mx-auto mb-4 grid size-12 place-items-center rounded-2xl bg-muted text-primary"><Icon size={22} /></div><h3 className="font-bold">{title}</h3><p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted-foreground">{body}</p>{action && <div className="mt-5">{action}</div>}</div></div>; }
 function ErrorState({ retry }: { retry?: () => void }) { return <div className="rounded-2xl border border-[#efc7bc] bg-[#fff5f0] p-6 text-sm text-[#9e4c39]"><div className="flex items-center gap-2 font-bold"><CircleHelp size={17} /> We couldn't load this view.</div><p className="mt-2 text-[#a96a5b]">Check your connection, then try again.</p>{retry && <button onClick={retry} className="mt-4 rounded-lg bg-[#a9533f] px-3 py-2 text-xs font-bold text-white" data-testid="button-retry">Try again</button>}</div>; }
 function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'green' | 'amber' | 'red' | 'blue' }) { return <span className={cn('inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold capitalize', tone === 'green' && 'bg-[#d7eee4] text-[#287058]', tone === 'amber' && 'bg-[#fff0cb] text-[#8d6420]', tone === 'red' && 'bg-[#f9ddd6] text-[#a34c3e]', tone === 'blue' && 'bg-[#dceaf1] text-[#32647b]', tone === 'neutral' && 'bg-muted text-muted-foreground')}>{children}</span>; }
@@ -1099,7 +1111,7 @@ function AiVisualizer() {
           className="mt-4 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-xs font-extrabold text-primary-foreground transition-transform hover:-translate-y-0.5 disabled:opacity-50"
           data-testid="button-generate-visualization"
         >
-          {generate.isPending ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
+          {generate.isPending ? <BrandSpinner size={14} /> : <Wand2 size={14} />}
           {generate.isPending ? 'Generating…' : 'Generate Visualization'}
         </button>
 
@@ -1124,7 +1136,7 @@ function AiVisualizer() {
         <ExplanationPanel spec={spec} stepIndex={stepIndex} />
 
         <div className="mt-5 flex flex-wrap justify-center gap-3">
-          <button onClick={() => generate.mutate(prompt)} disabled={generate.isPending} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-4 py-2.5 text-xs font-bold hover:bg-muted disabled:opacity-50" data-testid="button-visualizer-regenerate">{generate.isPending ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />} Regenerate</button>
+          <button onClick={() => generate.mutate(prompt)} disabled={generate.isPending} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-4 py-2.5 text-xs font-bold hover:bg-muted disabled:opacity-50" data-testid="button-visualizer-regenerate">{generate.isPending ? <BrandSpinner size={13} /> : <RotateCcw size={13} />} Regenerate</button>
           <button onClick={startOver} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-4 py-2.5 text-xs font-bold hover:bg-muted" data-testid="button-visualizer-new">New visualization</button>
         </div>
       </div>
@@ -1388,7 +1400,7 @@ function Login() {
     <label className="block text-xs font-bold">Password<div className="relative mt-2"><LockKeyhole size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><input required name="password" type={showPassword ? 'text' : 'password'} autoComplete="current-password" placeholder="At least 8 characters" className="h-12 w-full rounded-xl border border-border bg-card pl-10 pr-11 text-sm outline-none transition-shadow focus:border-primary/40 focus:ring-2 focus:ring-primary/20" data-testid="input-login-password" /><button type="button" tabIndex={-1} onClick={() => setShowPassword((v) => !v)} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground" data-testid="button-toggle-login-password">{showPassword ? <EyeOff size={15} /> : <Eye size={15} />}</button></div></label>
     <div className="flex justify-end"><Link href="/forgot-password" className="text-xs font-bold text-primary hover:underline" data-testid="button-forgot-password">Forgot password?</Link></div>
     {error && <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs font-semibold text-destructive" data-testid="text-login-error">{error}{unverifiedEmail && <div className="mt-2">{resendDone ? <span className="font-bold text-primary">Verification email sent — check your inbox.</span> : <button type="button" onClick={() => resend.mutate(unverifiedEmail)} disabled={resend.isPending} className="font-bold text-primary underline disabled:opacity-50" data-testid="button-resend-verification">{resend.isPending ? 'Sending…' : 'Resend verification email'}</button>}</div>}</div>}
-    <button disabled={login.isPending} className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-xs font-extrabold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-sm" data-testid="button-login-submit">{login.isPending && <Loader2 size={14} className="animate-spin" />}{login.isPending ? 'Signing in…' : 'Sign in'}</button>
+    <button disabled={login.isPending} className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-xs font-extrabold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-sm" data-testid="button-login-submit">{login.isPending && <BrandSpinner size={14} />}{login.isPending ? 'Signing in…' : 'Sign in'}</button>
   </form><p className="mt-7 text-center text-xs text-muted-foreground">New to the desk? <Link href="/register" className="font-bold text-primary hover:underline" data-testid="link-register">Create a student account</Link></p></div></AuthLayout>;
 }
 function Stepper({ step }: { step: 1 | 2 }) {
@@ -1507,7 +1519,7 @@ function Register() {
 
       {selectedPlan && <div className="flex items-center gap-2 rounded-xl bg-[#eef7f1] p-3 text-xs font-semibold text-primary"><CheckCircle2 size={14} /> Paying {money(selectedPlan.price, selectedPlan.currency)} for {selectedPlan.name} — your order goes to the admin for approval</div>}
       {error && <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs font-semibold text-destructive" data-testid="text-register-error">{error}</div>}
-      <button disabled={register.isPending || uploading} className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-xs font-extrabold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-sm" data-testid="button-register-submit">{register.isPending && <Loader2 size={14} className="animate-spin" />}{register.isPending ? 'Creating your account…' : 'Create account & submit payment'}</button>
+      <button disabled={register.isPending || uploading} className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-xs font-extrabold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-sm" data-testid="button-register-submit">{register.isPending && <BrandSpinner size={14} />}{register.isPending ? 'Creating your account…' : 'Create account & submit payment'}</button>
     </form>
     <p className="mt-6 text-center text-xs text-muted-foreground">Already have an account? <Link href="/login" className="font-bold text-primary hover:underline" data-testid="link-login">Sign in</Link></p>
   </div></AuthLayout>;

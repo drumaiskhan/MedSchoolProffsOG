@@ -47,6 +47,27 @@
   .card-lift { transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
   .card-lift:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: hsl(var(--primary) / .35); }
   .skeleton { background: linear-gradient(100deg, hsl(var(--muted)) 30%, hsl(var(--card)) 50%, hsl(var(--muted)) 70%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
+  /* Beautiful, responsive buttons everywhere: a subtle lift + shadow on
+     hover and a gentle press on click, applied via .btn-pop (used across
+     admin actions) as well as every native <button> as a safe fallback so
+     nothing feels flat or unresponsive on any screen size. */
+  .btn-pop { transition: transform .16s ease, box-shadow .16s ease, filter .16s ease, background-color .16s ease, opacity .16s ease; }
+  .btn-pop:hover:not(:disabled) { transform: translateY(-1.5px); filter: brightness(1.04); box-shadow: var(--shadow-sm); }
+  .btn-pop:active:not(:disabled) { transform: translateY(0) scale(.97); filter: brightness(.98); }
+  .brand-spinner { color: hsl(var(--primary)); animation: brandSpin 1.7s ease-in-out infinite; stroke-dasharray: 190; stroke-dashoffset: 190; }
+  .brand-spinner path { stroke-dasharray: 190; stroke-dashoffset: 190; animation: brandWaveDraw 1.7s ease-in-out infinite; }
+}
+button { transition: transform .16s ease, box-shadow .16s ease, filter .16s ease, opacity .16s ease; }
+button:hover:not(:disabled) { filter: brightness(1.035); }
+button:active:not(:disabled) { transform: scale(.98); }
+button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid hsl(var(--primary) / .55); outline-offset: 2px; }
+/* Responsive safety net: prevent any flex row (button groups, card headers,
+   form rows) from forcing horizontal scroll on narrow phones — corners of
+   the UI wrap instead of overflowing. */
+@media (max-width: 480px) {
+  .admin-content { padding-left: 14px; padding-right: 14px; }
 }
 @keyframes pageIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes shimmer { to { background-position: -200% 0; } }
+@keyframes brandWaveDraw { 0% { stroke-dashoffset: 190; opacity: .55; } 55% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: -190; opacity: .55; } }
+@keyframes brandSpin { 0%, 100% { opacity: .75; } 50% { opacity: 1; } }
