@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS med_institutions (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
   city TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL DEFAULT '',
   active BOOLEAN NOT NULL DEFAULT TRUE,
   display_order INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -652,6 +653,12 @@ ALTER TABLE med_subjects ADD COLUMN IF NOT EXISTS icon_path TEXT;
 -- Team member category (reviewer / question_setter / ownership) — existing
 -- rows default to 'reviewer' so they don't disappear from every group.
 ALTER TABLE med_team_members ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'reviewer';
+
+-- med_institutions: MBBS vs BDS college split (see schema/medschool.ts).
+-- Existing rows default to '' — they still show up (grouped as "Unset" in
+-- the admin UI) until someone assigns them a kind; nothing gets hidden by
+-- this column showing up on an existing database.
+ALTER TABLE med_institutions ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT '';
 
 COMMIT;
 `;

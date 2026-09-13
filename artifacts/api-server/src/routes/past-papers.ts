@@ -3,6 +3,7 @@ import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, pastPapersTable, mcqsTable, auditLogsTable, usersTable } from "@workspace/db";
 import { requireAdmin, requireAuth, requireActiveMembership, isAdminRole } from "../middlewares/auth";
+import { deleteMcqsEverywhere } from "../lib/mcqCascade";
 
 const router: IRouter = Router();
 
@@ -83,19 +84,22 @@ router.delete("/past-papers/:id", requireAdmin, async (req, res): Promise<void> 
 });
 
 // Hard delete — only for a paper already archived (the DELETE above).
-// Un-tags any MCQs linked to it (they stay in the bank, same wording as the
-// existing "lose the paper tag" behavior) before removing the row.
+// Deletes every MCQ that belongs to this paper — and everything else in
+// the app that references those MCQs (practice history, exam
+// attachments, notebook entries, flags) — instead of just un-tagging
+// them, so nothing is left behind in the question bank or anywhere else.
 router.delete("/past-papers/:id/permanent", requireAdmin, async (req, res): Promise<void> => {
   const id = Number(req.params.id);
   if (Number.isNaN(id)) { res.status(400).json({ error: "Invalid past paper id" }); return; }
   const [paper] = await db.select().from(pastPapersTable).where(eq(pastPapersTable.id, id));
   if (!paper) { res.status(404).json({ error: "Past paper not found" }); return; }
 
-  await db.update(mcqsTable).set({ pastPaperId: null }).where(eq(mcqsTable.pastPaperId, id));
+  const mcqRows = await db.select({ id: mcqsTable.id }).from(mcqsTable).where(eq(mcqsTable.pastPaperId, id));
+  await deleteMcqsEverywhere(mcqRows.map((r) => r.id));
   await db.delete(pastPapersTable).where(eq(pastPapersTable.id, id));
 
-  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "PAST_PAPER_PERMANENTLY_DELETED", entity: "past_paper", entityId: id });
-  res.json({ ok: true });
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "PAST_PAPER_PERMANENTLY_DELETED", entity: "past_paper", entityId: id, metadata: JSON.stringify({ mcqsDeleted: mcqRows.length }) });
+  res.json({ ok: true, mcqsDeleted: mcqRows.length });
 });
 
 // Attach/detach MCQs to a paper (admin only) — lets admins build a paper from

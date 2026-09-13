@@ -25,6 +25,14 @@ export const institutionsTable = pgTable("med_institutions", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   city: text("city").notNull().default(""),
+  // Which program the college itself is registered under — a real-world
+  // MBBS college and a BDS college are different institutions even when
+  // students colloquially call both "my college", so this is a property
+  // of the institution row, not just the programsTable row underneath it.
+  // Free text (default "") so legacy rows created before this column
+  // existed don't disappear from anywhere; the admin UI only ever writes
+  // "MBBS" or "BDS" into it.
+  kind: text("kind").notNull().default(""),
   active: boolean("active").notNull().default(true),
   displayOrder: integer("display_order").notNull().default(0),
   ...timestamps,

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db, examsTable, examQuestionsTable, examAttemptsTable, examAnswersTable, mcqsTable, usersTable, auditLogsTable } from "@workspace/db";
 import { requireAuth, requireAdmin, requireActiveMembership, isAdminRole } from "../middlewares/auth";
 import { getStudentTargeting } from "../lib/contentVisibility";
+import { deleteMcqsEverywhere } from "../lib/mcqCascade";
 
 const router: IRouter = Router();
 
@@ -140,10 +141,20 @@ router.delete("/admin/exams/:id/permanent", requireAdmin, async (req, res): Prom
     }
     await db.delete(examAttemptsTable).where(eq(examAttemptsTable.examId, id));
   }
+  // MCQs uploaded specifically for this exam (examId set at import time,
+  // same pattern as a past paper's pastPaperId) get hard-deleted from the
+  // bank and every place that references them — same "gone from
+  // everywhere" behavior as permanently deleting a past paper. MCQs that
+  // were merely attached from the general question bank (no examId of
+  // their own) just lose their attachment via the examQuestionsTable
+  // delete below; they stay in the bank since they may be tagged to a
+  // module/subject/topic and used elsewhere.
+  const examMcqRows = await db.select({ id: mcqsTable.id }).from(mcqsTable).where(eq(mcqsTable.examId, id));
+  await deleteMcqsEverywhere(examMcqRows.map((r) => r.id));
   await db.delete(examQuestionsTable).where(eq(examQuestionsTable.examId, id));
   await db.delete(examsTable).where(eq(examsTable.id, id));
-  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "EXAM_PERMANENTLY_DELETED", entity: "exam", entityId: id, metadata: JSON.stringify({ attemptsDeleted: attemptCount }) });
-  res.json({ ok: true });
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "EXAM_PERMANENTLY_DELETED", entity: "exam", entityId: id, metadata: JSON.stringify({ attemptsDeleted: attemptCount, mcqsDeleted: examMcqRows.length }) });
+  res.json({ ok: true, mcqsDeleted: examMcqRows.length });
 });
 
 router.post("/admin/exams/:id/questions", requireAdmin, async (req, res): Promise<void> => {

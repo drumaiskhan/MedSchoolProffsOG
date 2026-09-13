@@ -52,11 +52,19 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return data as T;
 }
 
+// Small helper for building "?a=1&b=2" query strings from a params object,
+// skipping any key whose value is undefined/empty — used by list endpoints
+// that take more than one optional filter (e.g. institutions active+kind).
+function qs(params: Record<string, string | number | boolean | undefined>): string {
+  const parts = Object.entries(params).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`);
+  return parts.length ? `?${parts.join('&')}` : '';
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export interface Institution { id: number; name: string; city: string; active: boolean; displayOrder: number }
+export interface Institution { id: number; name: string; city: string; kind: string; active: boolean; displayOrder: number }
 export interface Program { id: number; institutionId: number; name: string; kind: string; active: boolean; displayOrder: number }
 export interface AcademicYear { id: number; programId: number; label: string; yearNumber: number | null; active: boolean; displayOrder: number }
 export interface Batch { id: number; academicYearId: number; label: string; active: boolean; displayOrder: number }
@@ -284,7 +292,7 @@ export const notificationsApi = {
 // ---------------------------------------------------------------------------
 
 export const academicApi = {
-  institutions: (active?: boolean) => request<Institution[]>(`/institutions${active === undefined ? '' : `?active=${active}`}`),
+  institutions: (active?: boolean, kind?: string) => request<Institution[]>(`/institutions${qs({ active, kind })}`),
   createInstitution: (body: Partial<Institution>) => request<Institution>('/institutions', { method: 'POST', body: JSON.stringify(body) }),
   updateInstitution: (id: number, body: Partial<Institution>) => request<Institution>(`/institutions/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   archiveInstitution: (id: number) => request<Institution>(`/institutions/${id}`, { method: 'DELETE' }),

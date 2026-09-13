@@ -48,7 +48,7 @@ async function fetchWithTimeout(url: string, init: RequestInit, providerLabel: s
 
 export class AiNotConfiguredError extends Error {
   constructor() {
-    super("No AI provider is configured. Set it from Admin -> Platform settings -> AI, or set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY in the environment.");
+    super("No AI provider is configured. Set a primary (and optionally a backup) provider from Admin -> Platform settings -> AI, or set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY in the environment.");
     this.name = "AiNotConfiguredError";
   }
 }
@@ -541,34 +541,66 @@ const DEFAULT_MODELS: Record<AiProvider, string> = {
   custom: "openai/gpt-4o-mini",
 };
 
+export interface ResolvedProvider { provider: AiProvider; apiKey: string; model: string; baseUrl?: string; label: string }
+
 /**
- * DB setting takes precedence over the env var of the same provider.
- *
- * `modelOverride` (round 3, item 4b) lets the MCQ-import auto-explain
- * pipeline use a cheaper/faster model for bulk generation
- * (AI_AUTO_EXPLAIN_MODEL) without needing a whole separate
- * provider/key/base-URL config — same provider and API key, just a
- * different model string. Falls back to the normal AI_MODEL/default when
- * not set, so every other caller (on-demand "Ask AI to explain", flashcard/
- * MCQ generation) is unaffected.
+ * A single DB-configured provider slot. Slot "" is the original/primary
+ * fields (AI_PROVIDER/AI_API_KEY/AI_MODEL/AI_BASE_URL); slot "_2" is the
+ * backup added for multi-provider failover (AI_PROVIDER_2/AI_API_KEY_2/...).
+ * Both read the same way, just different setting keys.
  */
-async function resolveProvider(modelOverride?: string): Promise<{ provider: AiProvider; apiKey: string; model: string; baseUrl?: string } | null> {
-  const dbProvider = await getSetting("AI_PROVIDER", null);
-  const dbKey = await getSetting("AI_API_KEY", null);
-  const dbModel = await getSetting("AI_MODEL", null);
-  const dbBaseUrl = await getSetting("AI_BASE_URL", null);
+async function resolveDbSlot(suffix: "" | "_2", modelOverride?: string): Promise<{ provider: AiProvider; apiKey: string; model: string; baseUrl?: string } | null> {
+  const dbProvider = await getSetting(`AI_PROVIDER${suffix}`, null);
+  const dbKey = await getSetting(`AI_API_KEY${suffix}`, null);
+  const dbModel = await getSetting(`AI_MODEL${suffix}`, null);
+  const dbBaseUrl = await getSetting(`AI_BASE_URL${suffix}`, null);
   if ((dbKey || dbProvider === "custom") && dbProvider && (AI_PROVIDERS as readonly string[]).includes(dbProvider)) {
     const provider = dbProvider as AiProvider;
     if (provider === "custom" && !dbBaseUrl) return null; // custom needs a base URL to mean anything
     return { provider, apiKey: dbKey ?? "", model: modelOverride || dbModel || DEFAULT_MODELS[provider], baseUrl: dbBaseUrl ?? undefined };
   }
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
-  if (anthropicKey) return { provider: "anthropic", apiKey: anthropicKey, model: modelOverride || DEFAULT_MODELS.anthropic };
-  const openAiKey = process.env.OPENAI_API_KEY;
-  if (openAiKey) return { provider: "openai", apiKey: openAiKey, model: modelOverride || DEFAULT_MODELS.openai };
-  const geminiKey = process.env.GEMINI_API_KEY;
-  if (geminiKey) return { provider: "gemini", apiKey: geminiKey, model: modelOverride || DEFAULT_MODELS.gemini };
   return null;
+}
+
+/**
+ * Builds the ordered list of providers to try for this request, so that if
+ * one API goes down (rate-limited, outage, bad key, timeout) the very same
+ * request can fall through to the next one instead of failing outright.
+ * Order:
+ *   1. The primary DB-configured provider (Admin -> Platform settings -> AI).
+ *   2. The optional backup DB-configured provider (same page, "Backup AI
+ *      provider" section) — lets an admin pair two *different* providers
+ *      (e.g. Anthropic primary, OpenAI backup) so an outage on one vendor
+ *      doesn't take "Ask AI to explain" down with it.
+ *   3. Every provider with an API key present in the environment
+ *      (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, in that order) —
+ *      previously only the *first* one found was ever used; now all of them
+ *      are kept as further fallbacks instead of being silently ignored.
+ * Duplicate provider+key combinations are skipped so the same account isn't
+ * tried twice back-to-back.
+ */
+async function resolveProviders(modelOverride?: string): Promise<ResolvedProvider[]> {
+  const candidates: ResolvedProvider[] = [];
+  const seen = new Set<string>();
+  const add = (cfg: { provider: AiProvider; apiKey: string; model: string; baseUrl?: string } | null, label: string) => {
+    if (!cfg) return;
+    const dedupeKey = `${cfg.provider}:${cfg.apiKey}:${cfg.baseUrl ?? ""}`;
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+    candidates.push({ ...cfg, label });
+  };
+
+  add(await resolveDbSlot("", modelOverride), "primary provider");
+  add(await resolveDbSlot("_2", modelOverride), "backup provider");
+
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  if (anthropicKey) add({ provider: "anthropic", apiKey: anthropicKey, model: modelOverride || DEFAULT_MODELS.anthropic }, "ANTHROPIC_API_KEY");
+  const openAiKey = process.env.OPENAI_API_KEY;
+  if (openAiKey) add({ provider: "openai", apiKey: openAiKey, model: modelOverride || DEFAULT_MODELS.openai }, "OPENAI_API_KEY");
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (geminiKey) add({ provider: "gemini", apiKey: geminiKey, model: modelOverride || DEFAULT_MODELS.gemini }, "GEMINI_API_KEY");
+
+  return candidates;
 }
 
 async function callProvider(resolved: { provider: AiProvider; apiKey: string; model: string; baseUrl?: string }, prompt: string, maxTokens: number, jsonMode: JsonMode): Promise<ProviderResult> {
@@ -600,9 +632,10 @@ function trimToLastCompleteSentence(text: string): string {
   return trimmed;
 }
 
-export async function runPrompt(prompt: string, maxTokens = 400, jsonMode: JsonMode = false, modelOverride?: string): Promise<string> {
-  const resolved = await resolveProvider(modelOverride);
-  if (!resolved) throw new AiNotConfiguredError();
+// One provider attempt, including the existing truncation-retry-on-the-same-
+// provider behavior. Split out of runPrompt so the failover loop below can
+// call it once per candidate without duplicating the retry logic.
+async function runOnProvider(resolved: ResolvedProvider, prompt: string, maxTokens: number, jsonMode: JsonMode): Promise<string> {
   let result = await callProvider(resolved, prompt, maxTokens, jsonMode);
   // The actual fix for both "AI did not return valid flashcard JSON" and the
   // AI-explanation panel cutting off mid-sentence: the provider itself told
@@ -622,6 +655,33 @@ export async function runPrompt(prompt: string, maxTokens = 400, jsonMode: JsonM
   }
   const cleaned = stripReasoningArtifacts(result.text);
   return jsonMode || !result.truncated ? cleaned : trimToLastCompleteSentence(cleaned);
+}
+
+/**
+ * Multi-provider failover: tries every configured provider in order (see
+ * resolveProviders) and returns the first one that succeeds. A provider
+ * "going off" — an outage, a rate limit, an expired key, a timeout — no
+ * longer takes the whole feature down as long as at least one other
+ * configured provider is still up. Only throws once every candidate has
+ * failed, with a message that lists what each one said so an admin can tell
+ * "everything is actually down" apart from "nothing is configured."
+ */
+export async function runPrompt(prompt: string, maxTokens = 400, jsonMode: JsonMode = false, modelOverride?: string): Promise<string> {
+  const candidates = await resolveProviders(modelOverride);
+  if (!candidates.length) throw new AiNotConfiguredError();
+
+  const failures: string[] = [];
+  for (const candidate of candidates) {
+    try {
+      return await runOnProvider(candidate, prompt, maxTokens, jsonMode);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      failures.push(`${candidate.label} (${candidate.provider}): ${message}`);
+      // Fall through to the next configured provider instead of failing
+      // the whole request on one provider's outage/rate-limit/bad key.
+    }
+  }
+  throw new Error(`All configured AI providers failed:\n${failures.join("\n")}`);
 }
 
 // 700 (up from the old 400) gives a reasoning-capable model enough headroom

@@ -8,7 +8,7 @@ import {
   ReceiptText, Search, Settings, ShieldCheck, Sparkles, Stethoscope, Target, Trash2,
   TrendingUp, TrendingDown, Minus, Users, X, Zap, Bell, SlidersHorizontal, FileStack, NotebookPen, Bookmark,
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
-  GraduationCap, CalendarDays, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
+  GraduationCap, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
   RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Link2 as LinkIcon, Lightbulb,
   LayoutGrid, Presentation, Wand2, Crown, Globe, Star, Activity
 } from 'lucide-react';
@@ -82,18 +82,77 @@ function ProgressBadge({ tone, label }: { tone: 'up' | 'down' | 'flat' | 'new'; 
 // Shown once a practice or past-paper session is finished (the set runs
 // out) instead of silently looping back to question one — gives the
 // student a clear stopping point plus the improving/steady/needs-practice
-// read on where they stand.
-function PracticeResultCard({ correct, total, backHref, backLabel, onRestart }: { correct: number; total: number; backHref: string; backLabel: string; onRestart: () => void }) {
-  const scorePercent = total ? Math.round((correct / total) * 100) : 0;
+// read on where they stand, a full attempted/skipped/correct/wrong
+// breakdown, every question with its outcome, and a dedicated "review
+// wrong answers" section at the end so mistakes are easy to find again.
+function PracticeResultCard({ mcqs, answers, backHref, backLabel, onRestart }: { mcqs: Mcq[]; answers: Record<number, string | null>; backHref: string; backLabel: string; onRestart: () => void }) {
+  const total = mcqs.length;
+  const attempted = mcqs.filter((m) => answers[m.id] != null).length;
+  const correct = mcqs.filter((m) => answers[m.id] != null && answers[m.id] === m.correctAnswer).length;
+  const wrong = mcqs.filter((m) => answers[m.id] != null && answers[m.id] !== m.correctAnswer).length;
+  const skipped = total - attempted;
+  const scorePercent = attempted ? Math.round((correct / attempted) * 100) : 0;
   const trend = useQuery({ queryKey: ['progress-trend'], queryFn: analyticsApi.progress });
   const verdict = progressVerdict(scorePercent, trend.data);
-  return <div className="mx-auto max-w-lg rounded-3xl border border-border bg-card p-8 text-center" data-testid="card-practice-result">
-    <div className={cn('mx-auto grid size-16 place-items-center rounded-full', verdict.tone === 'down' ? 'bg-destructive/10 text-destructive' : 'bg-[#d7eee4] text-[#164b4b]')}>{verdict.tone === 'down' ? <RotateCcw size={26} /> : <CheckCircle2 size={28} />}</div>
-    <div className="mt-5 font-display text-5xl">{scorePercent}%</div>
-    <div className="mt-1 text-xs text-muted-foreground">{correct} correct of {total} questions</div>
-    <div className="mt-4 flex justify-center">{!trend.isLoading && <ProgressBadge tone={verdict.tone} label={verdict.label} />}</div>
-    {!trend.isLoading && <p className="mx-auto mt-3 max-w-sm text-xs leading-5 text-muted-foreground" data-testid="text-result-verdict">{verdict.message}</p>}
-    <div className="mt-7 flex flex-wrap justify-center gap-2"><button onClick={onRestart} className="rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-practice-again"><RotateCcw size={13} className="mr-1.5 inline" /> Practice again</button><Link href={backHref} className="rounded-xl border border-border bg-card px-5 py-2.5 text-xs font-bold" data-testid="link-result-back">{backLabel}</Link></div>
+  const statusFor = (m: Mcq): 'correct' | 'wrong' | 'skipped' => {
+    const a = answers[m.id];
+    if (a == null) return 'skipped';
+    return a === m.correctAnswer ? 'correct' : 'wrong';
+  };
+  const wrongMcqs = mcqs.filter((m) => statusFor(m) === 'wrong');
+  const statusStyles: Record<'correct' | 'wrong' | 'skipped', string> = {
+    correct: 'border-[#d7eee4] bg-[#f3fbf7]',
+    wrong: 'border-[#f0d3cc] bg-[#fff6f3]',
+    skipped: 'border-border bg-muted/30',
+  };
+  const statusBadge: Record<'correct' | 'wrong' | 'skipped', { tone: 'green' | 'red' | 'neutral'; label: string }> = {
+    correct: { tone: 'green', label: 'Correct' },
+    wrong: { tone: 'red', label: 'Wrong' },
+    skipped: { tone: 'neutral', label: 'Skipped' },
+  };
+  return <div data-testid="card-practice-result">
+    <div className="mx-auto max-w-lg rounded-3xl border border-border bg-card p-8 text-center">
+      <div className={cn('mx-auto grid size-16 place-items-center rounded-full', verdict.tone === 'down' ? 'bg-destructive/10 text-destructive' : 'bg-[#d7eee4] text-[#164b4b]')}>{verdict.tone === 'down' ? <RotateCcw size={26} /> : <CheckCircle2 size={28} />}</div>
+      <div className="mt-5 font-display text-5xl">{scorePercent}%</div>
+      <div className="mt-1 text-xs text-muted-foreground">{correct} correct of {attempted} attempted</div>
+      <div className="mt-4 flex justify-center">{!trend.isLoading && <ProgressBadge tone={verdict.tone} label={verdict.label} />}</div>
+      {!trend.isLoading && <p className="mx-auto mt-3 max-w-sm text-xs leading-5 text-muted-foreground" data-testid="text-result-verdict">{verdict.message}</p>}
+      {/* Attempted / Skipped / Correct / Wrong breakdown — the counts a
+          student needs at a glance, distinct from the score % above (which
+          is correct-of-attempted, not correct-of-total). */}
+      <div className="mt-6 grid grid-cols-4 gap-2 text-center">
+        <div className="rounded-xl bg-muted/40 py-3"><div className="font-display text-lg" data-testid="text-result-attempted">{attempted}</div><div className="text-[10px] font-bold text-muted-foreground">Attempted</div></div>
+        <div className="rounded-xl bg-[#f3fbf7] py-3"><div className="font-display text-lg text-[#164b4b]" data-testid="text-result-correct">{correct}</div><div className="text-[10px] font-bold text-muted-foreground">Correct</div></div>
+        <div className="rounded-xl bg-[#fff6f3] py-3"><div className="font-display text-lg text-[#a34c3e]" data-testid="text-result-wrong">{wrong}</div><div className="text-[10px] font-bold text-muted-foreground">Wrong</div></div>
+        <div className="rounded-xl bg-muted/40 py-3"><div className="font-display text-lg" data-testid="text-result-skipped">{skipped}</div><div className="text-[10px] font-bold text-muted-foreground">Skipped</div></div>
+      </div>
+      <div className="mt-7 flex flex-wrap justify-center gap-2"><button onClick={onRestart} className="rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-practice-again"><RotateCcw size={13} className="mr-1.5 inline" /> Practice again</button><Link href={backHref} className="rounded-xl border border-border bg-card px-5 py-2.5 text-xs font-bold" data-testid="link-result-back">{backLabel}</Link></div>
+    </div>
+
+    {/* Every question with its outcome, in original order. */}
+    {total > 0 && <div className="mx-auto mt-8 max-w-3xl">
+      <h3 className="text-sm font-extrabold">All questions</h3>
+      <div className="mt-3 space-y-2.5">{mcqs.map((m, i) => { const status = statusFor(m); const badge = statusBadge[status]; return <div key={m.id} className={cn('rounded-2xl border p-4', statusStyles[status])} data-testid={`row-result-question-${i}`}>
+        <div className="flex items-start justify-between gap-3"><div className="text-xs font-bold text-muted-foreground">Q{i + 1}</div><Badge tone={badge.tone}>{badge.label}</Badge></div>
+        <p className="mt-1 text-sm font-bold leading-5">{m.question}</p>
+        {status !== 'skipped' && <div className="mt-2 text-xs">
+          <span className={cn('font-bold', status === 'correct' ? 'text-[#287058]' : 'text-[#a34c3e]')}>Your answer: {answers[m.id]}</span>
+          {status === 'wrong' && m.correctAnswer && <span className="ml-3 font-bold text-[#287058]">Correct answer: {m.correctAnswer}</span>}
+        </div>}
+        {status === 'skipped' && m.correctAnswer && <div className="mt-2 text-xs font-bold text-muted-foreground">Correct answer: {m.correctAnswer}</div>}
+      </div>; })}</div>
+    </div>}
+
+    {/* Wrong questions again, on their own, at the very end — a quick
+        review list without needing to scroll back through everything. */}
+    {!!wrongMcqs.length && <div className="mx-auto mt-8 max-w-3xl">
+      <h3 className="text-sm font-extrabold text-[#a34c3e]">Review wrong answers ({wrongMcqs.length})</h3>
+      <div className="mt-3 space-y-2.5">{wrongMcqs.map((m, i) => <div key={m.id} className="rounded-2xl border border-[#f0d3cc] bg-[#fff6f3] p-4" data-testid={`row-review-wrong-${i}`}>
+        <p className="text-sm font-bold leading-5">{m.question}</p>
+        <div className="mt-2 text-xs"><span className="font-bold text-[#a34c3e]">Your answer: {answers[m.id]}</span>{m.correctAnswer && <span className="ml-3 font-bold text-[#287058]">Correct answer: {m.correctAnswer}</span>}</div>
+        {m.explanation && <p className="mt-2 text-[11px] leading-5 text-muted-foreground">{m.explanation}</p>}
+      </div>)}</div>
+    </div>}
   </div>;
 }
 
@@ -159,7 +218,14 @@ function QuickJump({ open, value, onChange, onClose }: { open: boolean; value: s
 // active MCQ practice session or exam attempt, both full-screen /
 // distraction-free by intent. Lifted above Shell (rather than local Shell
 // state) so Practice()/TakeExam() can set it from inside their own route.
-const FocusModeContext = createContext<{ focusMode: boolean; setFocusMode: (v: boolean) => void }>({ focusMode: false, setFocusMode: () => {} });
+// `strictFocusMode` is a stricter variant used only by the Pre-Proffs exam
+// screen: when on, Shell doesn't render the "Exit" button at all (there is
+// no click-to-leave affordance in the UI), on top of the normal focus-mode
+// sidebar hiding. TakeExam pairs this with its own beforeunload/popstate
+// guards below so a student genuinely can't back out of an in-progress
+// exam via the header button, a refresh, or the browser's back button —
+// only submitting (or running out of time, which auto-submits) leaves.
+const FocusModeContext = createContext<{ focusMode: boolean; setFocusMode: (v: boolean) => void; strictFocusMode: boolean; setStrictFocusMode: (v: boolean) => void }>({ focusMode: false, setFocusMode: () => {}, strictFocusMode: false, setStrictFocusMode: () => {} });
 // Lets a page (e.g. TakeExam) override the header's auto-generated,
 // URL-derived title — needed because that auto title is just the route
 // path with slashes ("Exams / Take / 2"), which surfaces raw numeric
@@ -174,12 +240,32 @@ function usePageTitle(title: string | null | undefined) {
     return () => setPageTitle(null);
   }, [title, setPageTitle]);
 }
-function useFocusMode(active: boolean) {
-  const { setFocusMode } = useContext(FocusModeContext);
+function useFocusMode(active: boolean, strict = false) {
+  const { setFocusMode, setStrictFocusMode } = useContext(FocusModeContext);
   useEffect(() => {
     setFocusMode(active);
-    return () => setFocusMode(false);
-  }, [active, setFocusMode]);
+    setStrictFocusMode(active && strict);
+    return () => { setFocusMode(false); setStrictFocusMode(false); };
+  }, [active, strict, setFocusMode, setStrictFocusMode]);
+}
+
+// Traps the student on the current screen while `active` — used by the
+// Pre-Proffs exam so a student can't back out mid-attempt. Blocks the
+// browser back/forward button (by immediately re-pushing the current URL
+// whenever a `popstate` fires) and warns on refresh/tab-close via the
+// standard `beforeunload` confirmation. Neither of these stops a
+// programmatic navigation from inside the app (e.g. `setLocation` on
+// submit), only user-driven ways of leaving the page.
+function useExamLock(active: boolean) {
+  useEffect(() => {
+    if (!active) return;
+    window.history.pushState(null, '', window.location.href);
+    const blockBack = () => window.history.pushState(null, '', window.location.href);
+    const warnUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('popstate', blockBack);
+    window.addEventListener('beforeunload', warnUnload);
+    return () => { window.removeEventListener('popstate', blockBack); window.removeEventListener('beforeunload', warnUnload); };
+  }, [active]);
 }
 
 // Every route below is wrapped in <Shell>, so this is the one place that has
@@ -196,7 +282,7 @@ function Shell({ children }: { children: ReactNode }) {
   const [location, setLocation] = useLocation();
   const isMobile = useIsMobile();
   const user = userQuery.data;
-  const { focusMode } = useContext(FocusModeContext);
+  const { focusMode, strictFocusMode } = useContext(FocusModeContext);
 
   useEffect(() => {
     // The topbar search button has always shown a "⌘K" hint — this is the
@@ -259,7 +345,7 @@ function Shell({ children }: { children: ReactNode }) {
     <div className={cn(focusMode ? 'hidden' : (menuOpen || !isMobile) ? 'block' : 'hidden')}><SideNav user={user} onClose={() => setMenuOpen(false)} /></div>
     <main className="min-w-0 flex-1">
       {focusMode
-        ? <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border/70 bg-background/90 px-4 backdrop-blur-md md:px-8"><button onClick={() => setLocation('/')} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold text-muted-foreground hover:bg-muted" data-testid="button-exit-focus-mode"><ArrowLeft size={15} /> Exit</button><span className="text-xs font-bold capitalize text-foreground">{title}</span></header>
+        ? <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border/70 bg-background/90 px-4 backdrop-blur-md md:px-8">{strictFocusMode ? <span className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold text-muted-foreground" data-testid="text-exam-locked"><LockKeyhole size={13} /> Exam in progress</span> : <button onClick={() => setLocation('/')} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold text-muted-foreground hover:bg-muted" data-testid="button-exit-focus-mode"><ArrowLeft size={15} /> Exit</button>}<span className="text-xs font-bold capitalize text-foreground">{title}</span></header>
         : <header className="sticky top-0 z-20 flex h-[66px] items-center justify-between border-b border-border/70 bg-background/92 px-4 backdrop-blur-md md:px-8"><div className="flex min-w-0 items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} data-testid="button-open-menu"><Menu size={20} /></button><div className="min-w-0"><div className="font-mono-app text-[9px] uppercase tracking-[.16em] text-muted-foreground">{today}</div><h1 className="mt-1 truncate text-[16px] font-bold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="relative flex items-center gap-2"><button onClick={() => { setQuickJumpOpen((current) => !current); setQuickJumpValue(''); }} className="hidden h-9 w-[220px] items-center gap-2 rounded-lg border border-border bg-card px-3 text-left text-[11px] text-muted-foreground shadow-sm hover:border-primary/50 sm:flex md:w-[340px]" data-testid="button-open-quick-jump"><Search size={14} /><span className="truncate">Search modules, topics, MCQs...</span><span className="ml-auto rounded border border-border px-1 text-[9px]">⌘K</span></button><Link href="/notifications" className="relative grid size-9 place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:bg-muted" data-testid="link-notifications"><Bell size={16} /></Link><Link href="/profile" className="ml-1 grid size-8 place-items-center rounded-full bg-[#cdebf0] text-[10px] font-extrabold text-[#0d5267]" data-testid="link-header-profile">{initials(user.name)}</Link><QuickJump open={quickJumpOpen} value={quickJumpValue} onChange={setQuickJumpValue} onClose={() => setQuickJumpOpen(false)} /></div></header>}
       <div className={cn('page-enter', focusMode ? 'px-5 py-6 md:px-10 md:py-8' : 'px-4 py-6 md:px-8 md:py-8')}>{children}</div>
     </main>
@@ -687,8 +773,7 @@ function Practice() {
   if (q.isLoading) return <SkeletonPage />;
 
   if (finished) {
-    const correct = mcqs.filter((m) => answers[m.id] != null && answers[m.id] === m.correctAnswer).length;
-    return <div className="max-w-6xl"><SectionHeader eyebrow="Daily practice" title="Session complete" /><PracticeResultCard correct={correct} total={answeredCount} onRestart={restartSession} backHref={pastPaperId ? '/past-papers' : '/blocks'} backLabel={pastPaperId ? 'Back to past papers' : 'Back to blocks'} /></div>;
+    return <div className="max-w-6xl"><SectionHeader eyebrow="Daily practice" title="Session complete" /><PracticeResultCard mcqs={mcqs} answers={answers} onRestart={restartSession} backHref={pastPaperId ? '/past-papers' : '/blocks'} backLabel={pastPaperId ? 'Back to past papers' : 'Back to blocks'} /></div>;
   }
 
   if (!mode) {
@@ -814,7 +899,23 @@ function Practice() {
             prev/next buttons fit one viewport on a normal laptop screen
             without scrolling — this was the whole stack's biggest single
             source of vertical height. */}
-        <div className="mt-4 space-y-2">{current.options.map((option, i) => <button key={option} onClick={() => selectOption(option)} className={cn('flex w-full items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-left text-sm transition-colors', answers[current.id] === option ? 'border-primary bg-[#e6f3ed]' : 'border-border hover:bg-muted')} data-testid={`button-answer-${i}`}><span className="grid size-6 shrink-0 place-items-center rounded-lg bg-muted font-mono-app text-[11px]">{String.fromCharCode(65 + i)}</span><span className="flex-1">{option}</span></button>)}</div>
+        <div className="mt-4 space-y-2">{current.options.map((option, i) => {
+          const selected = answers[current.id];
+          const isSelected = selected === option;
+          const isCorrectOpt = current.correctAnswer != null && option === current.correctAnswer;
+          // Immediate right/wrong feedback once the student has picked an
+          // option for this question: their pick turns green if it's
+          // correct or red if it's wrong, and — if they picked wrong — the
+          // actual correct option is also outlined green so they can see
+          // it right away instead of only finding out at the end.
+          const optionClass = selected == null
+            ? 'border-border hover:bg-muted'
+            : isSelected && isCorrectOpt ? 'border-[#287058] bg-[#e6f3ed]'
+            : isSelected && !isCorrectOpt ? 'border-destructive bg-[#fff1ed]'
+            : isCorrectOpt ? 'border-[#287058] bg-[#f3fbf7]'
+            : 'border-border opacity-70';
+          return <button key={option} onClick={() => selectOption(option)} className={cn('flex w-full items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-left text-sm transition-colors', optionClass)} data-testid={`button-answer-${i}`}><span className="grid size-6 shrink-0 place-items-center rounded-lg bg-muted font-mono-app text-[11px]">{String.fromCharCode(65 + i)}</span><span className="flex-1">{option}</span>{selected != null && isSelected && !isCorrectOpt && <X size={15} className="shrink-0 text-destructive" />}{selected != null && isCorrectOpt && <CheckCircle2 size={15} className="shrink-0 text-[#287058]" />}</button>;
+        })}</div>
 
         <div className="mt-4 flex flex-wrap gap-2">
           <button onClick={() => setPanel(panel === 'hint' ? null : 'hint')} className={cn('inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold', panel === 'hint' ? 'bg-[#e5a952] text-white' : 'border border-[#e5a952]/40 bg-[#fdf6e8] text-[#8a5a12]')} data-testid="button-hint"><Lightbulb size={13} /> Hint</button>
@@ -1449,7 +1550,17 @@ function Register() {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
-  const institutions = useQuery({ queryKey: ['institutions', 'active'], queryFn: () => academicApi.institutions(true) });
+  // College options are now scoped to the chosen program — an MBBS college
+  // and a BDS college are different institutions, so showing every college
+  // regardless of program (then asking MBBS/BDS separately, unconnected to
+  // that choice) let a student pick a college that doesn't even offer the
+  // program they're about to select. Query key includes programKind so
+  // switching MBBS/BDS refetches the right list instead of reusing MBBS's
+  // cached one.
+  const institutions = useQuery({ queryKey: ['institutions', 'active', programKind], queryFn: () => academicApi.institutions(true, programKind || undefined), enabled: !!programKind });
+  // Changing the program invalidates whichever college was picked under
+  // the old program — it may not even be in the new list.
+  useEffect(() => { setInstitutionId(''); }, [programKind]);
   const plans = useListMembershipPlans();
   const paymentDetails = useQuery({ queryKey: ['payment-details'], queryFn: publicApi.paymentDetails });
 
@@ -1494,11 +1605,16 @@ function Register() {
       });
     }} className="mt-7 space-y-3.5">
       <label className="block text-xs font-bold">Full name<div className="mt-2"><IconField icon={UserIcon} required name="name" placeholder="Your name" data-testid="input-register-name" /></div></label>
-      <label className="block text-xs font-bold">College<div className="relative mt-2"><GraduationCap size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><select required value={institutionId} onChange={(e) => setInstitutionId(e.target.value)} className="h-11 w-full appearance-none rounded-xl border border-border bg-card pl-10 pr-9 text-sm outline-none focus:ring-2 focus:ring-primary/20" data-testid="select-register-institution"><option value="">{institutions.isLoading ? 'Loading…' : 'Select your college'}</option>{(institutions.data || []).map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}</select><ChevronRight size={14} className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 rotate-90 text-muted-foreground" /></div>{!institutions.isLoading && !institutions.data?.length && <p className="mt-1.5 text-[11px] text-muted-foreground">No colleges are set up yet — ask an admin to add one first.</p>}</label>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block text-xs font-bold">Program<div className="mt-2 grid grid-cols-2 gap-2">{(['MBBS', 'BDS'] as const).map((p) => <button type="button" key={p} onClick={() => { setProgramKind(p); setYearNumber(''); }} className={cn('h-11 rounded-xl border text-sm font-bold transition-colors', programKind === p ? 'border-primary bg-[#eef7f1] text-primary' : 'border-border bg-card hover:bg-muted')} data-testid={`button-program-${p.toLowerCase()}`}>{p}</button>)}</div></label>
-        <label className="block text-xs font-bold">Academic year<div className="relative mt-2"><CalendarDays size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><select required value={yearNumber} onChange={(e) => setYearNumber(e.target.value)} disabled={!programKind} className="h-11 w-full appearance-none rounded-xl border border-border bg-card pl-10 pr-9 text-sm outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50" data-testid="select-register-year"><option value="">{!programKind ? 'Select program first' : 'Select year'}</option>{programKind && Array.from({ length: programKind === 'MBBS' ? 5 : 4 }, (_, i) => i + 1).map((y) => <option key={y} value={y}>{y}{y === 1 ? 'st' : y === 2 ? 'nd' : y === 3 ? 'rd' : 'th'} Year{y === (programKind === 'MBBS' ? 5 : 4) ? ' (Final)' : ''}</option>)}</select><ChevronRight size={14} className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 rotate-90 text-muted-foreground" /></div></label>
-      </div>
+      {/* Program now comes before College: MBBS colleges and BDS colleges
+          are different institutions, so the college list can't be shown
+          (or made sense of) until we know which one the student needs. */}
+      <label className="block text-xs font-bold">Program<div className="mt-2 grid grid-cols-2 gap-2">{(['MBBS', 'BDS'] as const).map((p) => <button type="button" key={p} onClick={() => { setProgramKind(p); setYearNumber(''); }} className={cn('h-11 rounded-xl border text-sm font-bold transition-colors', programKind === p ? 'border-primary bg-[#eef7f1] text-primary' : 'border-border bg-card hover:bg-muted')} data-testid={`button-program-${p.toLowerCase()}`}>{p}</button>)}</div></label>
+      <label className="block text-xs font-bold">College<div className="relative mt-2"><GraduationCap size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><select required value={institutionId} onChange={(e) => setInstitutionId(e.target.value)} disabled={!programKind} className="h-11 w-full appearance-none rounded-xl border border-border bg-card pl-10 pr-9 text-sm outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50" data-testid="select-register-institution"><option value="">{!programKind ? 'Select program first' : institutions.isLoading ? 'Loading…' : `Select your ${programKind} college`}</option>{(institutions.data || []).map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}</select><ChevronRight size={14} className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 rotate-90 text-muted-foreground" /></div>{programKind && !institutions.isLoading && !institutions.data?.length && <p className="mt-1.5 text-[11px] text-muted-foreground">No {programKind} colleges are set up yet — ask an admin to add one first.</p>}</label>
+      {/* Buttons (not a <select>) to match the Program picker above — a row
+          of tappable year buttons is faster to use on mobile than opening a
+          dropdown for a list this short, and keeps the selected year
+          visually obvious the same way the MBBS/BDS buttons do. */}
+      <label className="block text-xs font-bold">Academic year{!programKind && <span className="ml-2 font-normal text-muted-foreground">(select a program first)</span>}<div className="mt-2 grid grid-cols-5 gap-2">{programKind ? Array.from({ length: programKind === 'MBBS' ? 5 : 4 }, (_, i) => i + 1).map((y) => <button type="button" key={y} onClick={() => setYearNumber(String(y))} className={cn('flex h-11 flex-col items-center justify-center rounded-xl border text-sm font-bold leading-none transition-colors', yearNumber === String(y) ? 'border-primary bg-[#eef7f1] text-primary' : 'border-border bg-card hover:bg-muted')} data-testid={`button-year-${y}`}>{y}<span className="text-[9px] font-semibold uppercase tracking-wide opacity-70">{y === 1 ? 'st' : y === 2 ? 'nd' : y === 3 ? 'rd' : 'th'} yr</span></button>) : Array.from({ length: 5 }, (_, i) => <button type="button" disabled key={i} className="h-11 rounded-xl border border-border bg-card text-sm font-bold opacity-40" />)}</div></label>
       <div className="grid gap-3 sm:grid-cols-2"><label className="block text-xs font-bold">Email<div className="mt-2"><IconField icon={Mail} required type="email" name="email" placeholder="you@college.edu" data-testid="input-register-email" /></div></label><label className="block text-xs font-bold">WhatsApp number<div className="mt-2"><IconField icon={Phone} required name="phone" placeholder="03xx-xxxxxxx" data-testid="input-register-phone" /></div></label></div>
       <label className="block text-xs font-bold">Password<div className="relative mt-2"><LockKeyhole size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><input required minLength={8} type={showPassword ? 'text' : 'password'} name="password" value={passwordValue} onChange={(e) => setPasswordValue(e.target.value)} className="h-11 w-full rounded-xl border border-border bg-card pl-10 pr-10 text-sm outline-none focus:ring-2 focus:ring-primary/20" data-testid="input-register-password" /><button type="button" onClick={() => setShowPassword((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" data-testid="button-toggle-password">{showPassword ? <EyeOff size={15} /> : <Eye size={15} />}</button></div><PasswordStrength value={passwordValue} /></label>
 
@@ -1826,8 +1942,12 @@ function TakeExam() {
   // On for the whole time this screen is mounted — TakeExam is only ever
   // reached mid-attempt, so unlike Practice() there's no separate
   // setup/results state to gate on; unmount (navigating to the result page
-  // included) turns it back off via useFocusMode's cleanup.
-  useFocusMode(true);
+  // included) turns it back off via useFocusMode's cleanup. `strict` (true)
+  // hides Shell's Exit button — a Pre-Proffs exam is meant to be strict:
+  // no clicking away mid-attempt — and useExamLock backs that up by also
+  // blocking the browser back button and warning on refresh/close.
+  useFocusMode(true, true);
+  useExamLock(true);
   const submit = useMutation({ mutationFn: () => examsApi.submit(attemptId), onSuccess: () => setLocation(`/exams/result/${attemptId}`) });
   const saveAnswer = useMutation({ mutationFn: ({ mcqId, selectedAnswer }: { mcqId: number; selectedAnswer: string | null }) => examsApi.answer(attemptId, mcqId, selectedAnswer) });
 
@@ -1920,7 +2040,8 @@ function AppRoutes() {
  return <Switch><Route path="/login" component={Login} /><Route path="/register" component={Register} /><Route path="/forgot-password" component={ForgotPassword} /><Route path="/reset-password" component={ResetPassword} /><Route path="/verify-email" component={VerifyEmail} /><Route path="/"><Shell><Dashboard /></Shell></Route><Route path="/blocks"><Shell><Blocks /></Shell></Route><Route path="/blocks/:id"><Shell><BlockDetail /></Shell></Route><Route path="/modules"><Shell><ModulesRedirect /></Shell></Route><Route path="/modules/:id"><Shell><Subjects /></Shell></Route><Route path="/subjects"><Shell><Subjects /></Shell></Route><Route path="/subjects/:id"><Shell><Subjects topics /></Shell></Route><Route path="/topics"><Shell><Subjects topics /></Shell></Route><Route path="/practice"><Shell><Practice /></Shell></Route><Route path="/exams"><Shell><Exams /></Shell></Route><Route path="/exams/take/:attemptId"><Shell><TakeExam /></Shell></Route><Route path="/exams/result/:attemptId"><Shell><ExamResult /></Shell></Route><Route path="/past-papers"><Shell><PastPapers /></Shell></Route><Route path="/flashcards"><Shell><Flashcards /></Shell></Route><Route path="/ai-visualizer"><Shell><AiVisualizer /></Shell></Route><Route path="/books"><Shell><Books /></Shell></Route><Route path="/resources"><Shell><Resources /></Shell></Route><Route path="/notebook"><Shell><Notebook /></Shell></Route><Route path="/saved-sessions"><Shell><SavedSessions /></Shell></Route><Route path="/flagged-mcqs"><Shell><FlaggedMcqs /></Shell></Route><Route path="/leaderboard"><Shell><Leaderboard /></Shell></Route><Route path="/notifications"><Shell><Notifications /></Shell></Route><Route path="/payments"><Shell><Payments /></Shell></Route><Route path="/feedback"><Shell><Feedback /></Shell></Route><Route path="/profile"><Shell><Profile /></Shell></Route><Route component={NotFound} /></Switch>; }
 function App() {
   const [focusMode, setFocusMode] = useState(false);
+  const [strictFocusMode, setStrictFocusMode] = useState(false);
   const [pageTitle, setPageTitle] = useState<string | null>(null);
-  return <QueryClientProvider client={queryClient}><TooltipProvider><FocusModeContext.Provider value={{ focusMode, setFocusMode }}><PageTitleContext.Provider value={{ pageTitle, setPageTitle }}><WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}><ErrorBoundary><AppRoutes /></ErrorBoundary></WouterRouter><Toaster /></PageTitleContext.Provider></FocusModeContext.Provider></TooltipProvider></QueryClientProvider>;
+  return <QueryClientProvider client={queryClient}><TooltipProvider><FocusModeContext.Provider value={{ focusMode, setFocusMode, strictFocusMode, setStrictFocusMode }}><PageTitleContext.Provider value={{ pageTitle, setPageTitle }}><WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}><ErrorBoundary><AppRoutes /></ErrorBoundary></WouterRouter><Toaster /></PageTitleContext.Provider></FocusModeContext.Provider></TooltipProvider></QueryClientProvider>;
 }
 export default App;
