@@ -12,6 +12,7 @@ import {
   RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Wand2, Activity, Layers, BarChart3, GraduationCap, ToggleLeft,
   Download, Database, Loader2
 } from 'lucide-react';
+import { AreaChart, Area, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { applyThemeVars, DEFAULT_THEME, readableForegroundHsl } from '@/lib/theme';
 import {
   getListMembershipPlansQueryKey, getListPaymentsQueryKey, getListMcqsQueryKey, getListModulesQueryKey, getListStudentsQueryKey, getListNotificationsQueryKey, getGetCurrentUserQueryKey, getListFlashcardsQueryKey,
@@ -31,7 +32,7 @@ import { toast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
-import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, analyticsApi, mcqImportApi, mcqBackupApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, subjectAdminApi, topicAdminApi, flashcardsAdminApi, flashcardsAiApi, booksAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blockAdminApi, examsAdminApi, examsApi, explanationsApi, auditApi, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type StudentDetail, type SiteContent, type TeamMember, TEAM_CATEGORIES, TEAM_CATEGORY_LABELS, type TeamCategory, type AdminModule, type AdminBlock, type AdminSubject, type AdminTopic, type AdminFlashcard, type GeneratedFlashcard, type AdminMcqRow, type AdminBook, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type BankAccount, type PaymentMethodConfig, aiVisualizerAdminApi, type AiVisualizerLogEntry } from '@/lib/api';
+import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, analyticsApi, mcqImportApi, flashcardImportApi, mcqBackupApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, subjectAdminApi, topicAdminApi, flashcardsAdminApi, flashcardsAiApi, booksAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blockAdminApi, examsAdminApi, examsApi, explanationsApi, auditApi, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type FlashcardCandidate, type StudentDetail, type SiteContent, type TeamMember, TEAM_CATEGORIES, TEAM_CATEGORY_LABELS, type TeamCategory, type AdminModule, type AdminBlock, type AdminSubject, type AdminTopic, type AdminFlashcard, type GeneratedFlashcard, type AdminMcqRow, type AdminBook, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type BankAccount, type PaymentMethodConfig, aiVisualizerAdminApi, type AiVisualizerLogEntry, type AuditLogEntry } from '@/lib/api';
 import './index.css';
 
 // Round 3, item 10 (performance) — same over-fetching fix as the student
@@ -295,12 +296,51 @@ function timeAgo(iso: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+// Buckets audit-log rows into the last 7 calendar days (today inclusive),
+// summing each MCQ-import-shaped action's `metadata.count` (falling back to
+// 1 per row if a row has no count) — powers the "MCQ imports" sparkline on
+// the overview. MCQS_BULK_IMPORTED is the file-import commit; MCQ_BULK_CREATED
+// covers the "add several manually / from AI drafts" flow, which is import-shaped
+// in the same "many questions landed at once" sense.
+function buildMcqImportSeries(entries: AuditLogEntry[]): Array<{ date: string; label: string; count: number }> {
+  const days: Array<{ date: string; label: string; count: number }> = [];
+  const now = new Date();
+  for (let i = 6; i >= 0; i--) {
+    const dt = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+    const y = dt.getFullYear(); const m = String(dt.getMonth() + 1).padStart(2, '0'); const dd = String(dt.getDate()).padStart(2, '0');
+    days.push({ date: `${y}-${m}-${dd}`, label: dt.toLocaleDateString('en-US', { weekday: 'short' }), count: 0 });
+  }
+  const indexByDate = new Map(days.map((row, i) => [row.date, i]));
+  for (const entry of entries) {
+    if (entry.action !== 'MCQS_BULK_IMPORTED' && entry.action !== 'MCQ_BULK_CREATED') continue;
+    const idx = indexByDate.get(entry.createdAt.slice(0, 10));
+    if (idx === undefined) continue;
+    let count = 1;
+    if (entry.metadata) { try { const parsed = JSON.parse(entry.metadata); if (typeof parsed.count === 'number') count = parsed.count; } catch { /* ignore malformed metadata */ } }
+    days[idx].count += count;
+  }
+  return days;
+}
+
 function AdminOverview() {
   const q = useGetAdminDashboard({ query: { refetchInterval: 15000, queryKey: getGetAdminDashboardQueryKey() } });
   const d = q.data;
   const activity = useQuery({ queryKey: ['audit-logs', 'overview'], queryFn: () => auditApi.list(6), refetchInterval: 15000 });
+  // Content totals — shares the ['admin-modules'] cache the MCQ/flashcard
+  // bank pages already populate, so subjectCount/topicCount (already
+  // returned per module by GET /modules) are just summed here rather than
+  // needing a new backend aggregate.
+  const modulesQ = useQuery({ queryKey: ['admin-modules'], queryFn: moduleAdminApi.listAll });
+  const allModules = modulesQ.data ?? [];
+  const totalModules = allModules.length;
+  const totalSubjects = allModules.reduce((sum, m) => sum + (m.subjectCount ?? 0), 0);
+  const totalTopics = allModules.reduce((sum, m) => sum + (m.topicCount ?? 0), 0);
+  const importLogsQ = useQuery({ queryKey: ['audit-logs', 'mcq-imports-7d'], queryFn: () => auditApi.list(500), refetchInterval: 15000 });
+  const mcqImportSeries = buildMcqImportSeries(importLogsQ.data ?? []);
+  const mcqImportsThisWeek = mcqImportSeries.reduce((sum, row) => sum + row.count, 0);
   if (q.isLoading || !d) return <SkeletonPage />;
   const stats: Array<[string, string | number, typeof Users, string, string | null]> = [['Students', d.totalStudents, Users, 'bg-[#dceaf1] text-[#32647b]', '/admin/students'], ['Subscribed students', d.activeMembers, ShieldCheck, 'bg-[#d7eee4] text-[#287058]', '/admin/students?status=ACTIVE'], ['Pending payments', d.pendingPayments, Clock3, 'bg-[#fff0cb] text-[#94651c]', '/admin/payments'], ['This month\'s revenue', money(d.monthlyRevenue), TrendingUp, 'bg-[#f0e3ef] text-[#815276]', null]];
+  const contentStats: Array<[string, number, typeof Users, string, string]> = [['Total modules', totalModules, BookOpen, 'bg-[#eef7f1] text-[#287058]', '/admin/content'], ['Total subjects', totalSubjects, Layers, 'bg-[#dceaf1] text-[#32647b]', '/admin/subjects'], ['Total topics', totalTopics, Library, 'bg-[#fdf6e8] text-[#8a5a12]', '/admin/topics']];
   // Donut gradient stops derived from real studentsByStatus counts — this
   // used to be a hardcoded "72%, 86%, 100%" regardless of actual data (see
   // section 10 fix notes). Colors cycle through the same 3-color sequence
@@ -318,7 +358,28 @@ function AdminOverview() {
       return `${donutColors[i % donutColors.length]} ${start}% ${end}%`;
     }).join(', ')
     : '#dceaf1 0% 100%';
-  return <div><SectionHeader eyebrow="Command center" title="Good morning, academic team" action={<span className="inline-flex items-center gap-1.5 rounded-full bg-[#d7eee4] px-3 py-1.5 text-[10px] font-bold text-[#164b4b]" data-testid="text-live-indicator"><span className="size-1.5 rounded-full bg-[#287058]" /> Live · refreshes every 15s</span>} /><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{stats.map(([label, value, Icon, color, href], i) => { const card = <div className={cn('rounded-2xl border border-border bg-card p-5', href && 'card-lift cursor-pointer transition hover:border-primary/40')}><div className="flex items-center justify-between"><span className="text-xs font-semibold text-muted-foreground">{label}</span><div className={cn('grid size-9 place-items-center rounded-xl', color)}><Icon size={17} /></div></div><div className="mt-5 font-display text-4xl">{String(value)}</div><div className="mt-2 text-[11px] text-muted-foreground">{i === 2 ? 'Needs review today' : i === 3 ? 'Across active memberships' : 'Registered on the platform'}</div></div>; return href ? <Link key={String(label)} href={href} data-testid={`link-stat-${label.toLowerCase().replace(/[^a-z]+/g, '-')}`}>{card}</Link> : <div key={String(label)}>{card}</div>; })}</div><div className="mt-8 grid gap-6 lg:grid-cols-[1.5fr_1fr]"><div><SectionHeader eyebrow="Needs attention" title="Recent payments" action={<Link href="/admin/payments" className="text-xs font-bold text-primary" data-testid="link-admin-payments">View queue <ArrowRight size={13} className="ml-1 inline" /></Link>} />{d.recentPayments.length ? <div className="overflow-x-auto rounded-2xl border border-border bg-card"><table className="w-full min-w-[580px] text-left text-xs"><thead className="bg-muted text-[10px] uppercase tracking-[.12em] text-muted-foreground"><tr><th className="px-5 py-3">Student</th><th className="px-5 py-3">Plan</th><th className="px-5 py-3">Amount</th><th className="px-5 py-3">Status</th></tr></thead><tbody>{d.recentPayments.slice(0, 4).map((p) => <tr key={p.id} className="border-t border-border" data-testid={`row-admin-payment-${p.id}`}><td className="px-5 py-4 font-bold">{p.studentName}</td><td className="px-5 py-4 text-muted-foreground">{p.planName}</td><td className="px-5 py-4 font-mono-app text-[11px]">{money(p.amount, p.currency)}</td><td className="px-5 py-4"><Badge tone={paymentStatusTone(p.status)}>{paymentStatusLabel(p.status)}</Badge></td></tr>)}</tbody></table></div> : <EmptyState icon={ReceiptText} title="No payments yet" body="Payment submissions will show up here as students pay." />}</div><div><SectionHeader eyebrow="Membership health" title="Student status" /><div className="rounded-2xl border border-border bg-card p-6"><div className="flex items-center justify-center"><div className="relative grid size-44 place-items-center rounded-full" style={{ background: `conic-gradient(${gradientStops})` }}><div className="grid size-32 place-items-center rounded-full bg-card"><span className="font-display text-4xl">{d.activeMembers}</span><span className="text-[10px] text-muted-foreground">active</span></div></div></div><div className="mt-5 space-y-3">{statusEntries.map(([status, count], i) => <Link key={status} href={`/admin/students?status=${encodeURIComponent(status)}`} className="flex items-center justify-between text-xs transition hover:opacity-70" data-testid={`link-status-${status.toLowerCase()}`}><span className="flex items-center gap-2 capitalize"><span className="size-2 rounded-full" style={{ background: donutColors[i % donutColors.length] }} />{status}</span><span className="font-mono-app">{count}</span></Link>)}</div></div></div></div>
+  return <div><SectionHeader eyebrow="Command center" title="Good morning, academic team" action={<span className="inline-flex items-center gap-1.5 rounded-full bg-[#d7eee4] px-3 py-1.5 text-[10px] font-bold text-[#164b4b]" data-testid="text-live-indicator"><span className="size-1.5 rounded-full bg-[#287058]" /> Live · refreshes every 15s</span>} /><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{stats.map(([label, value, Icon, color, href], i) => { const card = <div className={cn('rounded-2xl border border-border bg-card p-5', href && 'card-lift cursor-pointer transition hover:border-primary/40')}><div className="flex items-center justify-between"><span className="text-xs font-semibold text-muted-foreground">{label}</span><div className={cn('grid size-9 place-items-center rounded-xl', color)}><Icon size={17} /></div></div><div className="mt-5 font-display text-4xl">{String(value)}</div><div className="mt-2 text-[11px] text-muted-foreground">{i === 2 ? 'Needs review today' : i === 3 ? 'Across active memberships' : 'Registered on the platform'}</div></div>; return href ? <Link key={String(label)} href={href} data-testid={`link-stat-${label.toLowerCase().replace(/[^a-z]+/g, '-')}`}>{card}</Link> : <div key={String(label)}>{card}</div>; })}</div>
+    <div className="mt-8"><SectionHeader eyebrow="Platform content" title="Content library" />
+      <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-1">{contentStats.map(([label, value, Icon, color, href]) => <Link key={label} href={href} className="card-lift block rounded-2xl border border-border bg-card p-5 transition hover:border-primary/40" data-testid={`link-content-stat-${label.toLowerCase().replace(/[^a-z]+/g, '-')}`}><div className="flex items-center justify-between"><span className="text-xs font-semibold text-muted-foreground">{label}</span><div className={cn('grid size-9 place-items-center rounded-xl', color)}><Icon size={17} /></div></div><div className="mt-5 font-display text-4xl">{modulesQ.isLoading ? '—' : value}</div></Link>)}</div>
+        <div className="rounded-2xl border border-border bg-card p-5">
+          <div className="flex items-center justify-between"><span className="text-xs font-semibold text-muted-foreground">MCQ imports</span><span className="text-[11px] text-muted-foreground">{mcqImportsThisWeek} question{mcqImportsThisWeek === 1 ? '' : 's'} · last 7 days</span></div>
+          <div className="mt-3 h-52">
+            {importLogsQ.isLoading ? <InlineLoading label="Loading import history…" /> : <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={mcqImportSeries} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                <defs><linearGradient id="mcqImportsFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#287058" stopOpacity={0.35} /><stop offset="100%" stopColor="#287058" stopOpacity={0} /></linearGradient></defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={11} stroke="currentColor" className="text-muted-foreground" />
+                <YAxis allowDecimals={false} tickLine={false} axisLine={false} fontSize={11} width={28} stroke="currentColor" className="text-muted-foreground" />
+                <RechartsTooltip formatter={(value: number) => [`${value} question${value === 1 ? '' : 's'}`, 'Imported']} labelFormatter={(_, payload) => (payload && payload[0] ? payload[0].payload.date : '')} contentStyle={{ borderRadius: 12, border: '1px solid hsl(var(--border))', fontSize: 12 }} />
+                <Area type="monotone" dataKey="count" stroke="#287058" strokeWidth={2} fill="url(#mcqImportsFill)" />
+              </AreaChart>
+            </ResponsiveContainer>}
+          </div>
+        </div>
+      </div>
+    </div>
+    <div className="mt-8 grid gap-6 lg:grid-cols-[1.5fr_1fr]"><div><SectionHeader eyebrow="Needs attention" title="Recent payments" action={<Link href="/admin/payments" className="text-xs font-bold text-primary" data-testid="link-admin-payments">View queue <ArrowRight size={13} className="ml-1 inline" /></Link>} />{d.recentPayments.length ? <div className="overflow-x-auto rounded-2xl border border-border bg-card"><table className="w-full min-w-[580px] text-left text-xs"><thead className="bg-muted text-[10px] uppercase tracking-[.12em] text-muted-foreground"><tr><th className="px-5 py-3">Student</th><th className="px-5 py-3">Plan</th><th className="px-5 py-3">Amount</th><th className="px-5 py-3">Status</th></tr></thead><tbody>{d.recentPayments.slice(0, 4).map((p) => <tr key={p.id} className="border-t border-border" data-testid={`row-admin-payment-${p.id}`}><td className="px-5 py-4 font-bold">{p.studentName}</td><td className="px-5 py-4 text-muted-foreground">{p.planName}</td><td className="px-5 py-4 font-mono-app text-[11px]">{money(p.amount, p.currency)}</td><td className="px-5 py-4"><Badge tone={paymentStatusTone(p.status)}>{paymentStatusLabel(p.status)}</Badge></td></tr>)}</tbody></table></div> : <EmptyState icon={ReceiptText} title="No payments yet" body="Payment submissions will show up here as students pay." />}</div><div><SectionHeader eyebrow="Membership health" title="Student status" /><div className="rounded-2xl border border-border bg-card p-6"><div className="flex items-center justify-center"><div className="relative grid size-44 place-items-center rounded-full" style={{ background: `conic-gradient(${gradientStops})` }}><div className="grid size-32 place-items-center rounded-full bg-card"><span className="font-display text-4xl">{d.activeMembers}</span><span className="text-[10px] text-muted-foreground">active</span></div></div></div><div className="mt-5 space-y-3">{statusEntries.map(([status, count], i) => <Link key={status} href={`/admin/students?status=${encodeURIComponent(status)}`} className="flex items-center justify-between text-xs transition hover:opacity-70" data-testid={`link-status-${status.toLowerCase()}`}><span className="flex items-center gap-2 capitalize"><span className="size-2 rounded-full" style={{ background: donutColors[i % donutColors.length] }} />{status}</span><span className="font-mono-app">{count}</span></Link>)}</div></div></div></div>
     <div className="mt-8"><SectionHeader eyebrow="What's happened lately" title="Recent activity" action={<Link href="/admin/team" className="text-xs font-bold text-primary" data-testid="link-admin-audit">Full history <ArrowRight size={13} className="ml-1 inline" /></Link>} />
       <div className="rounded-2xl border border-border bg-card p-2">{activity.isLoading ? <div className="p-4"><InlineLoading /></div> : activity.data?.length ? activity.data.map((entry, i) => <div key={entry.id} className={cn('flex items-center gap-3 px-4 py-3', i > 0 && 'border-t border-border')} data-testid={`row-activity-${entry.id}`}><span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[#dceaf1] text-[#2c6a8f]"><ClipboardCheck size={14} /></span><div className="min-w-0 flex-1"><div className="truncate text-xs font-bold">{humanizeAuditAction(entry.action)}</div><div className="truncate text-[11px] text-muted-foreground">{entry.actorName}{entry.entity ? ` · ${entry.entity}${entry.entityId ? ` #${entry.entityId}` : ''}` : ''}</div></div><span className="shrink-0 text-[10px] text-muted-foreground">{timeAgo(entry.createdAt)}</span></div>) : <div className="p-4 text-xs text-muted-foreground">No activity recorded yet.</div>}</div>
     </div>
@@ -2623,6 +2684,34 @@ function FlashcardTreeModule({ moduleId, name, cardCount, cardsByTopic }: { modu
   </div>;
 }
 
+// Top level of the flashcard bank tree — one "MBBS/BDS · Year N" group.
+// Collapsed by default, exactly like McqTreeYearGroup in the MCQ bank:
+// clicking it is what rolls out the Blocks (and their nested
+// Modules/Subjects/Topics) underneath, instead of dumping every block and
+// module open on screen at once.
+function FlashcardTreeYearGroup({ programLabel, yearLabel, groups, showBlockLabel, countByModule, cardsByTopic }: {
+  programLabel: string; yearLabel: string;
+  groups: Array<{ key: string; name: string; mods: AdminModule[] }>;
+  showBlockLabel: boolean; countByModule: Map<number, number>; cardsByTopic: Map<number, AdminFlashcard[]>;
+}) {
+  const [open, setOpen] = useState(false);
+  const groupCount = groups.reduce((sum, g) => sum + g.mods.reduce((s, m) => s + (countByModule.get(m.id) ?? 0), 0), 0);
+  return <div className="rounded-2xl border border-border bg-card">
+    <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 px-5 py-3.5 text-left" data-testid={`button-flashcard-tree-year-${programLabel}-${yearLabel}`}>
+      <ChevronRight size={16} className={cn('shrink-0 text-primary transition-transform', open && 'rotate-90')} />
+      <GraduationCap size={15} className="shrink-0 text-primary" />
+      <h3 className="flex-1 text-sm font-extrabold" data-testid={`text-flashcard-program-year-group-${programLabel}-${yearLabel}`}>{programLabel} <span className="font-normal text-muted-foreground">· {yearLabel}</span></h3>
+      <span className="text-[11px] text-muted-foreground">{groupCount} card{groupCount === 1 ? '' : 's'}</span>
+    </button>
+    {open && <div className="space-y-5 border-t border-border p-4">
+      {groups.map((g) => <div key={g.key} className="space-y-3">
+        {showBlockLabel && <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground" data-testid={`text-flashcard-block-group-${g.key}`}>{g.name}</p>}
+        {g.mods.map((m) => <FlashcardTreeModule key={m.id} moduleId={m.id} name={m.name} cardCount={countByModule.get(m.id) ?? 0} cardsByTopic={cardsByTopic} />)}
+      </div>)}
+    </div>}
+  </div>;
+}
+
 // Flashcard bank tree (module > subject > topic) — mirrors McqBankTree so
 // flashcards get the same "not all crammed onto one screen" browsing and the
 // same per-scope permanent delete as the MCQ bank.
@@ -2649,14 +2738,9 @@ function FlashcardBankTree({ modules, blocks }: { modules: AdminModule[]; blocks
   });
   const standaloneLeaves = (modulesByBlock.get('other') ?? []).map((m) => ({ key: `module-${m.id}`, name: m.name, mods: [m], program: m.programTargetKind || null, year: m.yearTargetNumber ?? null }));
   const programYearGroups = groupByProgramYear([...blockLeaves, ...standaloneLeaves]);
-  return <div className="space-y-7">
-    {programYearGroups.map(({ programLabel, yearLabel, groups }) => <div key={`${programLabel}-${yearLabel}`} className="space-y-5">
-      {(blocks.length > 0 || standaloneLeaves.length > 0) && <div className="flex items-center gap-2 border-b border-border pb-2"><GraduationCap size={14} className="text-primary" /><h3 className="text-xs font-extrabold" data-testid={`text-flashcard-program-year-group-${programLabel}-${yearLabel}`}>{programLabel} <span className="font-normal text-muted-foreground">· {yearLabel}</span></h3></div>}
-      {groups.map((g) => <div key={g.key} className="space-y-3">
-        <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground" data-testid={`text-flashcard-block-group-${g.key}`}>{g.name}</p>
-        {g.mods.map((m) => <FlashcardTreeModule key={m.id} moduleId={m.id} name={m.name} cardCount={countByModule.get(m.id) ?? 0} cardsByTopic={cardsByTopic} />)}
-      </div>)}
-    </div>)}
+  const showBlockLabel = blocks.length > 0 || standaloneLeaves.length > 0;
+  return <div className="space-y-4">
+    {programYearGroups.map(({ programLabel, yearLabel, groups }) => <FlashcardTreeYearGroup key={`${programLabel}-${yearLabel}`} programLabel={programLabel} yearLabel={yearLabel} groups={groups} showBlockLabel={showBlockLabel} countByModule={countByModule} cardsByTopic={cardsByTopic} />)}
     {!!trulyUnassigned.length && <div className="rounded-2xl border border-dashed border-border bg-card p-4"><p className="mb-3 text-xs font-bold text-muted-foreground">{trulyUnassigned.length} flashcard{trulyUnassigned.length === 1 ? '' : 's'} with no module/subject/topic</p><div className="space-y-2">{trulyUnassigned.map((c) => <FlashcardTreeRow key={c.id} card={c} />)}</div></div>}
   </div>;
 }
@@ -2739,7 +2823,58 @@ function AdminFlashcards() {
     toast({ title: 'Flashcards saved', description: 'AI-generated drafts were added to the bank.' });
   };
 
-  return <div><SectionHeader eyebrow="Study tools" title="Flashcards" action={<div className="flex items-center gap-2"><button onClick={() => { setAiOpen((v) => !v); setOpen(false); }} className="inline-flex items-center gap-2 rounded-xl border border-primary/40 bg-[#eef7f1] px-4 py-2.5 text-xs font-extrabold text-primary" data-testid="button-toggle-ai-flashcards"><Sparkles size={15} /> {aiOpen ? 'Close' : 'Generate with AI'}</button><button onClick={() => { setOpen((v) => !v); setAiOpen(false); }} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-toggle-add-flashcard"><Plus size={15} /> {open ? 'Close' : 'Add flashcard'}</button></div>} />
+  // Bulk upload from a file — same "upload, parse, review, commit" flow as
+  // AdminMcqs' file importer, minus the profile picker (a flashcard is just
+  // front/back, so there's no regex pattern to customize).
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [parsing, setParsing] = useState(false);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [candidates, setCandidates] = useState<FlashcardCandidate[]>([]);
+  const importCommit = useMutation({
+    mutationFn: () => flashcardImportApi.commit({ moduleId: Number(moduleId), subjectId: Number(subjectId), topicId: Number(topicId), module: moduleName, topic: topicName, cards: candidates.filter((c) => c.front.trim() && c.back.trim()) }),
+    onSuccess: (res) => { invalidate(); setCandidates([]); setFile(null); toast({ title: `Imported ${res.imported} flashcard${res.imported === 1 ? '' : 's'}`, description: 'Saved to the flashcard bank.' }); },
+    onError: (err: unknown) => toast({ title: 'Import failed', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
+  const parseFile = async () => {
+    if (!file) return;
+    setParsing(true); setParseError(null);
+    try {
+      const result = await flashcardImportApi.parse(file);
+      setCandidates(result.candidates);
+    } catch (err) {
+      setParseError(err instanceof ApiRequestError ? err.message : 'Could not parse this file.');
+    } finally {
+      setParsing(false);
+    }
+  };
+  const updateCandidate = (index: number, patch: Partial<FlashcardCandidate>) => setCandidates((prev) => prev.map((c, i) => (i === index ? { ...c, ...patch } : c)));
+  const removeCandidate = (index: number) => setCandidates((prev) => prev.filter((_, i) => i !== index));
+  const importAll = () => {
+    if (!targetReady || !candidates.filter((c) => c.front.trim() && c.back.trim()).length) return;
+    importCommit.mutate();
+  };
+
+  return <div><SectionHeader eyebrow="Study tools" title="Flashcards" action={<div className="flex items-center gap-2"><button onClick={() => { setUploadOpen((v) => !v); setAiOpen(false); setOpen(false); }} className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 text-xs font-bold" data-testid="button-toggle-upload-flashcards"><FileText size={15} /> {uploadOpen ? 'Close' : 'Upload file'}</button><button onClick={() => { setAiOpen((v) => !v); setOpen(false); setUploadOpen(false); }} className="inline-flex items-center gap-2 rounded-xl border border-primary/40 bg-[#eef7f1] px-4 py-2.5 text-xs font-extrabold text-primary" data-testid="button-toggle-ai-flashcards"><Sparkles size={15} /> {aiOpen ? 'Close' : 'Generate with AI'}</button><button onClick={() => { setOpen((v) => !v); setAiOpen(false); setUploadOpen(false); }} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-toggle-add-flashcard"><Plus size={15} /> {open ? 'Close' : 'Add flashcard'}</button></div>} />
+    {uploadOpen && <div className="mb-5 rounded-3xl border border-primary/30 bg-[#eef7f1] p-6"><div className="flex items-start gap-3"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground"><FileText size={18} /></div><div><h3 className="text-sm font-extrabold">Bulk upload from a file</h3><p className="mt-1 text-xs leading-5 text-muted-foreground">Upload a flashcard set as .txt, .csv, .xlsx/.xls, .pdf, or .docx. We'll extract front/back pairs automatically — review and fix anything before it's added to the bank.</p></div></div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-4"><select value={blockId} onChange={(e) => { setBlockId(e.target.value); setModuleId(''); setSubjectId(''); setTopicId(''); }} className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-upload-flashcard-block"><option value="">All blocks</option>{blocks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select><select value={moduleId} onChange={(e) => { setModuleId(e.target.value); setSubjectId(''); setTopicId(''); }} className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-upload-flashcard-module"><option value="">Select module</option>{modules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select><select value={subjectId} onChange={(e) => { setSubjectId(e.target.value); setTopicId(''); }} disabled={!moduleId} className="h-10 rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-upload-flashcard-subject"><option value="">Select subject</option>{(subjectsQ.data || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select><select value={topicId} onChange={(e) => setTopicId(e.target.value)} disabled={!subjectId} className="h-10 rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-upload-flashcard-topic"><option value="">Select topic</option>{(topicsQ.data || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
+      {!targetReady && <p className="mt-2 text-[11px] font-semibold text-[#8a5a12]">Pick a module, subject, and topic before uploading — every imported flashcard needs a home.</p>}
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <input type="file" accept=".txt,.csv,.xlsx,.xls,.pdf,.docx" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="flex-1 rounded-xl border border-dashed border-border bg-card px-3 py-2.5 text-xs" data-testid="input-flashcard-file" />
+        <button disabled={!file || parsing} onClick={parseFile} className="rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-parse-flashcard-file">{parsing ? 'Reading file…' : 'Parse file'}</button>
+      </div>
+      {parseError && <div className="mt-3 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs font-semibold text-destructive" data-testid="text-flashcard-parse-error">{parseError}</div>}
+
+      {candidates.length > 0 && <div className="mt-6"><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div className="text-xs font-bold">{candidates.length} flashcards found · {candidates.filter((c) => c.needsReview).length} need review</div><button disabled={!targetReady || importCommit.isPending} onClick={importAll} className="rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-import-all-flashcards">{importCommit.isPending ? 'Importing…' : `Import ${candidates.length} flashcards`}</button></div>
+        <div className="max-h-[32rem] space-y-3 overflow-y-auto pr-1">{candidates.map((c, i) => <div key={i} className={cn('rounded-2xl border bg-card p-4', c.needsReview ? 'border-[#e5a952]' : 'border-border')} data-testid={`card-flashcard-candidate-${i}`}>
+          <div className="flex items-center justify-between"><span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold', c.needsReview ? 'bg-[#fdeecb] text-[#8a5a12]' : 'bg-[#d7eee4] text-[#164b4b]')}>{c.needsReview ? 'Needs review' : 'Looks good'}</span><button onClick={() => removeCandidate(i)} className="text-[11px] font-bold text-destructive" data-testid={`button-remove-flashcard-candidate-${i}`}>Remove</button></div>
+          <textarea value={c.front} onChange={(e) => updateCandidate(i, { front: e.target.value })} placeholder="Front" className="mt-2 min-h-14 w-full rounded-lg border border-border bg-background p-2 text-xs" data-testid={`input-flashcard-candidate-front-${i}`} />
+          <textarea value={c.back} onChange={(e) => updateCandidate(i, { back: e.target.value })} placeholder="Back" className="mt-2 min-h-14 w-full rounded-lg border border-border bg-background p-2 text-xs" data-testid={`input-flashcard-candidate-back-${i}`} />
+        </div>)}</div>
+      </div>}
+    </div>}
     {aiOpen && <div className="mb-5 space-y-3 rounded-2xl border border-primary/30 bg-[#eef7f1] p-5">
       <p className="text-xs text-muted-foreground">Pick a target topic below (its MCQs will be used as source material), or paste your own text. Drafts are editable — nothing saves until you review and click "Save all".</p>
       <div className="grid gap-2 sm:grid-cols-4"><select value={blockId} onChange={(e) => { setBlockId(e.target.value); setModuleId(''); setSubjectId(''); setTopicId(''); }} className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-ai-flashcard-block"><option value="">All blocks</option>{blocks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</select><select value={moduleId} onChange={(e) => { setModuleId(e.target.value); setSubjectId(''); setTopicId(''); }} className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-ai-flashcard-module"><option value="">Select module</option>{modules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select><select value={subjectId} onChange={(e) => { setSubjectId(e.target.value); setTopicId(''); }} disabled={!moduleId} className="h-10 rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-ai-flashcard-subject"><option value="">Select subject</option>{(subjectsQ.data || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select><select value={topicId} onChange={(e) => setTopicId(e.target.value)} disabled={!subjectId} className="h-10 rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-ai-flashcard-topic"><option value="">Select topic</option>{(topicsQ.data || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>

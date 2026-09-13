@@ -122,6 +122,25 @@ export interface McqImportProfile { id: number; name: string; questionPattern: s
 export interface McqCandidate { question: string; options: string[]; correctAnswer: string | null; explanation: string | null; optionExplanations: (string | null)[] | null; reference: string | null; hint: string | null; needsReview: boolean; rawBlock?: string; difficulty: 'easy' | 'moderate' | 'hard' }
 export interface McqParseResult { fileName: string; totalFound: number; needsReviewCount: number; candidates: McqCandidate[] }
 
+export interface FlashcardCandidate { front: string; back: string; needsReview: boolean; rawBlock?: string }
+export interface FlashcardParseResult { fileName: string; totalFound: number; needsReviewCount: number; candidates: FlashcardCandidate[] }
+
+// File-based flashcard import — same "upload, parse, review, commit" shape
+// as mcqImportApi, minus the configurable regex profiles (flashcards only
+// ever have a front/back, so there's nothing to customize a pattern for).
+export const flashcardImportApi = {
+  parse: async (file: File): Promise<FlashcardParseResult> => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${API_ORIGIN}/api/admin/flashcard-import/parse`, { method: 'POST', credentials: 'include', body: form });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new ApiRequestError(res.status, (data && data.error) || 'Could not parse this file', data);
+    return data;
+  },
+  commit: (body: { moduleId: number; subjectId: number; topicId: number; module: string; topic: string; cards: FlashcardCandidate[] }) =>
+    request<{ imported: number; ids: number[] }>('/admin/flashcard-import/commit', { method: 'POST', body: JSON.stringify(body) }),
+};
+
 export const DEFAULT_IMPORT_PATTERNS = {
   questionPattern: "^\\s*(?:Q\\.?\\s*)?(\\d{1,3})[\\.\\):]\\s+(.+)$",
   optionPattern: "^\\s*\\(?([A-Da-d])\\)?[\\.\\):]\\s+(.+)$",
