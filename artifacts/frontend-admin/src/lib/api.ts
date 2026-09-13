@@ -303,6 +303,44 @@ export const mcqImportApi = {
     request<{ imported: number; ids: number[] }>('/admin/mcq-import/commit', { method: 'POST', body: JSON.stringify(body) }),
 };
 
+// Whole-bank backup/restore — separate from mcqImportApi's file parser
+// above. Export downloads every MCQ (every field, across the main tree,
+// past papers, and exams) as one JSON file; import restores a file like it,
+// either alongside the existing bank or replacing it entirely.
+export const mcqBackupApi = {
+  exportUrl: () => `${API_BASE}/admin/mcq-backup/export`,
+  // Not a plain <a href> download because it needs the admin's session
+  // cookie (credentials: 'include') and a nicer error than a bare failed
+  // navigation if the export fails — fetch it as a blob and trigger the
+  // save ourselves.
+  downloadBackup: async (): Promise<void> => {
+    const res = await fetch(`${API_BASE}/admin/mcq-backup/export`, { credentials: 'include' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new ApiRequestError(res.status, (data && data.error) || 'Could not download the backup', data);
+    }
+    const disposition = res.headers.get('content-disposition') || '';
+    const filenameMatch = disposition.match(/filename="([^"]+)"/);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filenameMatch?.[1] || 'mcq-bank-backup.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+  importBackup: async (file: File, mode: 'append' | 'replace'): Promise<{ restored: number; mode: 'append' | 'replace'; deletedFirst: number }> => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${API_BASE}/admin/mcq-backup/import?mode=${mode}`, { method: 'POST', credentials: 'include', body: form });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new ApiRequestError(res.status, (data && data.error) || 'Could not restore this backup', data);
+    return data;
+  },
+};
+
 export interface PastPaper { id: number; title: string; examBoard: string; year: string; level: string; active: boolean; archived?: boolean; displayOrder: number; mcqCount: number; programId: number | null; academicYearId: number | null }
 export interface NotebookEntry { id: number; userId: number; mcqId: number | null; title: string; content: string; createdAt: string; updatedAt: string }
 export interface SavedSession { id: number; userId: number; name: string; config: Record<string, unknown>; createdAt: string }

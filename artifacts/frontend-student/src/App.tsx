@@ -441,6 +441,15 @@ const QUICK_LINK_TILES: Array<{ href: string; label: string; sub: string; icon: 
 ];
 const OPEN_SEARCH_HREF = '#open-search';
 const OPEN_SEARCH_EVENT = 'medschoolproffs:open-search';
+// The "My Progress" tile points at an in-page section (#progress-profile),
+// not a route — wouter's <Link> does client-side route navigation, so
+// handing it a "#..." href just pushes that literal string as a path (no
+// route matches it) instead of scrolling anywhere. That's the bug: the tile
+// looked like a normal link but silently did nothing. Special-cased below
+// the same way OPEN_SEARCH_HREF already is, so it smooth-scrolls to the
+// section (with a brief highlight so it's obvious something happened)
+// instead of attempting a "navigation".
+const PROGRESS_ANCHOR_HREF = '#progress-profile';
 
 // Cycling palette for module tiles (Continue Learning / Recommended) so the
 // dashboard reads as multi-subject and colorful rather than one repeated
@@ -502,11 +511,26 @@ function Dashboard() {
 
     <section><SectionHeader eyebrow="Jump back in" title="Quick links" />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">{QUICK_LINK_TILES.map((tile) => {
-        const content = <><span className={cn('grid size-11 place-items-center rounded-xl', tile.bg, tile.fg)}><tile.icon size={19} /></span><span className="text-xs font-bold leading-tight">{tile.label}</span><span className="text-[10px] leading-tight text-muted-foreground">{tile.sub}</span></>;
+        const content = <><span className={cn('grid size-11 place-items-center rounded-xl transition-transform duration-200 group-hover:scale-110 group-hover:-rotate-3', tile.bg, tile.fg)}><tile.icon size={19} /></span><span className="text-xs font-bold leading-tight">{tile.label}</span><span className="text-[10px] leading-tight text-muted-foreground">{tile.sub}</span></>;
         const testId = `link-quick-${tile.label.toLowerCase().replaceAll(' ', '-')}`;
-        return tile.href === OPEN_SEARCH_HREF
-          ? <button key={tile.label} type="button" onClick={() => window.dispatchEvent(new CustomEvent(OPEN_SEARCH_EVENT))} className="card-lift flex flex-col items-center gap-2 rounded-2xl border border-border bg-card p-4 text-center" data-testid={testId}>{content}</button>
-          : <Link key={tile.label} href={tile.href} className="card-lift flex flex-col items-center gap-2 rounded-2xl border border-border bg-card p-4 text-center" data-testid={testId}>{content}</Link>;
+        const tileClassName = 'card-lift group flex flex-col items-center gap-2 rounded-2xl border border-border bg-card p-4 text-center active:scale-95';
+        if (tile.href === OPEN_SEARCH_HREF) {
+          return <button key={tile.label} type="button" onClick={() => window.dispatchEvent(new CustomEvent(OPEN_SEARCH_EVENT))} className={tileClassName} data-testid={testId}>{content}</button>;
+        }
+        if (tile.href === PROGRESS_ANCHOR_HREF) {
+          return <button key={tile.label} type="button" onClick={() => {
+            const section = document.getElementById('progress-profile');
+            if (!section) return;
+            section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            // Brief ring flash so landing on the section (which can be a
+            // full screen below the fold) reads as "you arrived", not just
+            // an instant unexplained jump — matches the smooth-scroll's own
+            // duration so it fades right as the scroll settles.
+            section.classList.add('ring-2', 'ring-primary/50');
+            window.setTimeout(() => section.classList.remove('ring-2', 'ring-primary/50'), 900);
+          }} className={tileClassName} data-testid={testId}>{content}</button>;
+        }
+        return <Link key={tile.label} href={tile.href} className={tileClassName} data-testid={testId}>{content}</Link>;
       })}</div>
     </section>
 
@@ -542,7 +566,7 @@ function Dashboard() {
         <StatTile icon={Flame} bg="bg-[#fff0cb]" fg="text-[#94651c]" label="Time spent" value={`${analytics.data?.timeSpentMinutes ?? 0}m`} />
       </div>
     </section>
-    <section id="progress-profile"><SectionHeader eyebrow="Where you stand" title="Progress profile" /><ProgressProfileCard /></section>
+    <section id="progress-profile" className="scroll-mt-24 rounded-2xl transition-shadow duration-700"><SectionHeader eyebrow="Where you stand" title="Progress profile" /><ProgressProfileCard /></section>
     <section className="grid gap-4 sm:grid-cols-2"><div className="rounded-2xl border border-border bg-card p-5"><div className="text-xs font-semibold text-muted-foreground">Membership</div><div className="mt-3 flex items-center gap-2"><span className="font-display text-2xl">{d?.membershipStatus || 'Active'}</span><Badge tone="green">verified</Badge></div><p className="mt-2 text-[11px] text-muted-foreground">{daysRemaining !== null ? `${daysRemaining} days remaining` : 'No active membership'}</p></div><div className="rounded-2xl border border-border bg-card p-5"><div className="text-xs font-semibold text-muted-foreground">This week</div><div className="mt-3 flex items-center gap-2"><span className="font-display text-2xl">{analytics.data?.totalSessions ?? 0} sessions</span></div><Link href="/modules" className="mt-2 inline-flex items-center gap-1 text-[11px] font-bold text-primary" data-testid="link-focus-practice">Open practice <ChevronRight size={13} /></Link></div></section>
   </div>}</>;
 }
@@ -1685,17 +1709,18 @@ function PastPapers() {
   // Scoping to the student's own program/year now happens server-side (see
   // GET /past-papers), the same way exam eligibility does — so there's no
   // more manual "All levels" toggle needed here; students just see what
-  // applies to them. The Year/Subject/Module filters below are a
-  // client-side narrowing on top of that, matching the reference design —
-  // "Module" is mapped to the paper's `level` field since PastPaper has no
-  // separate module association.
+  // applies to them. Just two client-side filters on top of that:
+  // Colleges/University (the paper's `examBoard` — that field is actually
+  // functioning as the college/university code, e.g. "KMU", "WMC") and
+  // Year (the paper's `year`, e.g. "2023" — whatever the admin typed in
+  // when it was uploaded). The old "All Subjects"/"All Modules" filters
+  // built off examBoard/level were dropped — a past paper doesn't really
+  // have a subject or module, and that pairing was confusing.
+  const [collegeFilter, setCollegeFilter] = useState('');
   const [yearFilter, setYearFilter] = useState('');
-  const [subjectFilter, setSubjectFilter] = useState('');
-  const [moduleFilter, setModuleFilter] = useState('');
+  const colleges = Array.from(new Set(list.map((p) => p.examBoard).filter(Boolean))).sort();
   const years = Array.from(new Set(list.map((p) => p.year).filter(Boolean))).sort().reverse();
-  const subjects = Array.from(new Set(list.map((p) => p.examBoard).filter(Boolean))).sort();
-  const modules = Array.from(new Set(list.map((p) => p.level).filter(Boolean))).sort();
-  const filtered = list.filter((p) => (!yearFilter || p.year === yearFilter) && (!subjectFilter || p.examBoard === subjectFilter) && (!moduleFilter || p.level === moduleFilter));
+  const filtered = list.filter((p) => (!collegeFilter || p.examBoard === collegeFilter) && (!yearFilter || p.year === yearFilter));
   const totals = { papers: list.length, questions: list.reduce((s, p) => s + p.mcqCount, 0) };
 
   return <div><div className="rounded-2xl border border-border bg-[#eef2fb] p-6"><div className="flex items-start gap-4"><div className="grid size-11 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground"><FileStack size={20} /></div><div><h1 className="font-display text-2xl tracking-[-.03em]">Past Papers</h1><p className="mt-1 text-sm text-muted-foreground">Previous exam papers and practice tests.</p></div></div>
@@ -1703,9 +1728,8 @@ function PastPapers() {
   </div>
 
   <div className="mt-5 flex flex-wrap gap-2">
-    <select value={yearFilter} onChange={(e) => setYearFilter(e.target.value)} className="h-10 rounded-xl border border-border bg-card px-3 text-xs font-semibold" data-testid="select-paper-filter-year"><option value="">All Years</option>{years.map((y) => <option key={y} value={y}>{y}</option>)}</select>
-    <select value={subjectFilter} onChange={(e) => setSubjectFilter(e.target.value)} className="h-10 rounded-xl border border-border bg-card px-3 text-xs font-semibold" data-testid="select-paper-filter-subject"><option value="">All Subjects</option>{subjects.map((s) => <option key={s} value={s}>{s}</option>)}</select>
-    <select value={moduleFilter} onChange={(e) => setModuleFilter(e.target.value)} className="h-10 rounded-xl border border-border bg-card px-3 text-xs font-semibold" data-testid="select-paper-filter-module"><option value="">All Modules</option>{modules.map((m) => <option key={m} value={m}>{m}</option>)}</select>
+    <select value={collegeFilter} onChange={(e) => setCollegeFilter(e.target.value)} className="h-10 rounded-xl border border-border bg-card px-3 text-xs font-semibold" data-testid="select-paper-filter-college"><option value="">Colleges/University</option>{colleges.map((c) => <option key={c} value={c}>{c}</option>)}</select>
+    <select value={yearFilter} onChange={(e) => setYearFilter(e.target.value)} className="h-10 rounded-xl border border-border bg-card px-3 text-xs font-semibold" data-testid="select-paper-filter-year"><option value="">Year</option>{years.map((y) => <option key={y} value={y}>{y}</option>)}</select>
   </div>
 
   {papers.isLoading ? <SkeletonPage /> : filtered.length ? <div className="mt-5 space-y-3">{filtered.map((paper) => {
@@ -1713,8 +1737,14 @@ function PastPapers() {
     return <div key={paper.id} className="card-lift flex items-center gap-4 rounded-2xl border border-border bg-card p-4" data-testid={`card-paper-${paper.id}`}>
       <PastPaperRowIcon examBoard={paper.examBoard} />
       <div className="min-w-0 flex-1">
-        <div className="text-[11px] font-bold text-muted-foreground">{paper.year}</div>
-        <div className="truncate text-sm font-extrabold leading-5">{paper.examBoard || paper.title}</div>
+        {/* Always the paper's own title (the "Block A"/"Block B" name it
+            was given in admin) — previously this fell back to showing the
+            college code instead whenever one was set, so the same list
+            showed a mix of college names and block names depending on the
+            paper. The college + year now sit together on the small line
+            above it instead, consistently, whether or not a college was set. */}
+        <div className="text-[11px] font-bold text-muted-foreground">{[paper.examBoard, paper.year].filter(Boolean).join(' · ')}</div>
+        <div className="truncate text-sm font-extrabold leading-5">{paper.title}</div>
         <div className="mt-0.5 text-[11px] text-muted-foreground">{paper.mcqCount} Question{paper.mcqCount === 1 ? '' : 's'} · {hours} Hour{hours === 1 ? '' : 's'}</div>
       </div>
       <Link href={`/practice?pastPaperId=${paper.id}`} className="shrink-0 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground" data-testid={`button-start-paper-${paper.id}`}>View</Link>
