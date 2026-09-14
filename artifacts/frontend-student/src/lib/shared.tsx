@@ -334,7 +334,12 @@ export function Shell({ children }: { children: ReactNode }) {
   // in frontend-admin/src/App.tsx's Shell, which still blocks students.
 
   const { pageTitle } = useContext(PageTitleContext);
-  const title = pageTitle ?? (location === '/dashboard' ? `Good morning, ${user.name?.split(' ')[0] || 'there'}` : location.slice(1).split('/').map((part) => part.replaceAll('-', ' ')).join(' / '));
+  // Was hardcoded to "Good morning" regardless of the time of day — the
+  // Dashboard's own welcome card already computed the correct greeting via
+  // greetingForHour(), so this header text disagreed with it (e.g. showing
+  // "Good morning" in the header while the card underneath said "Good
+  // evening"). Reuse the same helper so both read the same live clock.
+  const title = pageTitle ?? (location === '/dashboard' ? `${greetingForHour(new Date().getHours())}, ${user.name?.split(' ')[0] || 'there'}` : location.slice(1).split('/').map((part) => part.replaceAll('-', ' ')).join(' / '));
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
   // IMPORTANT: focus mode and the normal layout used to be two separate

@@ -1134,6 +1134,7 @@ router.get("/students/:id", requireAdmin, async (req, res): Promise<void> => {
     payments: await Promise.all(payments.map(paymentView)),
     activeMembership: memberships.find((m) => m.status === "ACTIVE" && m.expiresAt.getTime() > Date.now()) ? {
       expiresAt: memberships.find((m) => m.status === "ACTIVE")!.expiresAt.toISOString(),
+      isTrial: memberships.find((m) => m.status === "ACTIVE")!.isTrial,
     } : null,
   });
 });
@@ -1205,6 +1206,54 @@ router.patch("/students/:id/status", requireAdmin, async (req, res): Promise<voi
 
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "STUDENT_STATUS_UPDATED", entity: "user", entityId: row.id, metadata: JSON.stringify({ status: parsed.data.status, emailVerified: row.emailVerified, grantedMembership }) });
   res.json({ ok: true, status: row.status, emailVerified: row.emailVerified, grantedMembership });
+});
+
+// Trial mode: grant a student temporary access without a payment, for an
+// admin-chosen number of days. Reuses the same membership grant mechanism
+// as PATCH /students/:id/status's ACTIVE branch above (a med_memberships
+// row with status ACTIVE + expiresAt) — every place that already checks
+// membership status/expiry to gate content (GET /student/dashboard etc.)
+// works for a trial with no extra changes — just tagged isTrial: true so
+// the admin UI can show/revoke it distinctly from a real paid membership.
+router.post("/students/:id/trial", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const parsed = z.object({ durationDays: z.number().int().positive().max(365) }).safeParse(req.body);
+  if (!parsed.success || Number.isNaN(id)) { res.status(400).json({ error: "Invalid request" }); return; }
+  const [row] = await db.select().from(usersTable).where(and(eq(usersTable.id, id), eq(usersTable.role, "student")));
+  if (!row) { res.status(404).json({ error: "Student not found" }); return; }
+
+  const startsAt = new Date();
+  const expiresAt = new Date(startsAt);
+  expiresAt.setDate(expiresAt.getDate() + parsed.data.durationDays);
+
+  // Same defensive supersede as the manual-activation path, so a student
+  // never ends up with more than one ACTIVE membership row at a time —
+  // starting a trial for a student who already has an active paid
+  // membership or an earlier trial replaces it rather than stacking.
+  await db.update(membershipsTable).set({ status: "SUPERSEDED" }).where(and(eq(membershipsTable.userId, id), eq(membershipsTable.status, "ACTIVE")));
+  await db.insert(membershipsTable).values({ userId: id, planId: null, status: "ACTIVE", startsAt, expiresAt, isTrial: true });
+  await db.update(usersTable).set({ status: "ACTIVE", emailVerified: true }).where(eq(usersTable.id, id));
+
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "STUDENT_TRIAL_STARTED", entity: "user", entityId: id, metadata: JSON.stringify({ durationDays: parsed.data.durationDays, expiresAt }) });
+  void sendEmail(row.email, "Your MedschoolProffs trial is active", membershipActivatedEmailHtml(row.name, "Trial access", expiresAt)).catch(() => {});
+  res.json({ ok: true, expiresAt: expiresAt.toISOString() });
+});
+
+// Ends a trial early (before its expiry date). Leaves the membership row
+// in place for history but marks it SUSPENDED so it no longer counts as
+// active, and reverts the student's status — to EXPIRED if they have no
+// other membership history, or back to whatever an existing non-trial
+// membership implies isn't needed here since the ACTIVE-grant path above
+// already supersedes any prior row before creating a trial.
+router.delete("/students/:id/trial", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) { res.status(400).json({ error: "Invalid student id" }); return; }
+  const [trial] = await db.select().from(membershipsTable).where(and(eq(membershipsTable.userId, id), eq(membershipsTable.status, "ACTIVE"), eq(membershipsTable.isTrial, true))).orderBy(desc(membershipsTable.expiresAt)).limit(1);
+  if (!trial) { res.status(404).json({ error: "No active trial for this student" }); return; }
+  await db.update(membershipsTable).set({ status: "SUSPENDED", suspendedReason: "Trial ended early by admin" }).where(eq(membershipsTable.id, trial.id));
+  await db.update(usersTable).set({ status: "EXPIRED" }).where(and(eq(usersTable.id, id), eq(usersTable.role, "student")));
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "STUDENT_TRIAL_ENDED", entity: "user", entityId: id });
+  res.json({ ok: true });
 });
 
 // Standalone "verify email" action — lets an admin unblock a student's login

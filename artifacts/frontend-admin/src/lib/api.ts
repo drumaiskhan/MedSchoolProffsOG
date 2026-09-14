@@ -113,7 +113,7 @@ export interface StudentDetail {
   id: number; name: string; email: string; phone: string | null; rollNumber: string | null; status: string; emailVerified: boolean;
   institution: string | null; program: string | null; academicYear: string | null; batch: string | null;
   currentStreak: number; longestStreak: number; lastLoginAt: string | null; joinedAt: string;
-  payments: PaymentRow[]; activeMembership: { expiresAt: string } | null;
+  payments: PaymentRow[]; activeMembership: { expiresAt: string; isTrial: boolean } | null;
 }
 export interface PaymentRow { id: number; studentName: string; institution: string; program: string; academicYear: string; batch: string; rollNumber: string; planName: string; amount: number; currency: string; method: string; reference: string; paymentDate: string; proofPath: string | null; status: string; submittedAt: string }
 export const STUDENT_STATUSES = ['UNVERIFIED', 'VERIFIED', 'PAYMENT_PENDING_REVIEW', 'ACTIVE', 'EXPIRED', 'SUSPENDED', 'REJECTED', 'DELETED'] as const;
@@ -265,6 +265,8 @@ export const studentsAdminApi = {
   update: (id: number, body: Partial<{ name: string; phone: string; rollNumber: string }>) => request<{ ok: true }>(`/students/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   updateStatus: (id: number, status: string, emailVerified?: boolean) => request<{ ok: true; status: string; emailVerified: boolean }>(`/students/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status, ...(emailVerified !== undefined ? { emailVerified } : {}) }) }),
   verifyEmail: (id: number) => request<{ ok: true; status: string; emailVerified: boolean }>(`/students/${id}/verify-email`, { method: 'POST' }),
+  startTrial: (id: number, durationDays: number) => request<{ ok: true; expiresAt: string }>(`/students/${id}/trial`, { method: 'POST', body: JSON.stringify({ durationDays }) }),
+  endTrial: (id: number) => request<{ ok: true }>(`/students/${id}/trial`, { method: 'DELETE' }),
   remove: (id: number) => request<{ ok: true }>(`/students/${id}`, { method: 'DELETE' }),
   removePermanent: (id: number) => request<{ ok: true }>(`/students/${id}/permanent`, { method: 'DELETE' }),
 };

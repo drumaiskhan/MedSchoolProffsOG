@@ -198,6 +198,11 @@ export const membershipsTable = pgTable("med_memberships", {
   startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   suspendedReason: text("suspended_reason"),
+  // Admin-granted trial access (no payment) — same ACTIVE/expiresAt shape
+  // as a paid membership so access checks don't need to special-case it,
+  // just tagged so the admin UI can label/revoke it distinctly. See
+  // POST /students/:id/trial and DELETE /students/:id/trial.
+  isTrial: boolean("is_trial").notNull().default(false),
   ...timestamps,
 });
 

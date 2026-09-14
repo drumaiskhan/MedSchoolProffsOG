@@ -187,6 +187,7 @@ CREATE TABLE IF NOT EXISTS med_memberships (
   starts_at TIMESTAMPTZ NOT NULL,
   expires_at TIMESTAMPTZ NOT NULL,
   suspended_reason TEXT,
+  is_trial BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -668,6 +669,16 @@ ALTER TABLE med_institutions ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT
 -- med_modules/med_blocks already have.
 ALTER TABLE med_past_papers ADD COLUMN IF NOT EXISTS program_target_kind TEXT;
 ALTER TABLE med_past_papers ADD COLUMN IF NOT EXISTS year_target_number INTEGER;
+
+-- Trial mode: an admin can grant a student temporary access for a set
+-- number of days without a payment, and revoke it early. Reuses the
+-- existing med_memberships grant mechanism (same ACTIVE/expires_at shape
+-- as a paid membership, so every access check that already reads
+-- memberships "just works" for a trial too) — this column only tags a row
+-- as a trial so the admin UI can show/label/revoke it distinctly from a
+-- real paid membership. See routes/medschool.ts's /students/:id/trial
+-- endpoints and AdminStudents.tsx's "Trial access" panel.
+ALTER TABLE med_memberships ADD COLUMN IF NOT EXISTS is_trial BOOLEAN NOT NULL DEFAULT FALSE;
 
 COMMIT;
 `;

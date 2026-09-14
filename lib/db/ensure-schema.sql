@@ -194,6 +194,7 @@ CREATE TABLE IF NOT EXISTS med_memberships (
   starts_at TIMESTAMPTZ NOT NULL,
   expires_at TIMESTAMPTZ NOT NULL,
   suspended_reason TEXT,
+  is_trial BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -624,5 +625,10 @@ ALTER TABLE med_team_members ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEF
 -- semantics as med_modules/med_blocks already have.
 ALTER TABLE med_past_papers ADD COLUMN IF NOT EXISTS program_target_kind TEXT;
 ALTER TABLE med_past_papers ADD COLUMN IF NOT EXISTS year_target_number INTEGER;
+
+-- Trial mode: admin-granted temporary access, tagged distinctly from a
+-- real paid membership so it can be shown/revoked separately. See
+-- routes/medschool.ts's /students/:id/trial endpoints.
+ALTER TABLE med_memberships ADD COLUMN IF NOT EXISTS is_trial BOOLEAN NOT NULL DEFAULT FALSE;
 
 COMMIT;

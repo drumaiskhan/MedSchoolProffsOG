@@ -72,24 +72,49 @@
      nothing else touching `transform` on the same elements.
      Usage: .flip-card (perspective) > .flip-card-inner[.is-flipped]
      (rotates) > .flip-card-face + .flip-card-face.flip-card-back. */
-  .flip-card { perspective: 1700px; }
+  /* v20's fix (backface-visibility + vendor prefixes) still left the front
+     face readable mirrored/upside-down on some machines: without a forced
+     compositing layer, several Chromium/Windows GPU-driver combos rasterize
+     rotateY(180deg) content and its "hidden" backface using the same 2D
+     bitmap instead of true 3D depth, so the raw pixels of the back face
+     visibly show through (as a point-reflection, not just a Y-mirror) atop
+     the front face any time the browser repaints that element — which is
+     why it appeared while the pointer was over/near the card (repaint on
+     hover/move) and cleared once the card had actually finished animating
+     to its flipped state. `translateZ` on every rotated layer forces each
+     face onto its own GPU layer so the browser composites real 3D depth
+     instead of falling back to that flattened bitmap, and explicit z-index
+     makes sure the intended visible face always paints on top even if a
+     given browser still gets backface-visibility wrong. */
+  .flip-card { perspective: 1700px; -webkit-perspective: 1700px; }
   .flip-card-inner {
     position: relative;
     width: 100%;
-    transform: rotateY(0deg);
+    transform: rotateY(0deg) translateZ(0);
+    -webkit-transform: rotateY(0deg) translateZ(0);
     transform-style: preserve-3d;
     -webkit-transform-style: preserve-3d;
     transition: transform .5s cubic-bezier(.4, .12, .2, 1);
+    will-change: transform;
   }
-  .flip-card-inner.is-flipped { transform: rotateY(180deg); }
+  .flip-card-inner.is-flipped { transform: rotateY(180deg) translateZ(0); -webkit-transform: rotateY(180deg) translateZ(0); }
   .flip-card-face {
     position: absolute;
     inset: 0;
     backface-visibility: hidden;
     -webkit-backface-visibility: hidden;
-    transform: rotateY(0deg);
+    -moz-backface-visibility: hidden;
+    transform: rotateY(0deg) translateZ(1px);
+    -webkit-transform: rotateY(0deg) translateZ(1px);
+    z-index: 2;
   }
-  .flip-card-face.flip-card-back { transform: rotateY(180deg); }
+  .flip-card-face.flip-card-back {
+    transform: rotateY(180deg) translateZ(1px);
+    -webkit-transform: rotateY(180deg) translateZ(1px);
+    z-index: 1;
+  }
+  .flip-card-inner.is-flipped .flip-card-face { z-index: 1; }
+  .flip-card-inner.is-flipped .flip-card-face.flip-card-back { z-index: 2; }
 }
 @layer base {
   /* Previously declared unlayered (no @layer wrapper) further down this
