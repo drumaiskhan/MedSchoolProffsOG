@@ -41,7 +41,7 @@ import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiReq
 // mutations already call invalidateQueries on the specific keys they
 // change, so edits still show up immediately — this only avoids redundant
 // background refetches of data nothing has touched.
-import { AddModuleForm, BlockForm, ConfirmDialog, EmptyState, ModuleRow, SectionHeader, SkeletonPage, cn } from '@/lib/shared';
+import { AddModuleForm, BlockForm, ConfirmDialog, EmptyState, ModuleRow, SectionHeader, SkeletonPage, cn, groupByProgramYear } from '@/lib/shared';
 import { queryClient } from '@/lib/query-client';
 
 function AdminContent() {
@@ -66,6 +66,10 @@ function AdminContent() {
   const [deletingBlockId, setDeletingBlockId] = useState<number | null>(null);
   const [openModuleFormFor, setOpenModuleFormFor] = useState<number | 'unassigned' | null>(null);
   const [collapsed, setCollapsed] = useState<Set<number | 'unassigned'>>(new Set());
+  // Program/Year groups (MBBS · Year 1, etc.) — collapsed by default, same
+  // pattern as McqBankTree/FlashcardBankTree's top-level grouping, so this
+  // page reads the same way: click a year open to see its blocks/modules.
+  const [yearOpen, setYearOpen] = useState<Set<string>>(new Set());
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editProgram, setEditProgram] = useState('');
@@ -109,7 +113,48 @@ function AdminContent() {
       editProgram={editProgram} setEditProgram={setEditProgram} editYear={editYear} setEditYear={setEditYear} setDeletingId={setDeletingId} />);
   };
 
+  // Group every block (even empty ones — they still need to show up
+  // somewhere) and every unassigned (blockless) module under its
+  // Program/Year, same as McqBankTree/FlashcardBankTree do for the
+  // question/flashcard banks — a block with no targeting of its own falls
+  // back to whatever one of its modules says, so "I tagged the modules as
+  // MBBS Year 1 but never touched the block" still lands under MBBS ·
+  // Year 1 instead of Unspecified.
+  type BlockLeaf = { key: string; kind: 'block'; block: AdminBlock; program: string | null; year: number | null };
+  type ModuleLeaf = { key: string; kind: 'module'; module: AdminModule; program: string | null; year: number | null };
+  const blockLeaves: BlockLeaf[] = blocks.map((b) => {
+    const list = modulesByBlock.get(b.id) ?? [];
+    const fallback = list.find((m) => m.programTargetKind || m.yearTargetNumber);
+    return { key: `block-${b.id}`, kind: 'block', block: b, program: b.programTargetKind || fallback?.programTargetKind || null, year: b.yearTargetNumber ?? fallback?.yearTargetNumber ?? null };
+  });
+  const standaloneLeaves: ModuleLeaf[] = unassigned.map((m) => ({ key: `module-${m.id}`, kind: 'module', module: m, program: m.programTargetKind || null, year: m.yearTargetNumber ?? null }));
+  const yearGroups = groupByProgramYear<BlockLeaf | ModuleLeaf>([...blockLeaves, ...standaloneLeaves]);
+
   const loading = modulesQ.isLoading || blocksQ.isLoading;
+
+  const renderBlockCard = (b: (typeof blocks)[number]) => {
+    const list = modulesByBlock.get(b.id) ?? [];
+    const bi = blocks.findIndex((x) => x.id === b.id);
+    const isCollapsed = collapsed.has(b.id);
+    return <div key={b.id} className="rounded-2xl border border-border bg-card" data-testid={`section-block-${b.id}`}>
+      <div className="flex items-center gap-3 p-4">
+        <button onClick={() => setCollapsed((s) => { const next = new Set(s); if (next.has(b.id)) next.delete(b.id); else next.add(b.id); return next; })} className="rounded-lg p-1 text-muted-foreground hover:bg-muted" data-testid={`button-toggle-block-${b.id}`}><ChevronRight size={16} className={cn('transition-transform', !isCollapsed && 'rotate-90')} /></button>
+        <div className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-xl bg-[#eef7f1] text-primary">{b.iconUrl ? <img src={b.iconUrl} alt="" loading="lazy" decoding="async" className="size-full object-cover" /> : <Library size={16} />}</div>
+        <div className="flex-1"><div className="text-sm font-extrabold" data-testid={`text-block-name-${b.id}`}>{b.name}</div>{b.subtitle && <div className="text-xs text-muted-foreground">{b.subtitle}</div>}</div>
+        <span className="text-[11px] text-muted-foreground">{list.length} module{list.length === 1 ? '' : 's'}</span>
+        <div className="flex flex-col gap-0.5"><button onClick={() => reorderBlock(b, 'up')} disabled={bi === 0} className="rounded p-0.5 text-muted-foreground disabled:opacity-25 hover:bg-muted" data-testid={`button-block-move-up-${b.id}`}><ChevronUp size={13} /></button><button onClick={() => reorderBlock(b, 'down')} disabled={bi === blocks.length - 1} className="rounded p-0.5 text-muted-foreground disabled:opacity-25 hover:bg-muted" data-testid={`button-block-move-down-${b.id}`}><ChevronDown size={13} /></button></div>
+        <button onClick={() => setOpenModuleFormFor(openModuleFormFor === b.id ? null : b.id)} className="rounded-lg border border-border px-3 py-2 text-[11px] font-bold text-muted-foreground hover:bg-muted" data-testid={`button-add-module-to-block-${b.id}`}>+ Module</button>
+        <button onClick={() => setEditingBlockId(editingBlockId === b.id ? null : b.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-muted" data-testid={`button-edit-block-${b.id}`}><Pencil size={15} /></button>
+        <button onClick={() => setDeletingBlockId(b.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-block-${b.id}`}><Trash2 size={15} /></button>
+      </div>
+      {editingBlockId === b.id && <div className="border-t border-border p-4"><BlockForm initial={b} pending={updateBlock.isPending} onCancel={() => setEditingBlockId(null)} onSubmit={(body) => updateBlock.mutate({ id: b.id, body }, { onSuccess: () => setEditingBlockId(null) })} /></div>}
+      {!isCollapsed && <div className="border-t border-border">
+        {openModuleFormFor === b.id && <div className="p-4"><AddModuleForm blockId={b.id} onCreate={createModule} onDone={() => setOpenModuleFormFor(null)} /></div>}
+        {list.length ? renderModuleGroup(list) : <p className="p-5 text-xs text-muted-foreground">No modules in this block yet — use "+ Module" above to add one.</p>}
+      </div>}
+    </div>;
+  };
+
 
   return <div>
     <SectionHeader eyebrow="Curriculum operations" title="Academic content" action={<div className="flex gap-2">
@@ -119,41 +164,29 @@ function AdminContent() {
     {openBlockForm && <BlockForm pending={createBlock.isPending} onCancel={() => setOpenBlockForm(false)} onSubmit={(body) => createBlock.mutate(body, { onSuccess: () => setOpenBlockForm(false) })} />}
 
     {loading ? <SkeletonPage /> : (!blocks.length && !modules.length) ? <EmptyState icon={Library} title="No modules yet" body="Add your first block or module above to start building the curriculum." /> : <div className="space-y-5">
-      {blocks.map((b, bi) => {
-        const list = modulesByBlock.get(b.id) ?? [];
-        const isCollapsed = collapsed.has(b.id);
-        return <div key={b.id} className="rounded-2xl border border-border bg-card" data-testid={`section-block-${b.id}`}>
-          <div className="flex items-center gap-3 p-4">
-            <button onClick={() => setCollapsed((s) => { const next = new Set(s); if (next.has(b.id)) next.delete(b.id); else next.add(b.id); return next; })} className="rounded-lg p-1 text-muted-foreground hover:bg-muted" data-testid={`button-toggle-block-${b.id}`}><ChevronRight size={16} className={cn('transition-transform', !isCollapsed && 'rotate-90')} /></button>
-            <div className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-xl bg-[#eef7f1] text-primary">{b.iconUrl ? <img src={b.iconUrl} alt="" loading="lazy" decoding="async" className="size-full object-cover" /> : <Library size={16} />}</div>
-            <div className="flex-1"><div className="text-sm font-extrabold" data-testid={`text-block-name-${b.id}`}>{b.name}</div>{b.subtitle && <div className="text-xs text-muted-foreground">{b.subtitle}</div>}</div>
-            <span className="text-[11px] text-muted-foreground">{list.length} module{list.length === 1 ? '' : 's'}</span>
-            <div className="flex flex-col gap-0.5"><button onClick={() => reorderBlock(b, 'up')} disabled={bi === 0} className="rounded p-0.5 text-muted-foreground disabled:opacity-25 hover:bg-muted" data-testid={`button-block-move-up-${b.id}`}><ChevronUp size={13} /></button><button onClick={() => reorderBlock(b, 'down')} disabled={bi === blocks.length - 1} className="rounded p-0.5 text-muted-foreground disabled:opacity-25 hover:bg-muted" data-testid={`button-block-move-down-${b.id}`}><ChevronDown size={13} /></button></div>
-            <button onClick={() => setOpenModuleFormFor(openModuleFormFor === b.id ? null : b.id)} className="rounded-lg border border-border px-3 py-2 text-[11px] font-bold text-muted-foreground hover:bg-muted" data-testid={`button-add-module-to-block-${b.id}`}>+ Module</button>
-            <button onClick={() => setEditingBlockId(editingBlockId === b.id ? null : b.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-muted" data-testid={`button-edit-block-${b.id}`}><Pencil size={15} /></button>
-            <button onClick={() => setDeletingBlockId(b.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-block-${b.id}`}><Trash2 size={15} /></button>
-          </div>
-          {editingBlockId === b.id && <div className="border-t border-border p-4"><BlockForm initial={b} pending={updateBlock.isPending} onCancel={() => setEditingBlockId(null)} onSubmit={(body) => updateBlock.mutate({ id: b.id, body }, { onSuccess: () => setEditingBlockId(null) })} /></div>}
-          {!isCollapsed && <div className="border-t border-border">
-            {openModuleFormFor === b.id && <div className="p-4"><AddModuleForm blockId={b.id} onCreate={createModule} onDone={() => setOpenModuleFormFor(null)} /></div>}
-            {list.length ? renderModuleGroup(list) : <p className="p-5 text-xs text-muted-foreground">No modules in this block yet — use "+ Module" above to add one.</p>}
+      {openModuleFormFor === 'unassigned' && <div className="rounded-2xl border border-border bg-card p-4"><AddModuleForm blockId={null} onCreate={createModule} onDone={() => setOpenModuleFormFor(null)} /></div>}
+      {yearGroups.map(({ programLabel, yearLabel, groups }) => {
+        const groupKey = `${programLabel}-${yearLabel}`;
+        const isOpen = yearOpen.has(groupKey);
+        const blockGroups = groups.filter((g): g is BlockLeaf => g.kind === 'block');
+        const moduleGroups = groups.filter((g): g is ModuleLeaf => g.kind === 'module');
+        const totalModules = blockGroups.reduce((n, g) => n + (modulesByBlock.get(g.block.id)?.length ?? 0), 0) + moduleGroups.length;
+        return <div key={groupKey} className="rounded-2xl border border-border bg-card" data-testid={`section-year-${groupKey}`}>
+          <button type="button" onClick={() => setYearOpen((s) => { const next = new Set(s); if (next.has(groupKey)) next.delete(groupKey); else next.add(groupKey); return next; })} className="flex w-full items-center gap-3 p-4 text-left" data-testid={`button-toggle-year-${groupKey}`}>
+            <ChevronRight size={18} className={cn('shrink-0 text-primary transition-transform', isOpen && 'rotate-90')} />
+            <GraduationCap size={17} className="shrink-0 text-primary" />
+            <span className="flex-1 text-sm font-extrabold" data-testid={`text-year-group-${groupKey}`}>{programLabel} <span className="font-normal text-muted-foreground">· {yearLabel}</span></span>
+            <span className="text-[11px] text-muted-foreground">{totalModules} module{totalModules === 1 ? '' : 's'}</span>
+          </button>
+          {isOpen && <div className="space-y-5 border-t border-border p-4">
+            {blockGroups.map((g) => renderBlockCard(g.block))}
+            {!!moduleGroups.length && <div className="rounded-2xl border border-dashed border-border bg-card" data-testid={`section-year-unassigned-${groupKey}`}>
+              <div className="p-4 text-sm font-extrabold text-muted-foreground">Modules not in a block</div>
+              <div className="border-t border-border">{renderModuleGroup(moduleGroups.map((g) => g.module))}</div>
+            </div>}
           </div>}
         </div>;
       })}
-
-      <div className="rounded-2xl border border-dashed border-border bg-card" data-testid="section-block-unassigned">
-        <div className="flex items-center gap-3 p-4">
-          <button onClick={() => setCollapsed((s) => { const next = new Set(s); if (next.has('unassigned')) next.delete('unassigned'); else next.add('unassigned'); return next; })} className="rounded-lg p-1 text-muted-foreground hover:bg-muted" data-testid="button-toggle-block-unassigned"><ChevronRight size={16} className={cn('transition-transform', !collapsed.has('unassigned') && 'rotate-90')} /></button>
-          <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground"><Library size={16} /></div>
-          <div className="flex-1 text-sm font-extrabold text-muted-foreground">Unassigned modules</div>
-          <span className="text-[11px] text-muted-foreground">{unassigned.length} module{unassigned.length === 1 ? '' : 's'}</span>
-          <button onClick={() => setOpenModuleFormFor(openModuleFormFor === 'unassigned' ? null : 'unassigned')} className="rounded-lg border border-border px-3 py-2 text-[11px] font-bold text-muted-foreground hover:bg-muted" data-testid="button-add-module-unassigned">+ Module</button>
-        </div>
-        {!collapsed.has('unassigned') && <div className="border-t border-border">
-          {openModuleFormFor === 'unassigned' && <div className="p-4"><AddModuleForm blockId={null} onCreate={createModule} onDone={() => setOpenModuleFormFor(null)} /></div>}
-          {unassigned.length ? renderModuleGroup(unassigned) : <p className="p-5 text-xs text-muted-foreground">No unassigned modules.</p>}
-        </div>}
-      </div>
     </div>}
 
     {deletingId !== null && <ConfirmDialog title="Permanently delete this module?" body="This erases the module and its subjects/topics for good — MCQs and flashcards filed under it stay in their banks, just unassigned. There is no undo." confirmLabel="Delete forever" onCancel={() => setDeletingId(null)} onConfirm={() => removeModulePermanent.mutate(deletingId)} pending={removeModulePermanent.isPending} />}

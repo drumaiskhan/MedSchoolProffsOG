@@ -41,7 +41,7 @@ import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiReq
 // mutations already call invalidateQueries on the specific keys they
 // change, so edits still show up immediately — this only avoids redundant
 // background refetches of data nothing has touched.
-import { AdminImageUpload, CollapsibleGroup, ConfirmDialog, EmptyState, SectionHeader } from '@/lib/shared';
+import { AdminImageUpload, CollapsibleGroup, ConfirmDialog, EmptyState, SectionHeader, groupByProgramYear } from '@/lib/shared';
 import { queryClient } from '@/lib/query-client';
 
 function AdminSubjectsPage() {
@@ -79,6 +79,14 @@ function AdminSubjectsPage() {
   for (const s of allSubjects) { if (moduleFilter !== 'all' && s.moduleId !== moduleFilter) continue; if (!grouped.has(s.moduleId)) grouped.set(s.moduleId, []); grouped.get(s.moduleId)!.push(s); }
   for (const list of grouped.values()) list.sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
   const groupIds = [...grouped.keys()].sort((a, b) => moduleName(a).localeCompare(moduleName(b)));
+  // Program/Year layer above the per-module groups — same grouping
+  // (groupByProgramYear) and same collapsed-by-default UX as the MCQ
+  // bank/flashcard bank trees: click "MBBS · Year 1" open to see its
+  // modules underneath.
+  const yearGroups = groupByProgramYear(groupIds.map((id) => {
+    const m = modules.find((mod) => mod.id === id);
+    return { key: id, program: m?.programTargetKind ?? null, year: m?.yearTargetNumber ?? null };
+  }));
   // Reorder within a single module's list — same self-healing whole-list
   // renumber as AdminInstitutionsList/SubjectsTopicsManager.
   const moveSubject = (moduleId: number, index: number, dir: -1 | 1) => {
@@ -92,25 +100,31 @@ function AdminSubjectsPage() {
 
   return <div><SectionHeader eyebrow="Curriculum operations" title="Subjects" action={<select value={moduleFilter} onChange={(e) => setModuleFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))} className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-subjects-module-filter"><option value="all">All modules</option>{modules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>} />
     {!groupIds.length && <EmptyState icon={BookOpen} title="No subjects yet" body="Add one below — every subject belongs to a module." />}
-    <div className="space-y-6">{groupIds.map((moduleId) => { const list = grouped.get(moduleId)!; return <CollapsibleGroup key={moduleId} defaultOpen count={list.length} title={moduleName(moduleId)} testId={`subjects-module-${moduleId}`}>
-      <div className="space-y-2">{list.map((s, i) => <div key={s.id} className="rounded-xl border border-border bg-card">
-        <div className="flex items-center gap-2 p-3">
-          <div className="flex shrink-0 flex-col">
-            <button type="button" disabled={i === 0 || reorderSubjects.isPending} onClick={() => moveSubject(moduleId, i, -1)} className="grid size-4 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-30" data-testid={`button-move-up-subject-${s.id}`} aria-label="Move up"><ChevronUp size={12} /></button>
-            <button type="button" disabled={i === list.length - 1 || reorderSubjects.isPending} onClick={() => moveSubject(moduleId, i, 1)} className="grid size-4 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-30" data-testid={`button-move-down-subject-${s.id}`} aria-label="Move down"><ChevronDown size={12} /></button>
-          </div>
-          {s.iconUrl && <img src={resolveUploadUrl(s.iconUrl)} alt="" loading="lazy" decoding="async" className="size-8 shrink-0 rounded-lg object-cover" data-testid={`img-subject-thumbnail-${s.id}`} />}
-          <div className="flex-1 text-xs font-bold">{s.name} <span className="font-normal text-muted-foreground">· {s.topicCount} topics</span></div>
-          <button onClick={() => startEditSubject(s)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" data-testid={`button-edit-subject-${s.id}`}><Pencil size={13} /></button>
-          <button onClick={() => setDeletingSubjectId(s.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-subject-${s.id}`}><Trash2 size={13} /></button>
-        </div>
-        {editingSubjectId === s.id && <form onSubmit={(e) => { e.preventDefault(); if (!editSubjectName.trim()) return; updateSubject.mutate({ id: s.id, body: { name: editSubjectName.trim(), ...(editSubjectIcon !== undefined ? { iconPath: editSubjectIcon } : {}) } }); }} className="space-y-2 border-t border-border p-3">
-          <input autoFocus value={editSubjectName} onChange={(e) => setEditSubjectName(e.target.value)} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-xs" data-testid={`input-rename-subject-${s.id}`} />
-          <AdminImageUpload currentUrl={editSubjectIconPreview || ''} kind="resource" accept="image/png,image/jpeg,image/webp" hint="Optional thumbnail · PNG, JPEG, or WEBP." testId={`input-subject-icon-upload-${s.id}`} onUploaded={(storagePath, previewUrl) => { setEditSubjectIcon(storagePath); setEditSubjectIconPreview(previewUrl); }} />
-          <div className="flex gap-2"><button type="submit" disabled={updateSubject.isPending} className="rounded-lg bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground disabled:opacity-50" data-testid={`button-save-subject-${s.id}`}>Save</button><button type="button" onClick={() => setEditingSubjectId(null)} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold text-muted-foreground" data-testid={`button-cancel-edit-subject-${s.id}`}>Cancel</button></div>
-        </form>}
-      </div>)}</div>
-    </CollapsibleGroup>; })}</div>
+    <div className="space-y-6">{yearGroups.map(({ programLabel, yearLabel, groups }) => {
+      const yearKey = `${programLabel}-${yearLabel}`;
+      const yearCount = groups.reduce((n, g) => n + (grouped.get(g.key)?.length ?? 0), 0);
+      return <CollapsibleGroup key={yearKey} defaultOpen={false} icon={<GraduationCap size={14} className="mr-0.5 text-primary" />} count={yearCount} title={`${programLabel} · ${yearLabel}`} testId={`subjects-year-${yearKey}`}>
+        <div className="space-y-4">{groups.map(({ key: moduleId }) => { const list = grouped.get(moduleId)!; return <CollapsibleGroup key={moduleId} nested defaultOpen count={list.length} title={moduleName(moduleId)} testId={`subjects-module-${moduleId}`}>
+          <div className="space-y-2">{list.map((s, i) => <div key={s.id} className="rounded-xl border border-border bg-card">
+            <div className="flex items-center gap-2 p-3">
+              <div className="flex shrink-0 flex-col">
+                <button type="button" disabled={i === 0 || reorderSubjects.isPending} onClick={() => moveSubject(moduleId, i, -1)} className="grid size-4 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-30" data-testid={`button-move-up-subject-${s.id}`} aria-label="Move up"><ChevronUp size={12} /></button>
+                <button type="button" disabled={i === list.length - 1 || reorderSubjects.isPending} onClick={() => moveSubject(moduleId, i, 1)} className="grid size-4 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-30" data-testid={`button-move-down-subject-${s.id}`} aria-label="Move down"><ChevronDown size={12} /></button>
+              </div>
+              {s.iconUrl && <img src={resolveUploadUrl(s.iconUrl)} alt="" loading="lazy" decoding="async" className="size-8 shrink-0 rounded-lg object-cover" data-testid={`img-subject-thumbnail-${s.id}`} />}
+              <div className="flex-1 text-xs font-bold">{s.name} <span className="font-normal text-muted-foreground">· {s.topicCount} topics</span></div>
+              <button onClick={() => startEditSubject(s)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" data-testid={`button-edit-subject-${s.id}`}><Pencil size={13} /></button>
+              <button onClick={() => setDeletingSubjectId(s.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-subject-${s.id}`}><Trash2 size={13} /></button>
+            </div>
+            {editingSubjectId === s.id && <form onSubmit={(e) => { e.preventDefault(); if (!editSubjectName.trim()) return; updateSubject.mutate({ id: s.id, body: { name: editSubjectName.trim(), ...(editSubjectIcon !== undefined ? { iconPath: editSubjectIcon } : {}) } }); }} className="space-y-2 border-t border-border p-3">
+              <input autoFocus value={editSubjectName} onChange={(e) => setEditSubjectName(e.target.value)} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-xs" data-testid={`input-rename-subject-${s.id}`} />
+              <AdminImageUpload currentUrl={editSubjectIconPreview || ''} kind="resource" accept="image/png,image/jpeg,image/webp" hint="Optional thumbnail · PNG, JPEG, or WEBP." testId={`input-subject-icon-upload-${s.id}`} onUploaded={(storagePath, previewUrl) => { setEditSubjectIcon(storagePath); setEditSubjectIconPreview(previewUrl); }} />
+              <div className="flex gap-2"><button type="submit" disabled={updateSubject.isPending} className="rounded-lg bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground disabled:opacity-50" data-testid={`button-save-subject-${s.id}`}>Save</button><button type="button" onClick={() => setEditingSubjectId(null)} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold text-muted-foreground" data-testid={`button-cancel-edit-subject-${s.id}`}>Cancel</button></div>
+            </form>}
+          </div>)}</div>
+        </CollapsibleGroup>; })}</div>
+      </CollapsibleGroup>;
+    })}</div>
     <form onSubmit={(e) => { e.preventDefault(); if (newModuleId && newSubjectName.trim()) createSubject.mutate({ moduleId: Number(newModuleId), name: newSubjectName.trim(), active: true, iconPath: newSubjectIcon ?? undefined }); }} className="mt-6 space-y-2 rounded-xl border border-dashed border-border p-4">
       <div className="text-xs font-bold">Add subject</div>
       <select required value={newModuleId} onChange={(e) => setNewModuleId(e.target.value ? Number(e.target.value) : '')} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-xs" data-testid="select-new-subject-module"><option value="">Choose a module…</option>{modules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>

@@ -57,12 +57,21 @@ import { queryClient } from '@/lib/query-client';
 
 function Profile() {
   const q = useGetCurrentUser();
-  if (q.isLoading) return <SkeletonPage />;
-  if (!q.data) return <ErrorState retry={() => q.refetch()} />;
-  const u = q.data;
+  // Bug fix (React error #310, "Rendered more hooks than during the
+  // previous render"): useState/useMutation/useGetStudentDashboard used to
+  // be declared after the `if (q.isLoading) return ...` / `if (!q.data)
+  // return ...` early returns above. Those branches only fire on some
+  // renders (e.g. the very first one, before the query resolves), so the
+  // hooks after them ran a different number of times render-to-render —
+  // which crashed this page with #310 as soon as the current-user query
+  // finished loading. All hooks now run unconditionally, before any early
+  // return.
   const [editing, setEditing] = useState(false);
   const update = useMutation({ mutationFn: authApi.updateMe, onSuccess: () => { queryClient.invalidateQueries({ queryKey: getGetCurrentUserQueryKey() }); setEditing(false); } });
   const dashboard = useGetStudentDashboard();
+  if (q.isLoading) return <SkeletonPage />;
+  if (!q.data) return <ErrorState retry={() => q.refetch()} />;
+  const u = q.data;
   const daysRemaining = dashboard.data?.membershipExpiry ? Math.max(0, Math.ceil((new Date(dashboard.data.membershipExpiry).getTime() - Date.now()) / 86400000)) : null;
 
   return <div className="max-w-4xl"><SectionHeader eyebrow="Your account" title="Profile & access" /><div className="grid gap-5 md:grid-cols-[220px_1fr]"><div className="rounded-2xl border border-border bg-card p-6"><div className="grid size-16 place-items-center rounded-2xl bg-[#d7eee4] text-xl font-extrabold text-[#164b4b]">{initials(u.name)}</div><h2 className="mt-5 font-display text-2xl text-foreground">{u.name}</h2><div className="mt-1 text-xs text-muted-foreground">{u.program || 'Medical student'}</div><Badge tone={dashboard.data?.membershipStatus === 'ACTIVE' ? 'green' : 'amber'}>{dashboard.data?.membershipStatus === 'ACTIVE' ? 'Active member' : 'Pending activation'}</Badge></div>

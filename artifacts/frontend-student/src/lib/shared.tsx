@@ -306,6 +306,21 @@ export function Shell({ children }: { children: ReactNode }) {
   const isMobile = useIsMobile();
   const user = userQuery.data;
   const { focusMode, strictFocusMode } = useContext(FocusModeContext);
+  // Bug fix (React error #310, "Rendered more hooks than during the
+  // previous render"): this used to sit after the `if (userQuery.isLoading)
+  // return ...` / `if (!user) return ...` branches below. On the very
+  // first render (userQuery still loading) that early return skipped this
+  // hook entirely; once the query resolved and re-rendered with a user,
+  // the branch was skipped and the hook fired — a different hook count
+  // between renders, which is exactly what triggers #310. Since Shell
+  // wraps every routed page, this crashed on the first load of *any*
+  // page (dashboard, flashcards, profile, etc.), not just one route. All
+  // hooks now run unconditionally before any early return.
+  const { pageTitle } = useContext(PageTitleContext);
+  // Same #310 fix — this was declared below the early returns too (right
+  // before its "General trial mode" comment, which now sits just above
+  // where it's actually used further down).
+  const siteContentQ = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get });
 
   useEffect(() => {
     // The topbar search button has always shown a "⌘K" hint — this is the
@@ -345,14 +360,12 @@ export function Shell({ children }: { children: ReactNode }) {
   // what students see) — the reverse is not true, see the equivalent check
   // in frontend-admin/src/App.tsx's Shell, which still blocks students.
 
-  const { pageTitle } = useContext(PageTitleContext);
   // General trial mode — same site-content query SideNav already runs
-  // (shared queryKey, so this doesn't add an extra request), just read
-  // here too for a top banner reminding the student (and admin, if
-  // browsing as one) that every membership-gated page is unlocked for
-  // everyone right now. Hidden in focus mode so it doesn't crowd the
+  // (shared queryKey, so this doesn't add an extra request), read here
+  // too for a top banner reminding the student (and admin, if browsing
+  // as one) that every membership-gated page is unlocked for everyone
+  // right now. Hidden in focus mode so it doesn't crowd the
   // distraction-free exam/practice header.
-  const siteContentQ = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get });
   const globalTrialMode = siteContentQ.data?.GLOBAL_TRIAL_MODE === 'true';
   // Was hardcoded to "Good morning" regardless of the time of day — the
   // Dashboard's own welcome card already computed the correct greeting via

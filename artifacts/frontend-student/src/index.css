@@ -71,9 +71,16 @@
      This version fakes the flip with plain 2D opacity + scale — no
      `perspective`, no `preserve-3d`, no `rotateY`, no `backface-visibility`
      — so there's nothing left that can trigger that class of driver bug.
-     The outgoing face fades/shrinks out, the incoming face fades/grows in
-     after a short delay (`transition-delay`) so the two never fully
-     overlap mid-transition; `pointer-events` keeps the hidden face from
+     Updated again to sell the "turning card" illusion better: instead of
+     both faces shrinking/growing *uniformly* (which read as a plain
+     crossfade), the outgoing face now collapses to a sliver on the X axis
+     only (`scaleX`) while the incoming face expands back out from a
+     sliver on the same axis — a flat card being turned edge-on looks
+     exactly like this from the front, minus any real rotation. Still just
+     `opacity` + `scaleX`, so it's exactly as safe as the version it
+     replaces; nothing here can trigger the GPU 3D-compositor bug described
+     above. `transition-delay` keeps the two faces from ever fully
+     overlapping mid-turn, and `pointer-events` keeps the hidden face from
      eating clicks/taps meant for the visible one.
      Usage: .flip-card > .flip-card-inner[.is-flipped] >
      .flip-card-face + .flip-card-face.flip-card-back. */
@@ -83,30 +90,30 @@
     position: absolute;
     inset: 0;
     opacity: 1;
-    transform: scale(1);
-    transition: opacity .28s ease, transform .28s cubic-bezier(.4, .12, .2, 1);
-    transition-delay: .1s;
+    transform: scaleX(1);
+    transition: opacity .3s ease, transform .34s cubic-bezier(.61, .06, .39, .94);
+    transition-delay: .15s;
     pointer-events: auto;
     z-index: 2;
   }
   .flip-card-face.flip-card-back {
     opacity: 0;
-    transform: scale(.95);
+    transform: scaleX(0);
     transition-delay: 0s;
     pointer-events: none;
     z-index: 1;
   }
   .flip-card-inner.is-flipped .flip-card-face:not(.flip-card-back) {
     opacity: 0;
-    transform: scale(.95);
+    transform: scaleX(0);
     transition-delay: 0s;
     pointer-events: none;
     z-index: 1;
   }
   .flip-card-inner.is-flipped .flip-card-face.flip-card-back {
     opacity: 1;
-    transform: scale(1);
-    transition-delay: .1s;
+    transform: scaleX(1);
+    transition-delay: .15s;
     pointer-events: auto;
     z-index: 2;
   }

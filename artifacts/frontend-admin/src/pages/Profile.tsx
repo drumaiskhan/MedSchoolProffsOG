@@ -46,12 +46,15 @@ import { queryClient } from '@/lib/query-client';
 
 function Profile() {
   const q = useGetCurrentUser();
-  if (q.isLoading) return <SkeletonPage />;
-  if (!q.data) return <ErrorState retry={() => q.refetch()} />;
-  const u = q.data;
+  // Bug fix (React error #310) — see matching comment in the student
+  // app's Profile.tsx: hooks must run unconditionally, before any early
+  // return, or the hook count differs render-to-render and React throws.
   const [editing, setEditing] = useState(false);
   const update = useMutation({ mutationFn: authApi.updateMe, onSuccess: () => { queryClient.invalidateQueries({ queryKey: getGetCurrentUserQueryKey() }); setEditing(false); } });
   const dashboard = useGetStudentDashboard();
+  if (q.isLoading) return <SkeletonPage />;
+  if (!q.data) return <ErrorState retry={() => q.refetch()} />;
+  const u = q.data;
   const daysRemaining = dashboard.data?.membershipExpiry ? Math.max(0, Math.ceil((new Date(dashboard.data.membershipExpiry).getTime() - Date.now()) / 86400000)) : null;
 
   return <div className="max-w-4xl"><SectionHeader eyebrow="Your account" title="Profile & access" /><div className="grid gap-5 md:grid-cols-[220px_1fr]"><div className="rounded-2xl bg-[#164b4b] p-6 text-[#eaf2e9]"><div className="grid size-16 place-items-center rounded-2xl bg-[#d7eee4] text-xl font-extrabold text-[#164b4b]">{initials(u.name)}</div><h2 className="mt-5 font-display text-2xl">{u.name}</h2><div className="mt-1 text-xs text-[#bfd4cb]">{u.program || 'Medical student'}</div><Badge tone={dashboard.data?.membershipStatus === 'ACTIVE' ? 'green' : 'amber'}>{dashboard.data?.membershipStatus === 'ACTIVE' ? 'Active member' : 'Pending activation'}</Badge></div>
