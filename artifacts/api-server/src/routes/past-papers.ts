@@ -8,6 +8,16 @@ import { getStudentTargeting, isTargetVisible } from "../lib/contentVisibility";
 
 const router: IRouter = Router();
 
+// Mirrors DEGREE_YEAR_OPTIONS in frontend-admin/src/lib/shared.tsx — position
+// within the array is the year number (index + 1), same convention the
+// Degree + Year picker's studyYearToNumber() uses. Duplicated here rather
+// than imported since this is server code and that lives in a frontend
+// package; keep the two in sync if a degree/year label ever changes.
+const DEGREE_YEAR_OPTIONS: Record<string, string[]> = {
+  MBBS: ["1st Year", "2nd Year", "3rd Year", "4th Year", "Final Year"],
+  BDS: ["1st Year", "2nd Year", "3rd Year", "Final Year"],
+};
+
 async function paperView(paper: typeof pastPapersTable.$inferSelect) {
   const [mcqCount] = await db.select({ count: sql<number>`count(*)` }).from(mcqsTable).where(eq(mcqsTable.pastPaperId, paper.id));
   return { ...paper, mcqCount: Number(mcqCount?.count ?? 0) };
@@ -142,6 +152,36 @@ router.post("/past-papers/:id/mcqs", requireAdmin, async (req, res): Promise<voi
 router.delete("/past-papers/:id/mcqs/:mcqId", requireAdmin, async (req, res): Promise<void> => {
   await db.update(mcqsTable).set({ pastPaperId: null }).where(eq(mcqsTable.id, Number(req.params.mcqId)));
   res.json({ ok: true });
+});
+
+// One-time backward-compat fix (same pattern as
+// POST /admin/books/backfill-links) for papers uploaded before the Degree +
+// Year picker existed. Those rows only ever got the free-text `level`
+// field (e.g. "MBBS - 1st Year") typed or composed at creation, with
+// programTargetKind/yearTargetNumber left null — and null on either axis
+// means "visible to every program/year" (see contentVisibility.ts), which
+// is exactly why an old First Year paper still shows up in a Third Year
+// student's account: it was never actually tagged as First-Year-only, it
+// was just labeled that way in text nobody parsed back into the real
+// targeting fields. This walks every paper missing that targeting, splits
+// its `level` on " - " into a degree and a study-year label, and — only
+// when both halves match a real DEGREE_YEAR_OPTIONS entry — fills in
+// programTargetKind/yearTargetNumber from it. Safe to re-run: a paper
+// already tagged (by this or the create/edit form) is left untouched, and
+// a paper whose `level` doesn't parse cleanly is skipped rather than
+// guessed at.
+router.post("/past-papers/backfill-year-targeting", requireAdmin, async (_req, res): Promise<void> => {
+  const rows = await db.select().from(pastPapersTable).where(and(isNull(pastPapersTable.programTargetKind), isNull(pastPapersTable.yearTargetNumber)));
+  let fixed = 0;
+  let skipped = 0;
+  for (const row of rows) {
+    const [degree, studyYear] = (row.level || "").split(" - ").map((s) => s.trim());
+    const yearIndex = degree && studyYear ? (DEGREE_YEAR_OPTIONS[degree] || []).indexOf(studyYear) : -1;
+    if (yearIndex < 0) { skipped++; continue; }
+    await db.update(pastPapersTable).set({ programTargetKind: degree, yearTargetNumber: yearIndex + 1 }).where(eq(pastPapersTable.id, row.id));
+    fixed++;
+  }
+  res.json({ fixed, skipped });
 });
 
 export default router;

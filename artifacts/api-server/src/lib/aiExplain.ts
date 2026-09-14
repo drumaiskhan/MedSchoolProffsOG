@@ -533,7 +533,15 @@ export type AiProvider = typeof AI_PROVIDERS[number];
 const DEFAULT_MODELS: Record<AiProvider, string> = {
   anthropic: "claude-sonnet-4-6",
   openai: "gpt-4o-mini",
-  gemini: "gemini-2.0-flash",
+  // Google shut down gemini-2.0-flash on June 1, 2026 — any request for it
+  // now 404s with "This model ... is no longer available." "-latest" is a
+  // rolling alias Google maintains that always resolves to the current
+  // stable Flash release (see ai.google.dev/gemini-api/docs/models), so
+  // this default won't need another manual bump next time Google retires
+  // a version. An admin can still pin an exact version (e.g.
+  // "gemini-3.6-flash") via the Model field in Admin -> Platform settings
+  // -> AI if they want reproducible behavior instead of auto-upgrades.
+  gemini: "gemini-flash-latest",
   // OpenRouter (and most OpenAI-compatible aggregators) namespace model IDs
   // as "vendor/model" — a bare "gpt-4o-mini" with no vendor prefix returns
   // an OpenRouter error, not a completion. Only used when the admin leaves

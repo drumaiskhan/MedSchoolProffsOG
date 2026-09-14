@@ -50,6 +50,18 @@ function AdminPastPapers() {
   const update = useMutation({ mutationFn: ({ id, body }: { id: number; body: Partial<PastPaper> }) => pastPapersApi.update(id, body), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-past-papers'] }) });
   const toggle = useMutation({ mutationFn: ({ id, active }: { id: number; active: boolean }) => pastPapersApi.update(id, { active }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-past-papers'] }) });
   const removePermanent = useMutation({ mutationFn: pastPapersApi.removePermanent, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['admin-past-papers'] }); setDeletingId(null); }, onError: (err: unknown) => toast({ title: 'Could not delete paper', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
+  // One-time fix for papers uploaded before the Degree + Year picker
+  // existed — they only have the old free-text `level` label (e.g. "MBBS -
+  // 1st Year") with no real yearTargetNumber/programTargetKind set, which
+  // means they're currently visible to every program/year, not just the
+  // one in their label. This parses `level` and fills in the real
+  // targeting fields. Safe to click repeatedly — already-tagged papers are
+  // left alone.
+  const backfillYearTargeting = useMutation({
+    mutationFn: pastPapersApi.backfillYearTargeting,
+    onSuccess: (result) => { queryClient.invalidateQueries({ queryKey: ['admin-past-papers'] }); toast({ title: 'Year targeting fixed', description: `${result.fixed} paper${result.fixed === 1 ? '' : 's'} updated from their Level label${result.skipped ? `, ${result.skipped} skipped (label didn't match a known Degree/Year)` : ''}.` }); },
+    onError: (err: unknown) => toast({ title: 'Could not fix year targeting', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
   const [open, setOpen] = useState(false);
   const [uploadingId, setUploadingId] = useState<number | null>(null);
   const [viewingId, setViewingId] = useState<number | null>(null);
@@ -89,7 +101,7 @@ function AdminPastPapers() {
   const paperStudyYearSortKey = (p: PastPaper) => p.yearTargetNumber ?? studyYearToNumber(paperDegree(p), paperStudyYear(p));
   const grouped = groupByDegreeYear(papers.data || [], paperDegree, paperStudyYear, paperStudyYearSortKey);
 
-  return <div><SectionHeader eyebrow="Content" title="Past papers" action={<button onClick={() => setOpen(true)} className="btn-pop inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground shadow-sm sm:w-auto" data-testid="button-create-paper"><Plus size={15} /> Add paper</button>} />
+  return <div><SectionHeader eyebrow="Content" title="Past papers" action={<div className="flex gap-2"><button onClick={() => backfillYearTargeting.mutate()} disabled={backfillYearTargeting.isPending} className="inline-flex items-center gap-2 rounded-xl border border-border px-4 py-2.5 text-xs font-extrabold text-muted-foreground hover:text-foreground disabled:opacity-50" data-testid="button-backfill-paper-year-targeting" title="Fix old papers whose Level label (e.g. &quot;MBBS - 1st Year&quot;) was never turned into real year/degree targeting, so they show up for every year">{backfillYearTargeting.isPending ? 'Checking…' : 'Fix year targeting'}</button><button onClick={() => setOpen(true)} className="btn-pop inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground shadow-sm" data-testid="button-create-paper"><Plus size={15} /> Add paper</button></div>} />
     <datalist id="past-paper-college-options">{collegeOptions.map((c) => <option key={c} value={c} />)}</datalist>
     {open && <form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); const programId = f.get('programId') ? Number(f.get('programId')) : undefined; const academicYearId = f.get('academicYearId') ? Number(f.get('academicYearId')) : undefined; const level = String(f.get('level') || '') || composedLevel; create.mutate({ title: String(f.get('title')), examBoard: String(f.get('examBoard') || ''), year: String(f.get('year') || ''), level, programId, academicYearId, programTargetKind: formDegree || null, yearTargetNumber: studyYearToNumber(formDegree, formStudyYear) ?? null, active: true }, { onSuccess: resetForm }); }} className="mb-5 grid gap-3 rounded-2xl border border-primary/30 bg-[#eef7f1] p-4 sm:p-5 md:grid-cols-4">
       <input required name="title" placeholder="Paper title, e.g. Block A" className="h-11 rounded-xl border border-border bg-card px-3 text-xs outline-none transition-shadow focus:ring-2 focus:ring-primary/25 md:col-span-2" data-testid="input-paper-title" />

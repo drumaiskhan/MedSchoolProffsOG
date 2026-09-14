@@ -56,7 +56,20 @@ import { Badge, ErrorState, Footer, IconField, SectionHeader, SkeletonPage, Team
 import { queryClient } from '@/lib/query-client';
 
 function Profile() {
-  const q = useGetCurrentUser();
+  // Bug fix: this used to read `useGetCurrentUser()` from the generated
+  // api-client-react hooks, which types /auth/me's response as the
+  // codegen `User` shape (id/name/email/role/status/institution/program
+  // only — see lib/api-zod/src/generated/types/user.ts). That's a
+  // type-level ceiling, not a server one: /auth/me itself now also
+  // resolves and returns the student's real MBBS/BDS programKind,
+  // academicYear label/yearNumber, and profile picture (see userPublicView
+  // in auth.ts) — those fields were just invisible here because this
+  // page's `q.data` was typed too narrowly to see them. Switched to the
+  // richer local `AuthUser` type via `authApi.me`, reusing the exact same
+  // query key (`getGetCurrentUserQueryKey()`) so this stays the same cache
+  // entry the rest of the app already invalidates on login/update — no
+  // other page needs to change.
+  const q = useQuery({ queryKey: getGetCurrentUserQueryKey(), queryFn: authApi.me });
   // Bug fix (React error #310, "Rendered more hooks than during the
   // previous render"): useState/useMutation/useGetStudentDashboard used to
   // be declared after the `if (q.isLoading) return ...` / `if (!q.data)
@@ -67,17 +80,59 @@ function Profile() {
   // finished loading. All hooks now run unconditionally, before any early
   // return.
   const [editing, setEditing] = useState(false);
-  const update = useMutation({ mutationFn: authApi.updateMe, onSuccess: () => { queryClient.invalidateQueries({ queryKey: getGetCurrentUserQueryKey() }); setEditing(false); } });
+  // Profile picture — deliberately its own bit of state and its own
+  // upload step, separate from the name/phone form fields: the picture
+  // itself is optional (a student can save their name/phone without ever
+  // touching it), and it uploads immediately on file choice via the
+  // existing POST /uploads/profile-picture (same endpoint AdminTeam.tsx's
+  // photo picker already uses for team members) rather than waiting for
+  // the whole form's "Save changes".
+  const [pendingPicture, setPendingPicture] = useState<{ storagePath: string; previewUrl: string } | null>(null);
+  const [pictureUploading, setPictureUploading] = useState(false);
+  const [pictureError, setPictureError] = useState<string | null>(null);
+  const update = useMutation({ mutationFn: authApi.updateMe, onSuccess: () => { queryClient.invalidateQueries({ queryKey: getGetCurrentUserQueryKey() }); setEditing(false); setPendingPicture(null); } });
   const dashboard = useGetStudentDashboard();
   if (q.isLoading) return <SkeletonPage />;
   if (!q.data) return <ErrorState retry={() => q.refetch()} />;
   const u = q.data;
   const daysRemaining = dashboard.data?.membershipExpiry ? Math.max(0, Math.ceil((new Date(dashboard.data.membershipExpiry).getTime() - Date.now()) / 86400000)) : null;
+  // "MBBS · 3rd Year" when both are known; falls back gracefully for any
+  // account that (still) has neither set.
+  const programYearLabel = [u.programKind, u.academicYear].filter(Boolean).join(' · ') || u.program || 'Medical student';
+  const avatarUrl = pendingPicture?.previewUrl ?? resolveUploadUrl(u.profilePictureUrl ?? u.profilePicturePath);
 
-  return <div className="max-w-4xl"><SectionHeader eyebrow="Your account" title="Profile & access" /><div className="grid gap-5 md:grid-cols-[220px_1fr]"><div className="rounded-2xl border border-border bg-card p-6"><div className="grid size-16 place-items-center rounded-2xl bg-[#d7eee4] text-xl font-extrabold text-[#164b4b]">{initials(u.name)}</div><h2 className="mt-5 font-display text-2xl text-foreground">{u.name}</h2><div className="mt-1 text-xs text-muted-foreground">{u.program || 'Medical student'}</div><Badge tone={dashboard.data?.membershipStatus === 'ACTIVE' ? 'green' : 'amber'}>{dashboard.data?.membershipStatus === 'ACTIVE' ? 'Active member' : 'Pending activation'}</Badge></div>
-    <div className="rounded-2xl border border-border bg-card p-6"><div className="flex items-center justify-between"><h3 className="font-bold">Personal details</h3><button onClick={() => setEditing((v) => !v)} className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:opacity-80" data-testid="button-edit-profile"><Pencil size={13} /> {editing ? 'Cancel' : 'Edit'}</button></div>
-      {editing ? <form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); update.mutate({ name: String(f.get('name')), phone: String(f.get('phone') || '') }); }} className="mt-6 grid gap-4 sm:grid-cols-2"><label className="text-xs font-bold sm:col-span-2">Full name<div className="mt-2"><IconField icon={UserIcon} required name="name" defaultValue={u.name} data-testid="input-edit-name" /></div></label><label className="text-xs font-bold">Phone<div className="mt-2"><IconField icon={Phone} name="phone" defaultValue={(u as { phone?: string }).phone ?? ''} data-testid="input-edit-phone" /></div></label><div className="flex items-end sm:col-span-2"><button disabled={update.isPending} className="rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-save-profile">{update.isPending ? 'Saving…' : 'Save changes'}</button></div></form>
-      : <div className="mt-6 grid gap-5 sm:grid-cols-2">{[['Full name', u.name], ['Email address', u.email], ['Institution', u.institution || 'Not added'], ['Programme', u.program || 'Not added']].map(([label, value]) => <div key={label}><div className="text-[10px] font-bold uppercase tracking-[.12em] text-muted-foreground">{label}</div><div className="mt-2 text-sm font-semibold">{value}</div></div>)}</div>}
+  const handlePictureChange = async (file: File | undefined | null) => {
+    if (!file) return;
+    setPictureUploading(true); setPictureError(null);
+    try {
+      const res = await uploadFile(file, 'profile-picture');
+      setPendingPicture({ storagePath: res.storagePath, previewUrl: URL.createObjectURL(file) });
+    } catch (err) {
+      setPictureError(err instanceof ApiRequestError ? err.message : 'Could not upload that photo. Try a smaller image.');
+    } finally {
+      setPictureUploading(false);
+    }
+  };
+
+  return <div className="max-w-4xl"><SectionHeader eyebrow="Your account" title="Profile & access" /><div className="grid gap-5 md:grid-cols-[220px_1fr]"><div className="rounded-2xl border border-border bg-card p-6">
+      {avatarUrl ? <img src={avatarUrl} alt="" className="size-16 rounded-2xl border border-border object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} /> : <div className="grid size-16 place-items-center rounded-2xl bg-[#d7eee4] text-xl font-extrabold text-[#164b4b]">{initials(u.name)}</div>}
+      <h2 className="mt-5 font-display text-2xl text-foreground">{u.name}</h2><div className="mt-1 text-xs text-muted-foreground">{programYearLabel}</div><Badge tone={dashboard.data?.membershipStatus === 'ACTIVE' ? 'green' : 'amber'}>{dashboard.data?.membershipStatus === 'ACTIVE' ? 'Active member' : 'Pending activation'}</Badge></div>
+    <div className="rounded-2xl border border-border bg-card p-6"><div className="flex items-center justify-between"><h3 className="font-bold">Personal details</h3><button onClick={() => { setEditing((v) => !v); setPendingPicture(null); setPictureError(null); }} className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:opacity-80" data-testid="button-edit-profile"><Pencil size={13} /> {editing ? 'Cancel' : 'Edit'}</button></div>
+      {editing ? <form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); update.mutate({ name: String(f.get('name')), phone: String(f.get('phone') || ''), ...(pendingPicture ? { profilePicturePath: pendingPicture.storagePath } : {}) }); }} className="mt-6 grid gap-4 sm:grid-cols-2">
+        {/* Optional — a student can save name/phone changes without ever picking a photo. */}
+        <label className="text-xs font-bold sm:col-span-2">Profile picture <span className="font-normal text-muted-foreground">(optional)</span>
+          <div className="mt-2 flex items-center gap-3">
+            {avatarUrl ? <img src={avatarUrl} alt="" className="size-12 rounded-xl border border-border object-cover" /> : <div className="grid size-12 place-items-center rounded-xl bg-[#d7eee4] text-sm font-extrabold text-[#164b4b]">{initials(u.name)}</div>}
+            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => handlePictureChange(e.target.files?.[0])} className="flex-1 rounded-xl border border-dashed border-border bg-card px-3 py-2 text-xs" data-testid="input-profile-picture" />
+          </div>
+          {pictureUploading && <p className="mt-1 text-[11px] text-muted-foreground">Uploading…</p>}
+          {pictureError && <p className="mt-1 text-[11px] text-destructive">{pictureError}</p>}
+        </label>
+        <label className="text-xs font-bold sm:col-span-2">Full name<div className="mt-2"><IconField icon={UserIcon} required name="name" defaultValue={u.name} data-testid="input-edit-name" /></div></label>
+        <label className="text-xs font-bold">Phone<div className="mt-2"><IconField icon={Phone} name="phone" defaultValue={(u as { phone?: string }).phone ?? ''} data-testid="input-edit-phone" /></div></label>
+        <div className="flex items-end sm:col-span-2"><button disabled={update.isPending || pictureUploading} className="rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-save-profile">{update.isPending ? 'Saving…' : 'Save changes'}</button></div>
+      </form>
+      : <div className="mt-6 grid gap-5 sm:grid-cols-2">{[['Full name', u.name], ['Email address', u.email], ['Institution', u.institution || 'Not added'], ['Programme', u.programKind || u.program || 'Not added'], ['Academic year', u.academicYear || 'Not added']].map(([label, value]) => <div key={label}><div className="text-[10px] font-bold uppercase tracking-[.12em] text-muted-foreground">{label}</div><div className="mt-2 text-sm font-semibold">{value}</div></div>)}</div>}
     </div></div>
   <div className="mt-5 rounded-2xl border border-border bg-card p-6"><div className="flex items-center gap-3"><div className="grid size-10 place-items-center rounded-xl bg-[#d7eee4] text-primary"><ShieldCheck size={19} /></div><div><h3 className="text-sm font-bold">Membership access</h3><p className="mt-1 text-xs text-muted-foreground">{daysRemaining !== null ? `Active · ${daysRemaining} days remaining` : 'No active membership yet'}</p></div><Link href="/payments" className="ml-auto rounded-xl border border-border px-3 py-2 text-xs font-bold hover:bg-muted" data-testid="link-manage-membership">Manage</Link></div></div>
   <TeamSection />

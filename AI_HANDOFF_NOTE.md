@@ -1,141 +1,141 @@
-# AI Handoff Note v26 (for the next AI/dev)
+# AI Handoff Note v27 (for the next AI/dev)
 
-Scope: 3 requested fixes. One schema addition (new table, additive —
-`ensureSchema.ts`/`ensure-schema.sql`/`manual-migration.sql` all updated, no
-existing table or column touched). Not build-tested (no network access to
+Scope: 2 requested fixes, both traced to root cause rather than patched at
+the symptom. No schema changes. Not build-tested (no network access to
 `pnpm install` in this environment) — only syntax-checked with `tsc
 --noEmit` on each touched file in isolation (workspace-package import
-errors, missing `@types/node`, missing JSX runtime, and pre-existing
-`err: unknown` narrowing noise are expected in isolation and were
-individually confirmed to not be new syntax errors). **Run `pnpm dev` / a
-full build and a real signup+reset-password round trip before trusting this
-in prod.**
+errors, missing `@types/node`/`@types/react`, missing JSX runtime, and the
+pre-existing `err: unknown` narrowing pattern used throughout this codebase
+are expected in isolation and were individually confirmed to not be new
+syntax errors). **Run `pnpm dev` and a real signup + profile-edit round
+trip before trusting this in prod.**
 
-## 1. Reset-password (and verify-email/welcome) email links were broken
+## 1. First Year past papers showing up in Third Year (and other year-mismatch) accounts
 
-The report: the "Reset your MedschoolProffs password" email linked to
-`https://medschoolproffs.netlify.app,https://medschoolproffss.netlify.app/reset-password?token=...`
-— two URLs glued together with a comma, one of them a typo domain — which
-the browser can't resolve (`DNS_PROBE_FINISHED_NXDOMAIN`).
+Traced the actual visibility logic end to end
+(`contentVisibility.ts`'s `isTargetVisible`, `GET /past-papers` in
+`past-papers.ts`) and it's correct — a paper tagged `yearTargetNumber: 1`
+is already properly hidden from a student whose own year is 3. **This was
+a data problem, not a logic bug**: any past paper uploaded before the
+Degree + Year picker existed only ever got the free-text `level` field
+(e.g. `"MBBS - 1st Year"`) typed or composed at creation, with
+`programTargetKind`/`yearTargetNumber` left `null`. Per the existing
+convention (see `contentVisibility.ts`'s doc comment), `null` on either
+axis means "visible to every program/year" — so every one of those
+legacy-labeled papers has been showing to every student regardless of
+their actual year, even though its *label* says "1st Year".
 
-Root cause: `APP_URL` is documented and used in `app.ts` as a
-comma-separated CORS allow-list (`process.env.APP_URL?.split(",")` — see
-`.env.example`: `APP_URL=http://localhost:5173,http://localhost:5174`, one
-entry per frontend app). But `auth.ts` read that exact same env var and
-dropped it straight into email links as if it were a single origin:
-`` `${APP_URL}/reset-password?token=${raw}` ``. Any deploy that (correctly,
-per the CORS docs) set `APP_URL` to more than one origin got a broken email
-link — this wasn't a one-off typo in the email copy, it was structural: two
-different features silently sharing one env var with incompatible formats.
+Fix — new one-time backfill, same pattern as the existing
+`POST /admin/books/backfill-links`:
+- `POST /past-papers/backfill-year-targeting` (new, `past-papers.ts`,
+  `requireAdmin`) — walks every past paper with both targeting fields
+  null, splits its `level` on `" - "`, and — only when both halves match a
+  real `DEGREE_YEAR_OPTIONS` entry (duplicated server-side in
+  `past-papers.ts`, same values as `frontend-admin/src/lib/shared.tsx` —
+  keep in sync if a degree/year label ever changes) — fills in
+  `programTargetKind`/`yearTargetNumber` from it. Safe to re-run: already-
+  tagged papers are left alone, unparseable `level` strings are skipped
+  and counted rather than guessed at.
+- `pastPapersApi.backfillYearTargeting()` (`frontend-admin/src/lib/api.ts`).
+- "Fix year targeting" button next to "Add paper" in
+  `AdminPastPapers.tsx`, toasts the fixed/skipped counts.
 
-Fix:
-- New `artifacts/api-server/src/lib/publicAppUrl.ts` — `getPublicAppUrl()`
-  resolves to exactly one URL: prefers an explicit `PUBLIC_APP_URL` env var,
-  else falls back to the first entry of `APP_URL`, else `localhost:5173`.
-- `auth.ts`'s `APP_URL` constant now comes from `getPublicAppUrl()` instead
-  of `process.env.APP_URL` directly — this fixes all three email links that
-  used it (verify-email, welcome, reset-password) with one change, since
-  they all read the same constant.
-- Documented the new var in `.env.example` (root), `artifacts/api-server/.env.example`,
-  `DEPLOYMENT.md`'s env var table, and `DEPLOY-SPLIT.md`'s checklist.
+**Action needed on the actual deploy**: an admin needs to click this
+button once (Admin → Past papers → "Fix year targeting") for it to take
+effect on existing data — it doesn't run automatically at boot, since
+unlike a schema migration this reads/rewrites real content rows and should
+be a deliberate, visible action with a result an admin can see, same as
+the books link-fix button. Any *new* paper created via the Degree + Year
+picker already gets tagged correctly at save time and never needed this.
 
-**Action needed on the actual deploy, not just the code**: whichever host
-runs `api-server` (Render/Railway/whatever `netlify.admin.toml`/`render.yaml`
-resolve to in this setup) needs `PUBLIC_APP_URL` set to the real,
-correctly-spelled student-app origin (no comma, no `medschoolproffss`
-typo). The code fix makes a single-origin `APP_URL` keep working with zero
-config changes, but a deploy that already has a comma-separated `APP_URL`
-needs `PUBLIC_APP_URL` set explicitly or it'll still just take the *first*
-entry of the list, which may or may not be the right one.
+## 2. Student profile not showing MBBS/BDS or year; profile picture upload
 
-## 2. Notification "Clear all" — admin + student, admin's clears for everyone
+**Root cause, much bigger than the profile page alone**: `/auth/register`
+correctly saves a new student's college/program/year as proper foreign
+keys (`institutionId`/`programId`/`academicYearId`) — but `userPublicView`
+in `auth.ts` (what `/auth/me` returns) was reading the *old* free-text
+`institution`/`program` columns instead, which registration never writes
+to. Every student who signed up through the current registration flow
+therefore had a genuinely blank Institution/Programme, and no year at all
+(that field was never even returned), regardless of what they picked at
+signup. I found the identical pattern independently in `userView`/
+`paymentView` (`medschool.ts`) and the admin `/students`/`/students/:id`
+routes — **not fixed this round** (out of scope of the ask, flagged below)
+but worth knowing it's the same bug in four more places.
 
-New table `med_notification_dismissals` (`userId`, `notificationId`) — see
-its comment in `lib/db/src/schema/medschool.ts` for the full reasoning.
-Short version: a broadcast notification (`notificationsTable.userId IS
-NULL`) is shared by every student, so a *student's* "Clear all" can't
-delete the row outright without erasing the announcement for everyone else
-— it records a dismissal instead. An *admin's* "Clear all" is a different,
-more powerful action that really does delete every row for everyone,
-because that's explicitly what was asked for ("when admin clears the
-notifications they're removed from students too").
+Fix, `auth.ts`:
+- `userPublicView` is now `async` and resolves `institution`/`program`/
+  `academicYear` from the FK ids (falling back to the legacy text columns
+  only for any pre-existing row that has them but no FK set), and adds
+  `programKind` ("MBBS"/"BDS"), `academicYear` (label, e.g. "3rd Year"),
+  and `yearNumber` (plain 1-5) as their own fields since the profile page
+  needs the year on its own, not just folded into a display string. All 5
+  call sites updated to `await` it.
+- Also now returns `profilePicturePath` and a resolved `profilePictureUrl`
+  — the column already existed on `med_users` and the upload endpoint
+  (`POST /uploads/profile-picture`) already existed and worked (it's used
+  by `AdminTeam.tsx` for team member photos), it just was never returned
+  by `/auth/me` or wired into any student-facing page.
+- `PATCH /auth/me` (`UpdateMeSchema`) now also accepts an optional
+  `profilePicturePath` (empty string clears it to `null`).
 
-- `GET /notifications` (`medschool.ts`) now excludes any notification id
-  the requesting user has a dismissal row for.
-- `POST /notifications/clear` (new, `requireAuth`) — the personal/student
-  version. Hard-deletes the caller's own notifications (`userId` = them),
-  and inserts dismissal rows for every broadcast currently visible to them
-  that isn't already dismissed. Used by both apps' "Clear all" for a
-  non-admin, and by the admin for clearing just their own bell without
-  nuking everyone else's — see below.
-- `DELETE /admin/notifications/clear-all` (new, `requireAdmin`) — the
-  global version. Deletes every row in `med_notifications` outright (and
-  clears the dismissals table too, so it doesn't accumulate rows pointing
-  at now-gone ids), logs an audit entry with the deleted count.
-- `notificationsApi.clearMine()` (both frontends) → `POST /notifications/clear`.
-  `notificationsApi.clearAll()` (admin frontend only) → the admin route.
-- Both `Notifications.tsx` pages (admin + student) got a "Clear all" button
-  next to "Mark all as read", gated behind `ConfirmDialog` since it's
-  destructive. The admin's confirm copy says plainly that it removes
-  notifications for every student too; the student's says the opposite —
-  only their own view is cleared, classmates still see broadcasts.
+Fix, student frontend:
+- `AuthUser` (`frontend-student/src/lib/api.ts`) gained `programKind`,
+  `academicYear`, `yearNumber`, `profilePicturePath`, `profilePictureUrl`.
+  `authApi.updateMe`'s body type gained the optional `profilePicturePath`.
+- `Profile.tsx`:
+  - Switched its read from `useGetCurrentUser()` (the generated
+    api-client-react hook, typed against the codegen `User` shape —
+    `id`/`name`/`email`/`role`/`status`/`institution`/`program` only, see
+    `lib/api-zod/src/generated/types/user.ts`) to a local
+    `useQuery({ queryKey: getGetCurrentUserQueryKey(), queryFn: authApi.me })`.
+    Same cache key, so nothing else needs to change — this was purely a
+    type ceiling hiding fields the server already sends; not a codegen
+    regen (no network in this environment to run `orval`).
+  - Header now shows "MBBS · 3rd Year" (`programKind` + `academicYear`)
+    instead of the old blank `program` string; the read-only details grid
+    also gained its own "Academic year" row.
+  - New profile picture control in the edit form, explicitly labeled
+    "(optional)" — uploads immediately on file choice (same
+    `uploadFile(file, 'profile-picture')` used elsewhere), shows a preview,
+    and is only included in the "Save changes" PATCH if the student
+    actually picked a file. Skipping it entirely, or saving name/phone
+    without ever touching it, works exactly as before. Avatar (header and
+    edit-form) falls back to the existing initials circle when no picture
+    is set.
 
-Migration note: this needs the new table on any environment that hasn't
-run `ensureSchema.ts`'s boot-time DDL since this change — it runs
-automatically on next server boot (`CREATE TABLE IF NOT EXISTS`, safe to
-rerun), no manual migration step required. `manual-migration.sql` was also
-updated to match, for anyone who runs migrations by hand.
-
-## 3. Module names had no rename UI at all (Blocks/Subjects/Topics did)
-
-Checked all four "academic content" levels for the rename bug the ask
-described. Subjects and Topics already had a working Pencil → inline
-rename input → Save, and Blocks' edit form (`BlockForm`) already had a
-`name` input pre-filled with `initial?.name`. **Modules were the one gap**:
-`ModuleRow`'s Pencil button opened an edit panel with *only* program/year
-targeting fields — no name input existed anywhere in that panel, even
-though `PATCH /modules/:id` already accepts and applies `name` server-side
-(`CreateModuleBody.partial()`) and always has. There was simply no way to
-rename a module from the UI.
-
-Fix, `artifacts/frontend-admin/src/lib/shared.tsx` (`ModuleRow`): added
-local `editName` state, a "Module name" text input in the edit panel
-(pre-filled when the panel opens), and folded `name: editName.trim()` into
-the same "Save changes" mutation call that already updates
-program/year-targeting — one Save button, one request, same as before but
-now also renames. Save is disabled while the name is empty.
+**Not done this round** (flagging, not fixing): `userView`/`paymentView`
+in `medschool.ts`, and `GET /students` / `GET /students/:id`
+(same file) have the identical legacy-column bug — an admin looking at a
+student's payment history or the Students list is currently seeing the
+same blank Institution/Programme a student saw on their own profile
+before this fix. Same shape of fix as `userPublicView` above (resolve from
+the FK ids) would apply to all four.
 
 ## Verification done
-- `tsc --noEmit` against each touched file in isolation, copied out to a
-  tsconfig-free scratch dir so the project's own `tsconfig.json` didn't
-  swallow the check. Confirmed the only errors were the expected kind
-  (missing `@types/node`, missing JSX/React types, `err: unknown` in
-  catch-style `onError` callbacks used throughout this codebase already) —
-  none were new syntax errors introduced by these edits.
+- `tsc --noEmit` against each touched file in isolation, copied to a
+  tsconfig-free scratch dir. Confirmed zero `TS1xxx` (parse/syntax) errors
+  introduced; remaining errors are the expected isolation noise (missing
+  workspace package types, missing JSX runtime, the pre-existing
+  `err: unknown` catch pattern already used everywhere in this codebase).
 - **Not done**: `pnpm install` / `pnpm dev` / production build, no live
-  database to actually run the new `CREATE TABLE` against or confirm the
-  dismiss/clear-all queries behave as expected with real rows, and no way
-  to actually send an email from this environment to confirm the reset
-  link resolves. Please smoke-test all three before trusting this in prod:
-  (a) request a password reset and click the emailed link, (b) as a
-  student, broadcast a notification as admin, clear-all as the student,
-  confirm the admin and other students still see it, then clear-all as
-  admin and confirm it's gone for everyone, (c) rename a module and confirm
-  it sticks after a refresh.
+  database to actually run the backfill against real past-paper rows or
+  confirm a real signup + profile-picture-upload round trip end to end.
+  Please smoke-test before trusting this in prod: (a) as a 3rd Year
+  student, confirm 1st Year legacy papers disappear from the past-papers
+  list only *after* an admin clicks "Fix year targeting" — before that
+  click, this fix intentionally changes nothing; (b) sign up a fresh
+  student, confirm their Profile page immediately shows the right
+  MBBS/BDS + year (no backfill needed for new signups, this was a display
+  bug not a data bug); (c) upload a profile picture, refresh, confirm it
+  persists and renders; (d) confirm saving name/phone *without* touching
+  the picture still works exactly as before.
 
 ## Files touched (full list)
-- `artifacts/api-server/src/lib/publicAppUrl.ts` — new
+- `artifacts/api-server/src/routes/past-papers.ts`
 - `artifacts/api-server/src/routes/auth.ts`
-- `artifacts/api-server/src/routes/medschool.ts`
-- `lib/db/src/schema/medschool.ts`
-- `lib/db/src/ensureSchema.ts`
-- `lib/db/ensure-schema.sql`
-- `lib/db/manual-migration.sql`
 - `artifacts/frontend-admin/src/lib/api.ts`
+- `artifacts/frontend-admin/src/pages/AdminPastPapers.tsx`
 - `artifacts/frontend-student/src/lib/api.ts`
-- `artifacts/frontend-admin/src/pages/Notifications.tsx`
-- `artifacts/frontend-student/src/pages/Notifications.tsx`
-- `artifacts/frontend-admin/src/lib/shared.tsx` (`ModuleRow` only)
-- `.env.example`, `artifacts/api-server/.env.example`, `DEPLOYMENT.md`,
-  `DEPLOY-SPLIT.md` — docs for `PUBLIC_APP_URL`
-- this file, replaced (previous version archived as `AI_HANDOFF_NOTE_v25.md`)
+- `artifacts/frontend-student/src/pages/Profile.tsx`
+- this file, replaced (previous version archived as `AI_HANDOFF_NOTE_v26.md`)

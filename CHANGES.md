@@ -1,3 +1,20 @@
+# Round 10 — what changed, by file
+
+See `AI_HANDOFF_NOTE.md` for the full writeup. Short version: (1) First
+Year past papers showing in Third Year accounts was legacy content never
+tagged with real year/degree targeting (`level` text label only) — added
+a "Fix year targeting" backfill button in Admin → Past papers
+(`past-papers.ts`, `AdminPastPapers.tsx`), same pattern as the existing
+books link-fix button; needs an admin to click it once. (2) Student
+Profile page not showing MBBS/BDS or year — `/auth/me` was reading legacy
+free-text columns registration never writes to, instead of resolving the
+real program/year from the foreign keys registration does set
+(`auth.ts`'s `userPublicView`); also added a profile picture upload to
+`Profile.tsx` (optional — the existing upload endpoint was already wired
+up for team photos, just never exposed to students).
+
+---
+
 # Round 9 — what changed, by file
 
 Same method/caveat as prior rounds: read end-to-end, `esbuild` syntax-checked

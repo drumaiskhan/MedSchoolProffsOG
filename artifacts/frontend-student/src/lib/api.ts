@@ -72,8 +72,16 @@ export interface Batch { id: number; academicYearId: number; label: string; acti
 export interface AuthUser {
   id: number; name: string; email: string; role: string; status: string; emailVerified: boolean;
   institution: string | null; program: string | null;
+  // Resolved from institutionId/programId/academicYearId server-side (see
+  // userPublicView in auth.ts) — programKind is "MBBS"/"BDS", academicYear
+  // is the display label (e.g. "3rd Year"), yearNumber is its plain 1-5
+  // number. `institution`/`program` above are also now resolved names, not
+  // the old blank legacy text columns; these three are additionally broken
+  // out since the page needs the year on its own.
+  programKind: string | null; academicYear: string | null; yearNumber: number | null;
   institutionId: number | null; programId: number | null; academicYearId: number | null; batchId: number | null;
   rollNumber: string | null; phone: string | null;
+  profilePicturePath: string | null; profilePictureUrl: string | null;
 }
 
 export interface PlatformSettings {
@@ -287,7 +295,7 @@ export const authApi = {
   forgotPassword: (email: string) => request<{ message: string }>('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),
   resetPassword: (token: string, password: string) => request<{ message: string }>('/auth/reset-password', { method: 'POST', body: JSON.stringify({ token, password }) }),
   changePassword: (currentPassword: string, newPassword: string) => request<{ message: string }>('/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) }),
-  updateMe: (body: { name?: string; phone?: string; email?: string; currentPassword?: string }) => request<AuthUser>('/auth/me', { method: 'PATCH', body: JSON.stringify(body) }),
+  updateMe: (body: { name?: string; phone?: string; email?: string; currentPassword?: string; profilePicturePath?: string | null }) => request<AuthUser>('/auth/me', { method: 'PATCH', body: JSON.stringify(body) }),
 };
 
 export const notificationsApi = {

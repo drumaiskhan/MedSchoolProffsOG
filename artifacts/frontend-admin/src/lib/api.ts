@@ -552,6 +552,7 @@ export const pastPapersApi = {
   archive: (id: number) => request<{ ok: true }>(`/past-papers/${id}`, { method: 'DELETE' }),
   removePermanent: (id: number) => request<{ ok: true }>(`/past-papers/${id}/permanent`, { method: 'DELETE' }),
   attachMcqs: (id: number, mcqIds: number[]) => request<{ ok: true }>(`/past-papers/${id}/mcqs`, { method: 'POST', body: JSON.stringify({ mcqIds }) }),
+  backfillYearTargeting: () => request<{ fixed: number; skipped: number }>('/past-papers/backfill-year-targeting', { method: 'POST' }),
 };
 
 export const notebookApi = {

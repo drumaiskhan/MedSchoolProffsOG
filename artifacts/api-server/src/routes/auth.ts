@@ -29,6 +29,7 @@ import { checkRateLimit } from "../lib/rateLimit";
 import { requireAuth } from "../middlewares/auth";
 import { getSetting } from "../lib/settings";
 import { getPublicAppUrl } from "../lib/publicAppUrl";
+import { resolveFileUrl } from "../lib/storage";
 
 const router: IRouter = Router();
 
@@ -41,7 +42,22 @@ const APP_URL = getPublicAppUrl();
 const MAX_LOGIN_ATTEMPTS = 8;
 const LOCKOUT_MS = 15 * 60 * 1000;
 
-function userPublicView(user: typeof usersTable.$inferSelect) {
+// Bug fix: this used to return the legacy free-text `institution`/`program`
+// columns, which registration (see /auth/register below) never actually
+// writes to — it only sets institutionId/programId/academicYearId, the
+// proper FK trio. Every student who signed up through the current
+// registration flow therefore had a blank Institution/Programme on their
+// profile page (and in every other place that read those same two
+// columns), even though they'd picked a real college, MBBS/BDS, and year
+// at signup. Now resolves the real names from the FKs, with the legacy
+// text columns kept only as a fallback for any pre-existing row that has
+// them but no FK set. Also now includes the student's academic year
+// (number + label, e.g. 3 / "3rd Year") and their profile picture, neither
+// of which this response exposed at all before.
+async function userPublicView(user: typeof usersTable.$inferSelect) {
+  const [institution] = user.institutionId ? await db.select().from(institutionsTable).where(eq(institutionsTable.id, user.institutionId)) : [];
+  const [program] = user.programId ? await db.select().from(programsTable).where(eq(programsTable.id, user.programId)) : [];
+  const [academicYear] = user.academicYearId ? await db.select().from(academicYearsTable).where(eq(academicYearsTable.id, user.academicYearId)) : [];
   return {
     id: user.id,
     name: user.name,
@@ -49,14 +65,19 @@ function userPublicView(user: typeof usersTable.$inferSelect) {
     role: user.role,
     status: user.status,
     emailVerified: user.emailVerified,
-    institution: user.institution,
-    program: user.program,
+    institution: institution?.name ?? user.institution,
+    program: program?.kind ?? user.program,
+    programKind: program?.kind ?? null,
+    academicYear: academicYear?.label ?? null,
+    yearNumber: academicYear?.yearNumber ?? null,
     institutionId: user.institutionId,
     programId: user.programId,
     academicYearId: user.academicYearId,
     batchId: user.batchId,
     rollNumber: user.rollNumber,
     phone: user.phone,
+    profilePicturePath: user.profilePicturePath,
+    profilePictureUrl: resolveFileUrl(user.profilePicturePath),
   };
 }
 
@@ -190,7 +211,7 @@ router.post("/auth/register", async (req, res): Promise<void> => {
 
   await db.insert(auditLogsTable).values({ actorId: created.id, action: "USER_REGISTERED", entity: "user", entityId: created.id });
 
-  res.status(201).json({ user: userPublicView(created), message: "Account created and payment submitted. Please verify your email — an admin will review your payment shortly and activate your access." });
+  res.status(201).json({ user: await userPublicView(created), message: "Account created and payment submitted. Please verify your email — an admin will review your payment shortly and activate your access." });
 });
 
 // ---------------------------------------------------------------------------
@@ -247,7 +268,7 @@ router.post("/auth/admin/register", async (req, res): Promise<void> => {
   await db.insert(auditLogsTable).values({ actorId: created.id, action: "ADMIN_REGISTERED", entity: "user", entityId: created.id });
 
   const token = setSessionCookie(res, created);
-  res.status(201).json({ token, user: userPublicView(created) });
+  res.status(201).json({ token, user: await userPublicView(created) });
 });
 
 // ---------------------------------------------------------------------------
@@ -304,7 +325,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
   await db.update(usersTable).set({ failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() }).where(eq(usersTable.id, user.id));
 
   const token = setSessionCookie(res, user);
-  res.json({ token, user: userPublicView(user) });
+  res.json({ token, user: await userPublicView(user) });
 });
 
 router.post("/auth/logout", (_req, res): void => {
@@ -318,7 +339,7 @@ router.get("/auth/me", requireAuth, async (req, res): Promise<void> => {
     res.status(404).json({ error: "User not found" });
     return;
   }
-  res.json(userPublicView(user));
+  res.json(await userPublicView(user));
 });
 
 const UpdateMeSchema = z.object({
@@ -328,6 +349,12 @@ const UpdateMeSchema = z.object({
   // Required only when changing email — a stolen session shouldn't be able
   // to silently take over the account's login identity.
   currentPassword: z.string().optional(),
+  // Optional profile picture — the storagePath returned by
+  // POST /uploads/profile-picture. Deliberately optional everywhere: this
+  // schema field, the upload UI in Profile.tsx, and the column itself are
+  // all nullable, so a student can use the app fully without ever setting
+  // one. Pass an empty string to remove an existing picture.
+  profilePicturePath: z.string().max(500).nullable().optional(),
 });
 
 router.patch("/auth/me", requireAuth, async (req, res): Promise<void> => {
@@ -336,9 +363,12 @@ router.patch("/auth/me", requireAuth, async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid request" });
     return;
   }
-  const { email, currentPassword, ...rest } = parsed.data;
+  const { email, currentPassword, profilePicturePath, ...rest } = parsed.data;
 
   const updates: Partial<typeof usersTable.$inferInsert> = { ...rest };
+  // Empty string from the "remove photo" action means clear it, not
+  // literally store "" as the path.
+  if (profilePicturePath !== undefined) updates.profilePicturePath = profilePicturePath || null;
 
   if (email !== undefined) {
     const normalizedEmail = email.toLowerCase().trim();
@@ -360,7 +390,7 @@ router.patch("/auth/me", requireAuth, async (req, res): Promise<void> => {
     res.status(404).json({ error: "User not found" });
     return;
   }
-  res.json(userPublicView(user));
+  res.json(await userPublicView(user));
 });
 
 // ---------------------------------------------------------------------------
