@@ -12,7 +12,7 @@ import {
   TrendingUp, Users, X, Zap, Bell, SlidersHorizontal, FileStack, NotebookPen, Bookmark,
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
   GraduationCap, CalendarDays, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
-  RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Wand2, Activity, Layers, BarChart3, GraduationCap, ToggleLeft,
+  RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Wand2, Layers, BarChart3, ToggleLeft,
   Download, Database, Loader2, GripVertical
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
@@ -69,10 +69,29 @@ export function ConfirmDialog({ title, body, confirmLabel = 'Delete', onConfirm,
   return <div className="fixed inset-0 z-[60] grid place-items-center bg-black/40 p-4 animate-in fade-in duration-200" onClick={onCancel}><div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-2xl animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-200"><h3 className="font-bold">{title}</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">{body}</p><div className="mt-5 flex gap-2"><button onClick={onCancel} className="flex-1 rounded-xl border border-border py-2.5 text-xs font-bold transition-transform active:scale-95" data-testid="button-confirm-cancel">Cancel</button><button onClick={onConfirm} disabled={pending} className="flex-1 rounded-xl bg-destructive py-2.5 text-xs font-extrabold text-destructive-foreground transition-transform active:scale-95 disabled:opacity-50" data-testid="button-confirm-delete">{pending ? 'Deleting…' : confirmLabel}</button></div></div></div>;
 }
 
+// Matches the student app's Logo (see its shared.tsx) — a pulsing
+// waveform mark plus a continuously shimmering wordmark, instead of a
+// static Lucide icon and flat-coloured text with no animation at all.
+export function AnimatedBrandMark({ size = 20, className = '' }: { size?: number; className?: string }) {
+  return <svg width={size} height={size * 0.625} viewBox="0 0 64 40" aria-hidden="true" className={cn('shrink-0', className)}>
+    <style>{`@keyframes admin-brand-mark-pulse { 0% { stroke-dashoffset: 190; opacity: .55; } 55% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: -190; opacity: .55; } }`}</style>
+    <path d="M2 20 H14 L19 6 L27 34 L33 12 L38 20 H62" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" style={{ strokeDasharray: 190, strokeDashoffset: 190, animation: 'admin-brand-mark-pulse 1.7s ease-in-out infinite' }} />
+  </svg>;
+}
+
 export function Logo({ dark = false }: { dark?: boolean }) {
-  return <Link href="/" className="flex items-center gap-2" data-testid="link-logo">
-    <Activity size={20} strokeWidth={2.4} className={dark ? 'text-sidebar-primary' : 'text-primary'} aria-hidden="true" />
-    <span className={cn('text-[15px] font-extrabold tracking-[-.03em]', dark ? 'text-sidebar-foreground' : 'text-primary')}>MedschoolProffs</span>
+  return <Link href="/" className="group flex items-center gap-2" data-testid="link-logo">
+    <style>{`@keyframes admin-brand-text-shimmer { 0% { background-position: 200% 0; } 50% { background-position: 0% 0; } 100% { background-position: -200% 0; } }`}</style>
+    <AnimatedBrandMark size={20} className={dark ? 'text-sidebar-primary' : 'text-primary'} />
+    <span
+      className={cn(
+        'bg-clip-text text-[15px] font-extrabold tracking-[-.03em] text-transparent transition-[animation-duration] duration-300 ease-out group-hover:![animation-duration:1.1s]',
+        dark
+          ? 'bg-[linear-gradient(100deg,hsl(var(--sidebar-foreground))_20%,#2dd9c4_50%,hsl(var(--sidebar-foreground))_80%)]'
+          : 'bg-[linear-gradient(100deg,hsl(var(--primary))_20%,#2dd9c4_50%,hsl(var(--primary))_80%)]',
+      )}
+      style={{ backgroundSize: '250% 100%', animation: 'admin-brand-text-shimmer 3.4s ease-in-out infinite' }}
+    >MedschoolProffs</span>
   </Link>;
 }
 
@@ -1604,7 +1623,9 @@ export function PastPaperEditForm({ paper, onSave, onCancel, saving, collegeOpti
   const composedLevel = [formDegree, formStudyYear].filter(Boolean).join(' - ');
 
   return <form onSubmit={(e) => {
-    e.preventDefault(); const f = new FormData(e.currentTarget);
+    e.preventDefault();
+    if (!formDegree || !formStudyYear) { toast({ title: 'Degree and year required', description: 'Pick both so this paper only shows to the right students — leaving them blank makes it visible to every year.', variant: 'destructive' }); return; }
+    const f = new FormData(e.currentTarget);
     const programId = f.get('programId') ? Number(f.get('programId')) : null;
     const academicYearId = f.get('academicYearId') ? Number(f.get('academicYearId')) : null;
     onSave({
@@ -1619,23 +1640,24 @@ export function PastPaperEditForm({ paper, onSave, onCancel, saving, collegeOpti
     <input name="year" defaultValue={paper.year} placeholder="Year, e.g. 2024" className="h-11 rounded-xl border border-border bg-card px-3 text-xs outline-none transition-shadow focus:ring-2 focus:ring-primary/25" data-testid={`input-edit-paper-year-${paper.id}`} />
 
     <div className="rounded-xl border-2 border-primary/40 bg-card/70 p-3 md:col-span-4">
-      <p className="mb-2.5 text-[10px] font-extrabold uppercase tracking-[.08em] text-primary">Degree &amp; year (shown to students)</p>
+      <p className="mb-2.5 text-[10px] font-extrabold uppercase tracking-[.08em] text-primary">Degree &amp; year (shown to students) — required</p>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block">
           <span className="mb-1.5 block text-[11px] font-bold text-muted-foreground">Degree</span>
-          <select value={formDegree} onChange={(e) => { setFormDegree(e.target.value); setFormStudyYear(''); }} className="h-11 w-full rounded-xl border border-border bg-card px-3 text-xs font-semibold outline-none transition-shadow focus:ring-2 focus:ring-primary/25" data-testid={`select-edit-paper-degree-${paper.id}`}>
+          <select required value={formDegree} onChange={(e) => { setFormDegree(e.target.value); setFormStudyYear(''); }} className="h-11 w-full rounded-xl border border-border bg-card px-3 text-xs font-semibold outline-none transition-shadow focus:ring-2 focus:ring-primary/25" data-testid={`select-edit-paper-degree-${paper.id}`}>
             <option value="">Select degree…</option>
             {DEGREE_OPTIONS.map((d) => <option key={d} value={d}>{d}</option>)}
           </select>
         </label>
         <label className="block">
           <span className="mb-1.5 block text-[11px] font-bold text-muted-foreground">Year</span>
-          <select value={formStudyYear} onChange={(e) => setFormStudyYear(e.target.value)} disabled={!formDegree} className="h-11 w-full rounded-xl border border-border bg-card px-3 text-xs font-semibold outline-none transition-shadow focus:ring-2 focus:ring-primary/25 disabled:opacity-50" data-testid={`select-edit-paper-study-year-${paper.id}`}>
+          <select required value={formStudyYear} onChange={(e) => setFormStudyYear(e.target.value)} disabled={!formDegree} className="h-11 w-full rounded-xl border border-border bg-card px-3 text-xs font-semibold outline-none transition-shadow focus:ring-2 focus:ring-primary/25 disabled:opacity-50" data-testid={`select-edit-paper-study-year-${paper.id}`}>
             <option value="">{formDegree ? 'Select year…' : 'Pick a degree first'}</option>
             {(DEGREE_YEAR_OPTIONS[formDegree] || []).map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
         </label>
       </div>
+      <p className="mt-2 text-[11px] font-semibold text-[#8a5a12]">Both are required — leaving either blank makes this paper visible to every year, which is the bug this fixes.</p>
     </div>
 
     <select name="programId" value={formProgramId} onChange={(e) => setFormProgramId(e.target.value)} className="h-11 rounded-xl border border-border bg-card px-3 text-xs outline-none transition-shadow focus:ring-2 focus:ring-primary/25 md:col-span-2" data-testid={`select-edit-paper-program-${paper.id}`}><option value="">All programs (advanced targeting, optional)</option>{(programsQ.data || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>

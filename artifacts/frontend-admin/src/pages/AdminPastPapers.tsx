@@ -10,7 +10,7 @@ import {
   TrendingUp, Users, X, Zap, Bell, SlidersHorizontal, FileStack, NotebookPen, Bookmark,
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
   GraduationCap, CalendarDays, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
-  RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Wand2, Activity, Layers, BarChart3, GraduationCap, ToggleLeft,
+  RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Wand2, Activity, Layers, BarChart3, ToggleLeft,
   Download, Database, Loader2
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
@@ -103,7 +103,7 @@ function AdminPastPapers() {
 
   return <div><SectionHeader eyebrow="Content" title="Past papers" action={<div className="flex gap-2"><button onClick={() => backfillYearTargeting.mutate()} disabled={backfillYearTargeting.isPending} className="inline-flex items-center gap-2 rounded-xl border border-border px-4 py-2.5 text-xs font-extrabold text-muted-foreground hover:text-foreground disabled:opacity-50" data-testid="button-backfill-paper-year-targeting" title="Fix old papers whose Level label (e.g. &quot;MBBS - 1st Year&quot;) was never turned into real year/degree targeting, so they show up for every year">{backfillYearTargeting.isPending ? 'Checking…' : 'Fix year targeting'}</button><button onClick={() => setOpen(true)} className="btn-pop inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground shadow-sm" data-testid="button-create-paper"><Plus size={15} /> Add paper</button></div>} />
     <datalist id="past-paper-college-options">{collegeOptions.map((c) => <option key={c} value={c} />)}</datalist>
-    {open && <form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); const programId = f.get('programId') ? Number(f.get('programId')) : undefined; const academicYearId = f.get('academicYearId') ? Number(f.get('academicYearId')) : undefined; const level = String(f.get('level') || '') || composedLevel; create.mutate({ title: String(f.get('title')), examBoard: String(f.get('examBoard') || ''), year: String(f.get('year') || ''), level, programId, academicYearId, programTargetKind: formDegree || null, yearTargetNumber: studyYearToNumber(formDegree, formStudyYear) ?? null, active: true }, { onSuccess: resetForm }); }} className="mb-5 grid gap-3 rounded-2xl border border-primary/30 bg-[#eef7f1] p-4 sm:p-5 md:grid-cols-4">
+    {open && <form onSubmit={(e) => { e.preventDefault(); if (!formDegree || !formStudyYear) { toast({ title: 'Degree and year required', description: 'Pick both so this paper only shows to the right students — leaving them blank is what made First Year papers show up for Third Year.', variant: 'destructive' }); return; } const f = new FormData(e.currentTarget); const programId = f.get('programId') ? Number(f.get('programId')) : undefined; const academicYearId = f.get('academicYearId') ? Number(f.get('academicYearId')) : undefined; const level = String(f.get('level') || '') || composedLevel; create.mutate({ title: String(f.get('title')), examBoard: String(f.get('examBoard') || ''), year: String(f.get('year') || ''), level, programId, academicYearId, programTargetKind: formDegree || null, yearTargetNumber: studyYearToNumber(formDegree, formStudyYear) ?? null, active: true }, { onSuccess: resetForm }); }} className="mb-5 grid gap-3 rounded-2xl border border-primary/30 bg-[#eef7f1] p-4 sm:p-5 md:grid-cols-4">
       <input required name="title" placeholder="Paper title, e.g. Block A" className="h-11 rounded-xl border border-border bg-card px-3 text-xs outline-none transition-shadow focus:ring-2 focus:ring-primary/25 md:col-span-2" data-testid="input-paper-title" />
       <input name="examBoard" list="past-paper-college-options" placeholder="College, e.g. KMU" className="h-11 rounded-xl border border-border bg-card px-3 text-xs outline-none transition-shadow focus:ring-2 focus:ring-primary/25" data-testid="input-paper-board" />
       <input name="year" placeholder="Year, e.g. 2024" className="h-11 rounded-xl border border-border bg-card px-3 text-xs outline-none transition-shadow focus:ring-2 focus:ring-primary/25" data-testid="input-paper-year" />
@@ -115,23 +115,29 @@ function AdminPastPapers() {
           students and used for filtering — no academic structure setup
           required first. */}
       <div className="rounded-xl border-2 border-primary/40 bg-card/70 p-3 md:col-span-4">
-        <p className="mb-2.5 text-[10px] font-extrabold uppercase tracking-[.08em] text-primary">Degree &amp; year (shown to students)</p>
+        <p className="mb-2.5 text-[10px] font-extrabold uppercase tracking-[.08em] text-primary">Degree &amp; year (shown to students) — required</p>
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="block">
             <span className="mb-1.5 block text-[11px] font-bold text-muted-foreground">Degree</span>
-            <select name="degree" value={formDegree} onChange={(e) => { setFormDegree(e.target.value); setFormStudyYear(''); }} className="h-11 w-full rounded-xl border border-border bg-card px-3 text-xs font-semibold outline-none transition-shadow focus:ring-2 focus:ring-primary/25" data-testid="select-paper-degree">
+            <select required name="degree" value={formDegree} onChange={(e) => { setFormDegree(e.target.value); setFormStudyYear(''); }} className="h-11 w-full rounded-xl border border-border bg-card px-3 text-xs font-semibold outline-none transition-shadow focus:ring-2 focus:ring-primary/25" data-testid="select-paper-degree">
               <option value="">Select degree…</option>
               {DEGREE_OPTIONS.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
           </label>
           <label className="block">
             <span className="mb-1.5 block text-[11px] font-bold text-muted-foreground">Year</span>
-            <select value={formStudyYear} onChange={(e) => setFormStudyYear(e.target.value)} disabled={!formDegree} className="h-11 w-full rounded-xl border border-border bg-card px-3 text-xs font-semibold outline-none transition-shadow focus:ring-2 focus:ring-primary/25 disabled:opacity-50" data-testid="select-paper-study-year">
+            <select required value={formStudyYear} onChange={(e) => setFormStudyYear(e.target.value)} disabled={!formDegree} className="h-11 w-full rounded-xl border border-border bg-card px-3 text-xs font-semibold outline-none transition-shadow focus:ring-2 focus:ring-primary/25 disabled:opacity-50" data-testid="select-paper-study-year">
               <option value="">{formDegree ? 'Select year…' : 'Pick a degree first'}</option>
               {(DEGREE_YEAR_OPTIONS[formDegree] || []).map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
           </label>
         </div>
+        {/* Leaving either of these blank is exactly what made a First Year
+            paper show up in every other year's account — a blank axis
+            means "visible to everyone" on that axis (see past-papers.ts).
+            Both are now required so a new paper can't be saved untargeted
+            by accident. */}
+        <p className="mt-2 text-[11px] font-semibold text-[#8a5a12]">Both are required — leaving either blank makes this paper visible to every year, which is the bug this fixes.</p>
       </div>
 
       <select name="programId" value={formProgramId} onChange={(e) => setFormProgramId(e.target.value)} className="h-11 rounded-xl border border-border bg-card px-3 text-xs outline-none transition-shadow focus:ring-2 focus:ring-primary/25 md:col-span-2" data-testid="select-paper-program"><option value="">All programs (advanced targeting, optional)</option>{(programsQ.data || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>

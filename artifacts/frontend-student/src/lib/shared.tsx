@@ -170,17 +170,29 @@ export function ConfirmDialog({ title, body, confirmLabel = 'Delete', onConfirm,
   return <div className="fixed inset-0 z-[60] grid place-items-center bg-black/40 p-4" onClick={onCancel}><div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-2xl"><h3 className="font-bold">{title}</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">{body}</p><div className="mt-5 flex gap-2"><button onClick={onCancel} className="flex-1 rounded-xl border border-border py-2.5 text-xs font-bold" data-testid="button-confirm-cancel">Cancel</button><button onClick={onConfirm} disabled={pending} className="flex-1 rounded-xl bg-destructive py-2.5 text-xs font-extrabold text-destructive-foreground disabled:opacity-50" data-testid="button-confirm-delete">{pending ? 'Deleting…' : confirmLabel}</button></div></div></div>;
 }
 
+// The wordmark used to only shimmer on :hover (group-hover:[background-
+// position:0%]) — which never fires on a touch device, so on phones/
+// tablets it just sat frozen on whichever frame backgroundPosition:100%
+// happened to land on (mostly plain foreground colour, no visible teal).
+// It now animates continuously via the same kind of CSS keyframe the
+// AnimatedBrandMark icon next to it already uses, so the colour sweep is
+// always visible — hover still speeds it up as a nice-to-have, it's no
+// longer required to see it move at all. Explicit teal (#2dd9c4, matching
+// AnimatedBrandMark/BootScreen) is blended into the gradient so the text
+// keeps a visible brand colour instead of relying solely on CSS vars that
+// can render as a flat neutral at rest.
 export function Logo({ dark = false, href = '/' }: { dark?: boolean; href?: string }) {
   return <Link href={href} className="group flex items-center gap-2" data-testid="link-logo">
+    <style>{`@keyframes brand-text-shimmer { 0% { background-position: 200% 0; } 50% { background-position: 0% 0; } 100% { background-position: -200% 0; } }`}</style>
     <AnimatedBrandMark size={22} className={dark ? 'text-sidebar-primary' : 'text-primary'} />
     <span
       className={cn(
-        'bg-clip-text text-[15px] font-extrabold tracking-[-.03em] text-transparent transition-[background-position] duration-700 ease-out group-hover:[background-position:0%]',
+        'bg-clip-text text-[15px] font-extrabold tracking-[-.03em] text-transparent transition-[animation-duration] duration-300 ease-out group-hover:![animation-duration:1.1s]',
         dark
-          ? 'bg-[linear-gradient(100deg,hsl(var(--sidebar-foreground))_35%,hsl(var(--sidebar-primary))_50%,hsl(var(--sidebar-foreground))_65%)]'
-          : 'bg-[linear-gradient(100deg,hsl(var(--primary))_35%,hsl(var(--accent))_50%,hsl(var(--primary))_65%)]',
+          ? 'bg-[linear-gradient(100deg,hsl(var(--sidebar-foreground))_20%,#2dd9c4_50%,hsl(var(--sidebar-foreground))_80%)]'
+          : 'bg-[linear-gradient(100deg,hsl(var(--primary))_20%,#2dd9c4_50%,hsl(var(--primary))_80%)]',
       )}
-      style={{ backgroundSize: '250% 100%', backgroundPosition: '100%' }}
+      style={{ backgroundSize: '250% 100%', animation: 'brand-text-shimmer 3.4s ease-in-out infinite' }}
     >MedschoolProffs</span>
   </Link>;
 }
