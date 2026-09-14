@@ -52,7 +52,7 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // invalidateQueries after a save) already set their own options, which
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
-import { AuthLayout, IconField, PasswordStrength, cn, money } from '@/lib/shared';
+import { AuthLayout, IconField, PasswordStrength, cn, money, BrandSpinner, PaymentDestinationCard } from '@/lib/shared';
 
 function Register() {
   const [institutionId, setInstitutionId] = useState('');

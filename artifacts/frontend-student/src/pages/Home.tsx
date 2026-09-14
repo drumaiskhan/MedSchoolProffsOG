@@ -16,7 +16,7 @@ import { useGetCurrentUser, getGetCurrentUserQueryKey, useListMembershipPlans } 
 import type { MembershipPlan } from '@workspace/api-client-react';
 import { siteContentApi } from '@/lib/api';
 import { useQuery } from '@tanstack/react-query';
-import { cn, Footer } from '@/lib/shared';
+import { cn, Footer, AnimatedBrandMark } from '@/lib/shared';
 
 const WHY_US = [
   { icon: GraduationCap, title: 'Every college, one bank', desc: 'MCQs organised by program, year, subject, and topic — MBBS and BDS, side by side.' },
@@ -65,7 +65,7 @@ export default function Home() {
     <header className="sticky top-0 z-30 border-b border-border/70 bg-background/90 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5 md:px-8">
         <Link href="/" className="flex items-center gap-2" data-testid="link-home-logo">
-          <TrendingUp size={20} strokeWidth={2.4} className="text-primary" aria-hidden="true" />
+          <AnimatedBrandMark size={22} className="text-primary" />
           <span className="text-[15px] font-extrabold tracking-[-.03em] text-primary">{platformName}</span>
         </Link>
         <nav className="hidden items-center gap-7 text-xs font-bold text-muted-foreground md:flex">

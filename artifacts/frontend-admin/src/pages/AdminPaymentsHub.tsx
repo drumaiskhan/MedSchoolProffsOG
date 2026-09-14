@@ -41,7 +41,8 @@ import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiReq
 // mutations already call invalidateQueries on the specific keys they
 // change, so edits still show up immediately — this only avoids redundant
 // background refetches of data nothing has touched.
-import { BankAccountsTab, CollectionDetailsTab, PAYMENT_TABS, PaymentMethodsTab, PaymentProofsTab, PaymentStatsTab, SectionHeader, cn } from '@/lib/shared';
+import { BankAccountsTab, CollectionDetailsTab, PAYMENT_TABS, PaymentMethodsTab, PaymentProofsTab, PaymentStatsTab, SectionHeader, cn, SetSetting } from '@/lib/shared';
+import { queryClient } from '@/lib/query-client';
 
 function AdminPaymentsHub({ initialTab }: { initialTab?: (typeof PAYMENT_TABS)[number] }) {
   const [tab, setTab] = useState<(typeof PAYMENT_TABS)[number]>(initialTab || 'Proof Review');

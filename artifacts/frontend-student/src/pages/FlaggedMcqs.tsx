@@ -53,6 +53,7 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
 import { EmptyState, SectionHeader, cn } from '@/lib/shared';
+import { queryClient } from '@/lib/query-client';
 
 function FlaggedMcqs() {
   const flags = useQuery({ queryKey: ['flagged-mcqs'], queryFn: flaggedMcqsApi.list });

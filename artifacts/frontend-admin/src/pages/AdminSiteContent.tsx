@@ -42,6 +42,7 @@ import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiReq
 // change, so edits still show up immediately — this only avoids redundant
 // background refetches of data nothing has touched.
 import { AdminImageUpload, ColorField, SectionHeader, cn } from '@/lib/shared';
+import { queryClient } from '@/lib/query-client';
 
 function AdminSiteContent() {
   const settingsQuery = useQuery({ queryKey: ['admin-settings'], queryFn: settingsApi.get });

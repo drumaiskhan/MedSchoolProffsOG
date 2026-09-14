@@ -41,7 +41,8 @@ import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiReq
 // mutations already call invalidateQueries on the specific keys they
 // change, so edits still show up immediately — this only avoids redundant
 // background refetches of data nothing has touched.
-import { AuthLayout } from '@/lib/shared';
+import { AuthLayout, BrandSpinner } from '@/lib/shared';
+import { queryClient } from '@/lib/query-client';
 
 function AdminSignup() {
   const [, setLocation] = useLocation();

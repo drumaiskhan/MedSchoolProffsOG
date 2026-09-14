@@ -37,6 +37,7 @@ import { StepControls } from '@/components/visualizer/StepControls';
 import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 import './index.css';
 import { Shell, SkeletonPage, FocusModeContext, PageTitleContext, useFaviconSync, useThemeSync } from '@/lib/shared';
+import { queryClient } from '@/lib/query-client';
 
 // Round 3, item 10 (performance) — this was `new QueryClient()` with no
 // options, meaning every query defaulted to `staleTime: 0` and refetched
@@ -53,7 +54,6 @@ import { Shell, SkeletonPage, FocusModeContext, PageTitleContext, useFaviconSync
 // invalidateQueries after a save) already set their own options, which
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
-const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false } } });
 
 // NOTE (perf pass): App.tsx used to define every page component inline
 // (2000+ lines, all shipped in one JS chunk on first load). Pages now

@@ -41,7 +41,8 @@ import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiReq
 // mutations already call invalidateQueries on the specific keys they
 // change, so edits still show up immediately — this only avoids redundant
 // background refetches of data nothing has touched.
-import { SectionHeader } from '@/lib/shared';
+import { SectionHeader, Badge, ConfirmDialog, EmptyState, ExamEditForm, ExamManagePanel, groupByDegreeYear } from '@/lib/shared';
+import { queryClient } from '@/lib/query-client';
 
 function AdminExams() {
   const q = useQuery({ queryKey: ['admin-exams'], queryFn: examsAdminApi.list });

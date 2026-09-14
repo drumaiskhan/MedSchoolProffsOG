@@ -52,7 +52,7 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // invalidateQueries after a save) already set their own options, which
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
-import { Badge, EmptyState, MODULE_TILE_COLORS, OPEN_SEARCH_EVENT, OPEN_SEARCH_HREF, PROGRESS_ANCHOR_HREF, Progress, QUICK_LINK_TILES, SectionHeader, SkeletonPage, cn, greetingForHour } from '@/lib/shared';
+import { Badge, EmptyState, MODULE_TILE_COLORS, OPEN_SEARCH_EVENT, OPEN_SEARCH_HREF, PROGRESS_ANCHOR_HREF, Progress, QUICK_LINK_TILES, SectionHeader, SkeletonPage, cn, greetingForHour, ProgressProfileCard, StatTile } from '@/lib/shared';
 
 function Dashboard() {
   const q = useGetStudentDashboard();

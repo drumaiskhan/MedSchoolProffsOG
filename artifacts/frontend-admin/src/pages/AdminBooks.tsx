@@ -42,6 +42,8 @@ import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiReq
 // change, so edits still show up immediately — this only avoids redundant
 // background refetches of data nothing has touched.
 import { CollapsibleGroup, ConfirmDialog, EmptyState, SectionHeader } from '@/lib/shared';
+import { queryClient } from '@/lib/query-client';
+import { renderPdfFirstPageThumbnail } from '@/lib/pdf-thumbnail';
 
 function AdminBooks() {
   const modulesQ = useListModules();

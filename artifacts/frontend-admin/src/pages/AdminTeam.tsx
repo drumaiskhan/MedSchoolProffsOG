@@ -42,6 +42,7 @@ import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiReq
 // change, so edits still show up immediately — this only avoids redundant
 // background refetches of data nothing has touched.
 import { ConfirmDialog, EmptyState, SectionHeader, TeamPhoto, cn } from '@/lib/shared';
+import { queryClient } from '@/lib/query-client';
 
 function AdminTeam() {
   const q = useQuery({ queryKey: ['admin-team'], queryFn: teamApi.listAll });

@@ -53,6 +53,7 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
 import { EmptyState, SectionHeader } from '@/lib/shared';
+import { queryClient } from '@/lib/query-client';
 
 function SavedSessions() {
   const sessions = useQuery({ queryKey: ['saved-sessions'], queryFn: savedSessionsApi.list });

@@ -35,6 +35,7 @@ import NotFound from '@/pages/not-found';
 import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, analyticsApi, mcqImportApi, flashcardImportApi, mcqBackupApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, subjectAdminApi, topicAdminApi, flashcardsAdminApi, flashcardsAiApi, booksAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blockAdminApi, examsAdminApi, examsApi, explanationsApi, auditApi, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type FlashcardCandidate, type StudentDetail, type SiteContent, type TeamMember, TEAM_CATEGORIES, TEAM_CATEGORY_LABELS, type TeamCategory, type AdminModule, type AdminBlock, type AdminSubject, type AdminTopic, type AdminFlashcard, type GeneratedFlashcard, type AdminMcqRow, type AdminBook, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type BankAccount, type PaymentMethodConfig, aiVisualizerAdminApi, type AiVisualizerLogEntry, type AuditLogEntry } from '@/lib/api';
 import './index.css';
 import { Shell, SkeletonPage, useFaviconSync, useThemeSync } from '@/lib/shared';
+import { queryClient } from '@/lib/query-client';
 
 // Round 3, item 10 (performance) — same over-fetching fix as the student
 // app (see its App.tsx for the full rationale): `new QueryClient()` with no
@@ -48,8 +49,6 @@ import { Shell, SkeletonPage, useFaviconSync, useThemeSync } from '@/lib/shared'
 // fetched. Shared chrome (Shell, SideNav, tree components, helper
 // hooks) lives in src/lib/shared.tsx and stays in the main bundle
 // since nearly every admin route needs it anyway.
-
-const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false } } });
 
 // Route-level code splitting: each admin page ships as its own chunk and
 // is only fetched when that route is actually visited.

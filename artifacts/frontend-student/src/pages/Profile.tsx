@@ -53,6 +53,7 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
 import { Badge, ErrorState, Footer, IconField, SectionHeader, SkeletonPage, TeamSection, initials } from '@/lib/shared';
+import { queryClient } from '@/lib/query-client';
 
 function Profile() {
   const q = useGetCurrentUser();

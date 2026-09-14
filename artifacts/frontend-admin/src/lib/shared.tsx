@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { applyThemeVars, DEFAULT_THEME, readableForegroundHsl } from '@/lib/theme';
+import { queryClient } from '@/lib/query-client';
 import {
   getListMembershipPlansQueryKey, getListPaymentsQueryKey, getListMcqsQueryKey, getListModulesQueryKey, getListStudentsQueryKey, getListNotificationsQueryKey, getGetCurrentUserQueryKey, getListFlashcardsQueryKey,
   useApprovePayment, useCreateMembershipPlan, useCreateMcq, useCreateModule, useGetAdminDashboard, getGetAdminDashboardQueryKey,
@@ -1248,6 +1249,12 @@ export function PasswordStrength({ value }: { value: string }) {
   const color = ['bg-destructive', 'bg-destructive', 'bg-[#e5a952]', 'bg-[#8bcbb8]', 'bg-primary'][score];
   return <div className="mt-2"><div className="flex gap-1">{[0, 1, 2, 3].map((i) => <div key={i} className={cn('h-1 flex-1 rounded-full transition-colors', i < score ? color : 'bg-muted')} />)}</div><div className="mt-1 text-[10px] font-semibold text-muted-foreground">{label}</div></div>;
 }
+
+// The admin-settings key/value bag (raw string values keyed by setting
+// name, e.g. PAYMENT_BANK_ACCOUNTS, PAYMENT_UPI_ID) and the setter the tabs
+// below call to stage an edit before "Save changes" persists it.
+export type PaymentSettingsValues = Record<string, string>;
+export type SetSetting = (key: string, value: string) => void;
 
 export const PAYMENT_METHODS: Array<{ value: string; label: string; icon: typeof Landmark }> = [
   { value: 'Bank transfer', label: 'Bank transfer', icon: Landmark },

@@ -52,7 +52,7 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // invalidateQueries after a save) already set their own options, which
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
-import { SectionHeader } from '@/lib/shared';
+import { SectionHeader, EmptyState, ExamCard } from '@/lib/shared';
 
 function Exams() {
   const [, setLocation] = useLocation();

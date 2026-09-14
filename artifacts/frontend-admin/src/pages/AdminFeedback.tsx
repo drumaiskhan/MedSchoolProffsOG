@@ -42,6 +42,7 @@ import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiReq
 // change, so edits still show up immediately — this only avoids redundant
 // background refetches of data nothing has touched.
 import { EmptyState, FeedbackThread, SectionHeader, cn } from '@/lib/shared';
+import { queryClient } from '@/lib/query-client';
 
 function AdminFeedback() {
   const feedback = useQuery({ queryKey: ['admin-feedback'], queryFn: feedbackApi.listAll });

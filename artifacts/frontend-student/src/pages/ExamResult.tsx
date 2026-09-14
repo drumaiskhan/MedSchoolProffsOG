@@ -52,7 +52,7 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // invalidateQueries after a save) already set their own options, which
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
-import { SkeletonPage, usePageTitle } from '@/lib/shared';
+import { SkeletonPage, usePageTitle, Badge, cn } from '@/lib/shared';
 
 function ExamResult() {
   const params = useParams();

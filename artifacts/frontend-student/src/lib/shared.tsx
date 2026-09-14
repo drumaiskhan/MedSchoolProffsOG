@@ -16,6 +16,7 @@ import {
   LayoutGrid, Presentation, Wand2, Crown, Globe, Star, Activity
 } from 'lucide-react';
 import { applyThemeVars } from '@/lib/theme';
+import { queryClient } from '@/lib/query-client';
 import {
   getListMembershipPlansQueryKey, getListPaymentsQueryKey, getListMcqsQueryKey, getListModulesQueryKey, getListStudentsQueryKey, getListNotificationsQueryKey, getGetCurrentUserQueryKey,
   useApprovePayment, useCreateMembershipPlan, useCreateMcq, useCreateModule, useGetAdminDashboard,
@@ -399,6 +400,17 @@ export function BrandSpinner({ size = 16, className = '' }: { size?: number; cla
 
 export function InlineLoading({ label = 'Loading…', size = 13 }: { label?: string; size?: number }) {
   return <div className="flex items-center gap-2 py-2 text-[11px] font-semibold text-primary"><BrandSpinner size={size} />{label}</div>;
+}
+
+// Animated version of the brand mark (same path + pulse keyframe as
+// BrandedLoadingScreen's boot animation) sized for inline use next to a
+// wordmark — e.g. the marketing site's nav logo — rather than as a
+// full-screen loading state.
+export function AnimatedBrandMark({ size = 22, className = '' }: { size?: number; className?: string }) {
+  return <svg width={size} height={size * 0.625} viewBox="0 0 64 40" aria-hidden="true" className={cn('shrink-0', className)}>
+    <style>{`@keyframes brand-mark-pulse { 0% { stroke-dashoffset: 190; opacity: .55; } 55% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: -190; opacity: .55; } }`}</style>
+    <path d="M2 20 H14 L19 6 L27 34 L33 12 L38 20 H62" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" style={{ strokeDasharray: 190, strokeDashoffset: 190, animation: 'brand-mark-pulse 1.7s ease-in-out infinite' }} />
+  </svg>;
 }
 
 export function SkeletonPage() { return <div className="space-y-5"><div className="flex items-center gap-2 text-primary"><BrandSpinner size={22} /><span className="text-[11px] font-bold uppercase tracking-[.1em]">Loading</span></div><div className="skeleton h-8 w-56 rounded-lg" /><div className="grid gap-4 md:grid-cols-3"><div className="skeleton h-32 rounded-2xl" /><div className="skeleton h-32 rounded-2xl" /><div className="skeleton h-32 rounded-2xl" /></div><div className="skeleton h-72 rounded-2xl" /></div>; }

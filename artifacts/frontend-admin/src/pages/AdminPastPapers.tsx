@@ -41,7 +41,8 @@ import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiReq
 // mutations already call invalidateQueries on the specific keys they
 // change, so edits still show up immediately — this only avoids redundant
 // background refetches of data nothing has touched.
-import { DEGREE_OPTIONS, DEGREE_YEAR_OPTIONS, McqTreeModule, SectionHeader, groupByDegreeYear, studyYearToNumber } from '@/lib/shared';
+import { DEGREE_OPTIONS, DEGREE_YEAR_OPTIONS, McqTreeModule, SectionHeader, groupByDegreeYear, studyYearToNumber, BrandSpinner, CollapsibleGroup, ConfirmDialog, EmptyState, PastPaperEditForm, PastPaperQuestionsList, PastPaperUploader, cn } from '@/lib/shared';
+import { queryClient } from '@/lib/query-client';
 
 function AdminPastPapers() {
   const papers = useQuery({ queryKey: ['admin-past-papers'], queryFn: () => pastPapersApi.list() });
