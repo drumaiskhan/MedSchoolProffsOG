@@ -11,7 +11,7 @@ import {
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
   GraduationCap, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
   RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Link2 as LinkIcon, Lightbulb,
-  LayoutGrid, Presentation, Wand2, Crown, Globe, Star, Activity
+  LayoutGrid, Presentation, Wand2, Crown, Globe, Star, Activity, Shuffle
 } from 'lucide-react';
 import { applyThemeVars } from '@/lib/theme';
 import {
@@ -89,8 +89,17 @@ function Practice() {
   // choice sticks even if they flip between Timer/Timeless and back.
   const [customMinutes, setCustomMinutes] = useState<number | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState(0);
+  // "Shuffle question order" toggle on the setup screen — off by default so
+  // the set stays in its curated/syllabus order unless the student opts in.
+  const [shuffleQuestions, setShuffleQuestions] = useState(false);
+  // The order actually being played this session, locked in once Start is
+  // pressed (see the setup screen below) so the question navigator grid
+  // stays stable across answers/prev/next even if shuffle is on. null before
+  // a session starts, meaning "use the server order".
+  const [orderedMcqs, setOrderedMcqs] = useState<Mcq[] | null>(null);
   const mcqs: Mcq[] = q.data ?? [];
-  const current = mcqs[index];
+  const activeMcqs = orderedMcqs ?? mcqs;
+  const current = activeMcqs[index];
   // Focus mode: on for the duration of an active session (mode chosen,
   // not yet finished) — off during setup and on the results screen.
   useFocusMode(mode !== null && !finished);
@@ -112,15 +121,15 @@ function Practice() {
   // but the hook itself must still be declared unconditionally every render.
   const askAi = useMutation({ mutationFn: () => explanationsApi.askAi(current!.id) });
   const answeredCount = Object.values(answers).filter((v) => v != null).length;
-  const percentAnswered = mcqs.length ? Math.round((answeredCount / mcqs.length) * 100) : 0;
+  const percentAnswered = activeMcqs.length ? Math.round((answeredCount / activeMcqs.length) * 100) : 0;
 
   const finishSession = () => {
-    const sessionAnswers = mcqs.map((m) => ({ mcqId: m.id, selectedAnswer: answers[m.id] ?? null })).filter((a) => a.selectedAnswer != null);
+    const sessionAnswers = activeMcqs.map((m) => ({ mcqId: m.id, selectedAnswer: answers[m.id] ?? null })).filter((a) => a.selectedAnswer != null);
     const durationSeconds = Math.max(0, Math.round((Date.now() - sessionStartRef.current) / 1000));
     if (sessionAnswers.length) submitAnswer.mutate({ topicId, answers: sessionAnswers, durationSeconds, mode: mode ?? undefined });
     setFinished(true);
   };
-  const restartSession = () => { setIndex(0); setAnswers({}); setFlaggedIds(new Set()); setSavedIds(new Set()); setPanel(null); setPaused(false); setFinished(false); setMode(null); setRemainingSeconds(0); setPendingMode('timed'); setCustomMinutes(null); askAi.reset(); };
+  const restartSession = () => { setIndex(0); setAnswers({}); setFlaggedIds(new Set()); setSavedIds(new Set()); setPanel(null); setPaused(false); setFinished(false); setMode(null); setRemainingSeconds(0); setPendingMode('timed'); setCustomMinutes(null); setOrderedMcqs(null); askAi.reset(); };
 
   useEffect(() => {
     if (mode !== 'timed' || finished || paused) return;
@@ -138,52 +147,106 @@ function Practice() {
   if (q.isLoading) return <SkeletonPage />;
 
   if (finished) {
-    return <div className="max-w-6xl"><SectionHeader eyebrow="Daily practice" title="Session complete" /><PracticeResultCard mcqs={mcqs} answers={answers} onRestart={restartSession} backHref={pastPaperId ? '/past-papers' : '/blocks'} backLabel={pastPaperId ? 'Back to past papers' : 'Back to blocks'} /></div>;
+    return <div className="max-w-6xl"><SectionHeader eyebrow="Daily practice" title="Session complete" /><PracticeResultCard mcqs={activeMcqs} answers={answers} onRestart={restartSession} backHref={pastPaperId ? '/past-papers' : '/blocks'} backLabel={pastPaperId ? 'Back to past papers' : 'Back to blocks'} /></div>;
   }
 
   if (!mode) {
-    const autoMinutes = Math.max(1, Math.round(mcqs.length * 1.5));
+    // 1 minute per question — standard board-exam pacing (was 1.5min/q).
+    const autoMinutes = Math.max(1, mcqs.length);
     const effectiveMinutes = customMinutes ?? autoMinutes;
-    return <div className="mx-auto max-w-lg"><SectionHeader eyebrow="Daily practice" title="Before you start" />
-      <div className="rounded-3xl border border-border bg-card p-6 text-center md:p-9">
-        <div className="mx-auto grid size-12 place-items-center rounded-full bg-[#eef7f1] text-primary"><Clock3 size={22} /></div>
-        <h2 className="mt-5 font-display text-xl">How do you want to practice?</h2>
-        <p className="mt-2 text-xs text-muted-foreground">{mcqs.length} question{mcqs.length === 1 ? '' : 's'} in this set.</p>
-        <div className="mt-7 grid gap-3 sm:grid-cols-2">
-          <button onClick={() => setPendingMode('timed')} className={cn('card-lift rounded-2xl border-2 p-5 text-left', pendingMode === 'timed' ? 'border-primary bg-[#eef7f1]' : 'border-border bg-card')} data-testid="button-mode-timed"><Clock3 size={18} className={pendingMode === 'timed' ? 'text-primary' : 'text-muted-foreground'} /><div className={cn('mt-3 text-sm font-extrabold', pendingMode === 'timed' && 'text-[#164b4b]')}>Timer</div><p className="mt-1 text-[11px] text-muted-foreground">Practice with a countdown, auto-submits when time runs out.</p></button>
-          <button onClick={() => setPendingMode('untimed')} className={cn('card-lift rounded-2xl border-2 p-5 text-left', pendingMode === 'untimed' ? 'border-primary bg-[#eef7f1]' : 'border-border bg-card')} data-testid="button-mode-untimed"><Target size={18} className={pendingMode === 'untimed' ? 'text-primary' : 'text-muted-foreground'} /><div className={cn('mt-3 text-sm font-extrabold', pendingMode === 'untimed' && 'text-[#164b4b]')}>Timeless</div><p className="mt-1 text-[11px] text-muted-foreground">No time limit — study at your own pace.</p></button>
+    const isAuto = customMinutes === null;
+    // Difficulty mix for this set, shown as quick chips on the hero so a
+    // student can gauge the set before committing — 'easy'/'moderate'/'hard'
+    // ordering when present, any other custom labels tacked on after.
+    const difficultyCounts = mcqs.reduce<Record<string, number>>((acc, m) => { const key = (m.difficulty || 'moderate').toLowerCase(); acc[key] = (acc[key] ?? 0) + 1; return acc; }, {});
+    const difficultyOrder = ['easy', 'moderate', 'hard'];
+    const difficultyEntries = Object.entries(difficultyCounts).sort(([a], [b]) => {
+      const ia = difficultyOrder.indexOf(a), ib = difficultyOrder.indexOf(b);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+    const finishClock = pendingMode === 'timed' ? new Date(Date.now() + effectiveMinutes * 60000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null;
+    const startSession = () => {
+      setOrderedMcqs(shuffleQuestions ? shuffleArray(mcqs) : mcqs);
+      setMode(pendingMode);
+      setRemainingSeconds(pendingMode === 'timed' ? effectiveMinutes * 60 : 0);
+      sessionStartRef.current = Date.now();
+    };
+    return <div className="mx-auto max-w-xl"><SectionHeader eyebrow="Daily practice" title="Before you start" />
+      <div className="overflow-hidden rounded-3xl border border-border bg-card">
+        {/* Hero strip — mirrors the dashboard's primary-color hero treatment
+            so this setup screen feels like part of the same app instead of a
+            plain form dropped in the middle of it. */}
+        <div className="relative overflow-hidden bg-primary px-6 py-8 text-center text-primary-foreground sm:px-9">
+          <div className="pointer-events-none absolute -right-10 -top-12 size-40 rounded-full bg-white/10" />
+          <div className="pointer-events-none absolute -bottom-16 -left-12 size-40 rounded-full bg-white/10" />
+          <div className="relative mx-auto grid size-14 place-items-center rounded-2xl bg-white/15 backdrop-blur"><Clock3 size={26} /></div>
+          <h2 className="relative mt-4 font-display text-2xl">How do you want to practice?</h2>
+          <p className="relative mt-2 text-xs text-primary-foreground/80">{mcqs.length} question{mcqs.length === 1 ? '' : 's'} in this set{pastPaperId ? ' · Past paper' : ''}.</p>
+          {difficultyEntries.length > 0 && <div className="relative mt-4 flex flex-wrap items-center justify-center gap-1.5">
+            {difficultyEntries.map(([diff, count]) => <span key={diff} className="inline-flex items-center gap-1 rounded-full bg-white/15 px-2.5 py-1 text-[10px] font-bold capitalize backdrop-blur" data-testid={`chip-difficulty-${diff}`}>{count} {diff}</span>)}
+          </div>}
         </div>
-        {pendingMode === 'timed' && <div className="mt-4 rounded-2xl border border-border bg-muted/40 p-4 text-left">
-          <div className="text-[11px] font-bold text-muted-foreground">Set your own time</div>
-          <div className="mt-2 flex items-center gap-2">
-            <button type="button" onClick={() => setCustomMinutes(Math.max(1, effectiveMinutes - 5))} className="grid size-9 shrink-0 place-items-center rounded-lg border border-border text-sm font-bold hover:bg-muted" data-testid="button-timer-minus" aria-label="Subtract 5 minutes">−</button>
-            <input
-              type="number"
-              min={1}
-              max={480}
-              value={effectiveMinutes}
-              onChange={(e) => setCustomMinutes(Math.max(1, Math.min(480, Number(e.target.value) || 1)))}
-              className="h-9 w-20 rounded-lg border border-border bg-background px-2 text-center text-sm font-mono-app font-bold"
-              data-testid="input-timer-minutes"
-            />
-            <span className="text-xs text-muted-foreground">minutes</span>
-            <button type="button" onClick={() => setCustomMinutes(Math.min(480, effectiveMinutes + 5))} className="grid size-9 shrink-0 place-items-center rounded-lg border border-border text-sm font-bold hover:bg-muted" data-testid="button-timer-plus" aria-label="Add 5 minutes">+</button>
+
+        <div className="p-6 sm:p-9">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <button onClick={() => setPendingMode('timed')} className={cn('card-lift relative rounded-2xl border-2 p-5 text-left transition-all', pendingMode === 'timed' ? 'border-primary bg-[#eef7f1] shadow-sm' : 'border-border bg-card hover:border-primary/30')} data-testid="button-mode-timed">
+              {pendingMode === 'timed' && <span className="absolute right-3 top-3 grid size-5 place-items-center rounded-full bg-primary text-white"><Check size={11} /></span>}
+              <span className={cn('grid size-9 place-items-center rounded-xl', pendingMode === 'timed' ? 'bg-primary text-white' : 'bg-muted text-muted-foreground')}><Clock3 size={17} /></span>
+              <div className={cn('mt-3 text-sm font-extrabold', pendingMode === 'timed' && 'text-[#164b4b]')}>Timer</div>
+              <p className="mt-1 text-[11px] leading-5 text-muted-foreground">Practice with a countdown, auto-submits when time runs out.</p>
+            </button>
+            <button onClick={() => setPendingMode('untimed')} className={cn('card-lift relative rounded-2xl border-2 p-5 text-left transition-all', pendingMode === 'untimed' ? 'border-primary bg-[#eef7f1] shadow-sm' : 'border-border bg-card hover:border-primary/30')} data-testid="button-mode-untimed">
+              {pendingMode === 'untimed' && <span className="absolute right-3 top-3 grid size-5 place-items-center rounded-full bg-primary text-white"><Check size={11} /></span>}
+              <span className={cn('grid size-9 place-items-center rounded-xl', pendingMode === 'untimed' ? 'bg-primary text-white' : 'bg-muted text-muted-foreground')}><Target size={17} /></span>
+              <div className={cn('mt-3 text-sm font-extrabold', pendingMode === 'untimed' && 'text-[#164b4b]')}>Timeless</div>
+              <p className="mt-1 text-[11px] leading-5 text-muted-foreground">No time limit — study at your own pace.</p>
+            </button>
           </div>
-          <div className="mt-2.5 flex flex-wrap gap-1.5">
-            {[autoMinutes, 15, 30, 45, 60].filter((v, idx, arr) => v > 0 && arr.indexOf(v) === idx).map((v) => <button key={v} type="button" onClick={() => setCustomMinutes(v)} className={cn('rounded-full border px-2.5 py-1 text-[11px] font-bold', effectiveMinutes === v ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-muted')} data-testid={`button-timer-preset-${v}`}>{v === autoMinutes ? `${v} min (recommended)` : `${v} min`}</button>)}
-          </div>
-        </div>}
-        <button
-          onClick={() => { setMode(pendingMode); setRemainingSeconds(pendingMode === 'timed' ? effectiveMinutes * 60 : 0); sessionStartRef.current = Date.now(); }}
-          className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-xs font-extrabold text-primary-foreground"
-          data-testid="button-start-session"
-        >Start {pendingMode === 'timed' ? `(${effectiveMinutes} min)` : 'session'}</button>
-        <button
-          onClick={() => saveSession.mutate({ name: `Practice — ${new Date().toLocaleDateString()}`, config: { topicId, pastPaperId } })}
-          disabled={saveSession.isPending}
-          className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-border px-4 py-2.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-50"
-          data-testid="button-save-session"
-        ><Bookmark size={14} /> {saveSession.isPending ? 'Saving…' : 'Save this filter for later'}</button>
+
+          {pendingMode === 'timed' && <div className="mt-4 rounded-2xl border border-border bg-muted/40 p-4 text-left">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[11px] font-bold text-muted-foreground">Set your own time</div>
+              {finishClock && <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-semibold text-muted-foreground" data-testid="text-estimated-finish"><Clock3 size={11} /> Ends ~{finishClock}</span>}
+            </div>
+            <div className="mt-3 flex items-center justify-center gap-3">
+              <button type="button" onClick={() => setCustomMinutes(Math.max(1, effectiveMinutes - 5))} className="grid size-10 shrink-0 place-items-center rounded-xl border border-border text-base font-bold transition-transform hover:bg-muted active:scale-95" data-testid="button-timer-minus" aria-label="Subtract 5 minutes">−</button>
+              <div className="flex flex-col items-center">
+                <input
+                  type="number"
+                  min={1}
+                  max={480}
+                  value={effectiveMinutes}
+                  onChange={(e) => setCustomMinutes(Math.max(1, Math.min(480, Number(e.target.value) || 1)))}
+                  className="h-11 w-24 rounded-xl border border-border bg-background px-2 text-center text-lg font-mono-app font-extrabold"
+                  data-testid="input-timer-minutes"
+                />
+                <span className="mt-1 text-[10px] text-muted-foreground">minutes</span>
+              </div>
+              <button type="button" onClick={() => setCustomMinutes(Math.min(480, effectiveMinutes + 5))} className="grid size-10 shrink-0 place-items-center rounded-xl border border-border text-base font-bold transition-transform hover:bg-muted active:scale-95" data-testid="button-timer-plus" aria-label="Add 5 minutes">+</button>
+            </div>
+            <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+              {[autoMinutes, 15, 30, 45, 60].filter((v, idx, arr) => v > 0 && arr.indexOf(v) === idx).map((v) => <button key={v} type="button" onClick={() => setCustomMinutes(v)} className={cn('rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors', effectiveMinutes === v ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-muted-foreground hover:bg-muted')} data-testid={`button-timer-preset-${v}`}>{v === autoMinutes ? `${v} min (recommended)` : `${v} min`}</button>)}
+            </div>
+            <p className="mt-2.5 text-center text-[10px] text-muted-foreground">{isAuto ? '~1 min per question' : 'Custom pace'}, based on a {mcqs.length}-question set.</p>
+          </div>}
+
+          <button type="button" onClick={() => setShuffleQuestions((s) => !s)} className="mt-4 flex w-full items-center justify-between rounded-2xl border border-border bg-muted/40 px-4 py-3 text-left transition-colors hover:bg-muted/60" data-testid="button-toggle-shuffle" aria-pressed={shuffleQuestions}>
+            <span className="flex items-center gap-2 text-xs font-bold"><Shuffle size={14} className="text-muted-foreground" /> Shuffle question order</span>
+            <span className={cn('relative h-5 w-9 shrink-0 rounded-full transition-colors', shuffleQuestions ? 'bg-primary' : 'bg-border')}><span className={cn('absolute top-0.5 size-4 rounded-full bg-white shadow transition-transform', shuffleQuestions ? 'translate-x-4' : 'translate-x-0.5')} /></span>
+          </button>
+
+          <button
+            onClick={startSession}
+            className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3.5 text-xs font-extrabold text-primary-foreground shadow-sm transition-transform active:scale-[0.99]"
+            data-testid="button-start-session"
+          ><Zap size={14} /> Start {pendingMode === 'timed' ? `(${effectiveMinutes} min)` : 'session'}</button>
+          <button
+            onClick={() => saveSession.mutate({ name: `Practice — ${new Date().toLocaleDateString()}`, config: { topicId, pastPaperId } })}
+            disabled={saveSession.isPending}
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-border px-4 py-2.5 text-xs font-bold text-muted-foreground hover:text-foreground disabled:opacity-50"
+            data-testid="button-save-session"
+          ><Bookmark size={14} /> {saveSession.isPending ? 'Saving…' : 'Save this filter for later'}</button>
+        </div>
       </div>
     </div>;
   }
@@ -210,7 +273,7 @@ function Practice() {
   const ss = String(remainingSeconds % 60).padStart(2, '0');
   const stateForIndex = (i: number): 'current' | 'answered' | 'flagged' | 'new' => {
     if (i === index) return 'current';
-    const id = mcqs[i].id;
+    const id = activeMcqs[i].id;
     if (flaggedIds.has(id)) return 'flagged';
     if (answers[id] != null) return 'answered';
     return 'new';
@@ -227,7 +290,7 @@ function Practice() {
     </div>
     <div className="rounded-2xl border border-border bg-card p-3.5">
       <div className="mb-2.5 text-[11px] font-bold text-muted-foreground">Question Navigator</div>
-      <div className="grid grid-cols-5 gap-1.5">{mcqs.map((m, i) => { const st = stateForIndex(i); return <button key={m.id} onClick={() => goTo(i)} className={cn('grid aspect-square place-items-center rounded-lg text-[11px] font-bold transition-colors', st === 'current' && 'border-2 border-primary bg-card text-primary', st === 'answered' && 'bg-[#32647b] text-white', st === 'flagged' && 'bg-[#e5a952] text-white', st === 'new' && 'bg-muted text-muted-foreground')} data-testid={`button-goto-question-${i}`}>{i + 1}</button>; })}</div>
+      <div className="grid grid-cols-5 gap-1.5">{activeMcqs.map((m, i) => { const st = stateForIndex(i); return <button key={m.id} onClick={() => goTo(i)} className={cn('grid aspect-square place-items-center rounded-lg text-[11px] font-bold transition-colors', st === 'current' && 'border-2 border-primary bg-card text-primary', st === 'answered' && 'bg-[#32647b] text-white', st === 'flagged' && 'bg-[#e5a952] text-white', st === 'new' && 'bg-muted text-muted-foreground')} data-testid={`button-goto-question-${i}`}>{i + 1}</button>; })}</div>
       <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground"><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-[#32647b]" /> Answered</span><span className="flex items-center gap-1"><span className="size-2 rounded-full border-2 border-primary" /> Current</span><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-muted" /> Not Answered</span><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-[#e5a952]" /> Bookmarked</span></div>
     </div>
   </div>;
@@ -249,7 +312,7 @@ function Practice() {
   const breadcrumbParts = [current.module, current.subject, current.topic].filter(Boolean);
   return <div className="max-w-6xl">
     {breadcrumbParts.length > 0 && <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground" data-testid="text-practice-breadcrumb">{breadcrumbParts.map((part, i) => <span key={i} className="flex items-center gap-1.5">{i > 0 && <ChevronRight size={11} />}<span>{part}</span></span>)}</div>}
-    <div className="flex flex-wrap items-center justify-between gap-2"><h1 className="font-display text-2xl">Practice MCQs</h1><span className="font-mono-app text-[11px] text-muted-foreground">{index + 1} / {mcqs.length}</span></div>
+    <div className="flex flex-wrap items-center justify-between gap-2"><h1 className="font-display text-2xl">Practice MCQs</h1><span className="font-mono-app text-[11px] text-muted-foreground">{index + 1} / {activeMcqs.length}</span></div>
     {/* Top progress bar — the single biggest whitespace cut vs. before: this
         replaces a whole separate "Timer" card that used to sit above the
         question, pushing everything down a full card's height before you
@@ -301,12 +364,25 @@ function Practice() {
 
         <div className="mt-5 flex items-center justify-between gap-3">
           <button disabled={index === 0} onClick={() => goTo(index - 1)} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-5 py-2.5 text-xs font-bold disabled:opacity-40" data-testid="button-prev-question"><ArrowLeft size={14} /> Prev</button>
-          {index + 1 >= mcqs.length ? <button onClick={finishSession} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-finish-session">Finish session <CheckCircle2 size={14} /></button> : <button onClick={() => goTo(index + 1)} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-next-question">Next <ArrowRight size={14} /></button>}
+          {index + 1 >= activeMcqs.length ? <button onClick={finishSession} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-finish-session">Finish session <CheckCircle2 size={14} /></button> : <button onClick={() => goTo(index + 1)} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-next-question">Next <ArrowRight size={14} /></button>}
         </div>
       </div>
       <div className="order-2">{controlPanel}</div>
     </div>
   </div>;
+}
+
+// Fisher–Yates shuffle for the setup screen's "Shuffle question order"
+// toggle — returns a new array (never mutates the query-cache array from
+// react-query) so switching the toggle off and starting again reliably
+// falls back to the original server order.
+function shuffleArray<T>(items: T[]): T[] {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
 }
 
 // Deterministic per-topic accent color, cycling through the app's existing

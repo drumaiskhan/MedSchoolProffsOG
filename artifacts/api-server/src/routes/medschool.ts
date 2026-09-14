@@ -180,8 +180,24 @@ router.get("/student/dashboard", requireAuth, async (req, res): Promise<void> =>
   const userId = req.user!.id;
   const weekAgo = new Date();
   weekAgo.setDate(weekAgo.getDate() - 7);
+  // Same program/year targeting used by GET /modules, /blocks, /books,
+  // /past-papers, /exams — was missing here, which is why the dashboard's
+  // "Continue learning"/"Recommended for you" always showed every active
+  // module (e.g. a Year-1 "Foundation I" module) to every student
+  // regardless of their actual registered program (MBBS/BDS/etc) and year.
+  // Nothing hardcoded: a student's targeting is looked up fresh from their
+  // own programId/academicYearId on every request via getStudentTargeting.
+  const isAdmin = isAdminRole(req.user!.role);
+  let visibleModuleIds: number[] | null = null;
+  if (!isAdmin) {
+    const targeting = await getStudentTargeting(userId);
+    visibleModuleIds = await getVisibleModuleIds(targeting);
+  }
   const [moduleRows, notificationRows, membership, user, weeklyAttempts, questionAttemptRows, [streakRow]] = await Promise.all([
-    db.select().from(modulesTable).where(eq(modulesTable.active, true)).orderBy(modulesTable.displayOrder),
+    db.select().from(modulesTable).where(and(
+      eq(modulesTable.active, true),
+      visibleModuleIds ? inArray(modulesTable.id, visibleModuleIds) : undefined,
+    )).orderBy(modulesTable.displayOrder),
     db.select().from(notificationsTable).where(or(eq(notificationsTable.userId, userId), sql`${notificationsTable.userId} IS NULL`)).orderBy(desc(notificationsTable.createdAt)).limit(4),
     db.select().from(membershipsTable).where(and(eq(membershipsTable.userId, userId), eq(membershipsTable.status, "ACTIVE"))).orderBy(desc(membershipsTable.expiresAt)).limit(1),
     userView(userId),
