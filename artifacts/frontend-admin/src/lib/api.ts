@@ -147,6 +147,43 @@ export const flashcardImportApi = {
     request<{ imported: number; ids: number[] }>('/admin/flashcard-import/commit', { method: 'POST', body: JSON.stringify(body) }),
 };
 
+// Whole-bank backup/restore — the flashcard-side counterpart to
+// mcqBackupApi below. Export downloads every flashcard (every field) as
+// one JSON file; import restores a file like it, either alongside the
+// existing bank or replacing it entirely.
+export const flashcardBackupApi = {
+  exportUrl: () => `${API_BASE}/admin/flashcard-backup/export`,
+  // Not a plain <a href> download — same reasoning as mcqBackupApi's
+  // downloadBackup: needs the admin's session cookie and a real error
+  // message instead of a bare failed navigation if it fails.
+  downloadBackup: async (): Promise<void> => {
+    const res = await fetch(`${API_BASE}/admin/flashcard-backup/export`, { credentials: 'include' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new ApiRequestError(res.status, (data && data.error) || 'Could not download the backup', data);
+    }
+    const disposition = res.headers.get('content-disposition') || '';
+    const filenameMatch = disposition.match(/filename="([^"]+)"/);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filenameMatch?.[1] || 'flashcard-bank-backup.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+  importBackup: async (file: File, mode: 'append' | 'replace'): Promise<{ restored: number; mode: 'append' | 'replace'; deletedFirst: number }> => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${API_BASE}/admin/flashcard-backup/import?mode=${mode}`, { method: 'POST', credentials: 'include', body: form });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new ApiRequestError(res.status, (data && data.error) || 'Could not restore this backup', data);
+    return data;
+  },
+};
+
 export const DEFAULT_IMPORT_PATTERNS = {
   questionPattern: "^\\s*(?:Q\\.?\\s*)?(\\d{1,3})[\\.\\):]\\s+(.+)$",
   optionPattern: "^\\s*\\(?([A-Da-d])\\)?[\\.\\):]\\s+(.+)$",

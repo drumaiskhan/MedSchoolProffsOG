@@ -700,6 +700,7 @@ export type Payment = typeof paymentsTable.$inferSelect;
 export type Module = typeof modulesTable.$inferSelect;
 export type Block = typeof blocksTable.$inferSelect;
 export type Mcq = typeof mcqsTable.$inferSelect;
+export type Flashcard = typeof flashcardsTable.$inferSelect;
 export type Institution = typeof institutionsTable.$inferSelect;
 export type Program = typeof programsTable.$inferSelect;
 export type AcademicYear = typeof academicYearsTable.$inferSelect;

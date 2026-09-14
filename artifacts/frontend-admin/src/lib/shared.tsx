@@ -911,6 +911,33 @@ export function groupByProgramYear<T extends { key: string | number; program: st
     .map((b) => ({ programLabel: b.program || 'Unspecified program', yearLabel: b.year ? `Year ${b.year}` : 'All years', groups: b.groups }));
 }
 
+// Groups a flat list of Blocks into <optgroup>-ready buckets by
+// Program + Year, for the plain Block <select> filters used by the
+// MCQ/flashcard file-import ("parser") pickers and the AI-generate
+// flashcard picker. Those selects used to just list every block
+// alphabetically regardless of year, unlike McqBankTree/FlashcardBankTree
+// and AdminContent's block cards, which already group Block > Module >
+// Subject > Topic under Program > Year (see McqBankTree's own comment on
+// "the parser's Block filter below"). This closes that gap using the same
+// fallback-to-a-module's-targeting resolution as those trees, so e.g. the
+// blocks that make up "Third Year MBBS" open together under one
+// "MBBS · Year 3" group in the picker instead of being scattered through
+// one long flat list.
+export function groupBlocksForPicker(blocks: AdminBlock[], modules: AdminModule[]): Array<{ programLabel: string; yearLabel: string; blocks: AdminBlock[] }> {
+  const modulesByBlock = new Map<number, AdminModule[]>();
+  for (const m of modules) {
+    if (m.blockId == null) continue;
+    const list = modulesByBlock.get(m.blockId);
+    if (list) list.push(m); else modulesByBlock.set(m.blockId, [m]);
+  }
+  const leaves = blocks.map((b) => {
+    const mods = modulesByBlock.get(b.id) ?? [];
+    const fallback = mods.find((m) => m.programTargetKind || m.yearTargetNumber);
+    return { key: b.id, block: b, program: b.programTargetKind || fallback?.programTargetKind || null, year: b.yearTargetNumber ?? fallback?.yearTargetNumber ?? null };
+  });
+  return groupByProgramYear(leaves).map((g) => ({ programLabel: g.programLabel, yearLabel: g.yearLabel, blocks: g.groups.map((l) => l.block) }));
+}
+
 export function McqBankTree({ modules, blocks, search, statusFilter, selectedIds, onToggleSelect }: { modules: AdminModule[]; blocks: AdminBlock[]; search?: string; statusFilter?: ExplanationStatus | null; selectedIds: Set<number>; onToggleSelect: (id: number) => void }) {
   const treeQ = useQuery({ queryKey: ['admin-mcqs-tree'], queryFn: mcqAdminApi.list });
   const allRows = treeQ.data ?? [];
