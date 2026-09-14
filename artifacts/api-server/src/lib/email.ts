@@ -1,38 +1,193 @@
 import { logger } from "./logger";
+import { getSetting } from "./settings";
 
 /**
- * Sends transactional email via SMTP when configured (SMTP_HOST/PORT/USER/PASS
- * + MAIL_FROM env vars). When SMTP isn't configured (e.g. local dev), the
- * email is logged instead of sent so flows are testable without a mail
- * server. Swap in a provider SDK (SendGrid, Postmark, SES...) here if
- * preferred — the call sites don't need to change.
+ * Resolved email provider config — either what the admin saved at Admin ->
+ * Settings -> Email (DB, via lib/settings.ts, same pattern as the AI
+ * provider / Cloudinary settings) or, if nothing's saved there, whatever
+ * is in the environment. DB wins so an admin can set this up — and change
+ * it — from the settings UI without a redeploy; env vars remain a valid
+ * way to configure this for a deployment that never touches the admin UI
+ * at all (e.g. self-hosted with secrets injected by the platform).
+ */
+interface EmailConfig {
+  provider: "brevo" | "custom" | "smtp";
+  brevoApiKey?: string;
+  customApiUrl?: string;
+  customApiKey?: string;
+  customApiKeyHeader?: string;
+  customApiKeyPrefix?: string;
+  smtpHost?: string;
+  smtpPort?: string;
+  smtpUser?: string;
+  smtpPass?: string;
+  senderEmail: string;
+  senderName: string;
+}
+
+async function resolveEmailConfig(): Promise<EmailConfig | null> {
+  const dbProvider = await getSetting("EMAIL_PROVIDER", null);
+  const senderEmail = (await getSetting("MAIL_FROM", null)) || process.env.MAIL_FROM || "no-reply@medschoolproffs.com";
+  const senderName = (await getSetting("MAIL_FROM_NAME", null)) || process.env.BREVO_SENDER_NAME || "MedschoolProffs";
+
+  // 1. Whatever the admin picked at Admin -> Settings -> Email, if it has
+  // the fields it needs to actually work.
+  if (dbProvider === "brevo") {
+    const brevoApiKey = await getSetting("BREVO_API_KEY", null);
+    if (brevoApiKey) return { provider: "brevo", brevoApiKey, senderEmail, senderName };
+  } else if (dbProvider === "custom") {
+    const customApiUrl = await getSetting("CUSTOM_EMAIL_API_URL", null);
+    if (customApiUrl) {
+      return {
+        provider: "custom",
+        customApiUrl,
+        customApiKey: (await getSetting("CUSTOM_EMAIL_API_KEY", null)) ?? undefined,
+        customApiKeyHeader: (await getSetting("CUSTOM_EMAIL_API_KEY_HEADER", null)) ?? undefined,
+        customApiKeyPrefix: (await getSetting("CUSTOM_EMAIL_API_KEY_PREFIX", null)) ?? undefined,
+        senderEmail, senderName,
+      };
+    }
+  } else if (dbProvider === "smtp") {
+    const smtpHost = await getSetting("SMTP_HOST", null);
+    const smtpPort = await getSetting("SMTP_PORT", null);
+    const smtpUser = await getSetting("SMTP_USER", null);
+    const smtpPass = await getSetting("SMTP_PASS", null);
+    if (smtpHost && smtpPort && smtpUser && smtpPass) {
+      return { provider: "smtp", smtpHost, smtpPort, smtpUser, smtpPass, senderEmail, senderName };
+    }
+  }
+
+  // 2. Environment variables — same order as before this settings UI
+  // existed, so a deployment that only ever used env vars keeps working
+  // unchanged.
+  if (process.env.BREVO_API_KEY) {
+    return { provider: "brevo", brevoApiKey: process.env.BREVO_API_KEY, senderEmail: process.env.BREVO_SENDER_EMAIL || senderEmail, senderName };
+  }
+  if (process.env.CUSTOM_EMAIL_API_URL) {
+    return {
+      provider: "custom",
+      customApiUrl: process.env.CUSTOM_EMAIL_API_URL,
+      customApiKey: process.env.CUSTOM_EMAIL_API_KEY,
+      customApiKeyHeader: process.env.CUSTOM_EMAIL_API_KEY_HEADER,
+      customApiKeyPrefix: process.env.CUSTOM_EMAIL_API_KEY_PREFIX,
+      senderEmail, senderName,
+    };
+  }
+  if (process.env.SMTP_HOST && process.env.SMTP_PORT && process.env.SMTP_USER && process.env.SMTP_PASS) {
+    return { provider: "smtp", smtpHost: process.env.SMTP_HOST, smtpPort: process.env.SMTP_PORT, smtpUser: process.env.SMTP_USER, smtpPass: process.env.SMTP_PASS, senderEmail, senderName };
+  }
+
+  return null;
+}
+
+/**
+ * Sends transactional email through whichever provider resolveEmailConfig()
+ * finds configured (DB settings first, then env vars); if nothing at all is
+ * configured, logs the email instead of sending so every flow (signup,
+ * forgot-password, trial grant, payment review) stays testable without a
+ * mail provider set up. Every provider function throws on failure — this is
+ * the one place that catches and logs, so every call site's existing
+ * `.catch(() => {})` still behaves the same way on a failed send as before.
  */
 export async function sendEmail(to: string, subject: string, html: string): Promise<void> {
-  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, MAIL_FROM } = process.env;
-
-  if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS) {
-    logger.info({ to, subject }, "[email:dev-mode] SMTP not configured — logging email instead of sending");
-    // eslint-disable-next-line no-console
-    console.log(`\n----- DEV EMAIL -----\nTo: ${to}\nSubject: ${subject}\n${html}\n----------------------\n`);
+  try {
+    const config = await resolveEmailConfig();
+    if (config?.provider === "brevo") { await sendViaBrevo(to, subject, html, config); return; }
+    if (config?.provider === "custom") { await sendViaCustomApi(to, subject, html, config); return; }
+    if (config?.provider === "smtp") { await sendViaSmtp(to, subject, html, config); return; }
+  } catch (err) {
+    logger.error({ err, to, subject }, "Failed to send email");
     return;
   }
 
-  try {
-    const nodemailer = await import("nodemailer");
-    const transport = nodemailer.default.createTransport({
-      host: SMTP_HOST,
-      port: Number(SMTP_PORT),
-      secure: Number(SMTP_PORT) === 465,
-      auth: { user: SMTP_USER, pass: SMTP_PASS },
-    });
-    await transport.sendMail({ from: MAIL_FROM || SMTP_USER, to, subject, html });
-  } catch (err) {
-    logger.error({ err, to, subject }, "Failed to send email");
+  logger.info({ to, subject }, "[email:dev-mode] No email provider configured — logging email instead of sending");
+  // eslint-disable-next-line no-console
+  console.log(`\n----- DEV EMAIL -----\nTo: ${to}\nSubject: ${subject}\n${html}\n----------------------\n`);
+}
+
+async function sendViaBrevo(to: string, subject: string, html: string, config: EmailConfig): Promise<void> {
+  const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json", "api-key": config.brevoApiKey as string },
+    body: JSON.stringify({ sender: { email: config.senderEmail, name: config.senderName }, to: [{ email: to }], subject, htmlContent: html }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Brevo send failed (${res.status}): ${body.slice(0, 500)}`);
   }
+}
+
+/**
+ * A deliberately generic contract so any provider's API — or an internal
+ * mail microservice — can sit behind this without a bespoke integration:
+ * POST a { to, subject, html, from, fromName } JSON body to the configured
+ * URL. Auth header is configurable since providers disagree on the header
+ * name and scheme (defaults to "Authorization: Bearer <key>"; set the
+ * prefix to an empty string for providers that want the raw key in a
+ * header like "api-key").
+ */
+async function sendViaCustomApi(to: string, subject: string, html: string, config: EmailConfig): Promise<void> {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (config.customApiKey) {
+    const headerName = config.customApiKeyHeader || "Authorization";
+    const prefix = config.customApiKeyPrefix ?? "Bearer ";
+    headers[headerName] = `${prefix}${config.customApiKey}`;
+  }
+  const res = await fetch(config.customApiUrl as string, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ to, subject, html, from: config.senderEmail, fromName: config.senderName }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Custom email API send failed (${res.status}): ${body.slice(0, 500)}`);
+  }
+}
+
+async function sendViaSmtp(to: string, subject: string, html: string, config: EmailConfig): Promise<void> {
+  const nodemailer = await import("nodemailer");
+  const transport = nodemailer.default.createTransport({
+    host: config.smtpHost,
+    port: Number(config.smtpPort),
+    secure: Number(config.smtpPort) === 465,
+    auth: { user: config.smtpUser, pass: config.smtpPass },
+  });
+  await transport.sendMail({ from: config.senderEmail, to, subject, html });
+}
+
+/**
+ * Sends a one-off test email through whatever provider is currently
+ * configured, so the admin settings page can confirm the setup actually
+ * works instead of just checking that fields aren't blank (same "real
+ * connectivity check" pattern as POST /admin/settings/test-storage for
+ * Cloudinary). Throws with the real provider error on failure — unlike
+ * sendEmail() above, this one call site wants to know exactly what went
+ * wrong, not silently fall back to dev-log mode.
+ */
+export async function sendTestEmail(to: string): Promise<void> {
+  const config = await resolveEmailConfig();
+  if (!config) throw new Error("No email provider is configured yet.");
+  if (config.provider === "brevo") return sendViaBrevo(to, "MedschoolProffs test email", testEmailHtml(), config);
+  if (config.provider === "custom") return sendViaCustomApi(to, "MedschoolProffs test email", testEmailHtml(), config);
+  return sendViaSmtp(to, "MedschoolProffs test email", testEmailHtml(), config);
+}
+
+function testEmailHtml(): string {
+  return `<p>This is a test email from MedschoolProffs admin settings.</p><p>If you're reading this, your email provider is configured correctly.</p>`;
 }
 
 export function verificationEmailHtml(name: string, verifyUrl: string): string {
   return `<p>Hi ${name},</p><p>Welcome to MedschoolProffs. Please verify your email address to activate your account:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p><p>This link expires in 24 hours.</p>`;
+}
+
+/**
+ * Sent once, right after a student's email is verified (not at signup —
+ * at signup they haven't proven the address is real yet). This is the
+ * "welcome code etc" email: a proper welcome now that the account is
+ * actually usable, distinct from the verification link email above.
+ */
+export function welcomeEmailHtml(name: string, loginUrl: string): string {
+  return `<p>Hi ${name},</p><p>Your email is verified and your MedschoolProffs account is ready to go. Welcome aboard!</p><p>Log in to get started:</p><p><a href="${loginUrl}">${loginUrl}</a></p><p>If you ever need help, just reply to this email.</p>`;
 }
 
 export function resetPasswordEmailHtml(name: string, resetUrl: string): string {
@@ -42,4 +197,25 @@ export function resetPasswordEmailHtml(name: string, resetUrl: string): string {
 export function membershipActivatedEmailHtml(name: string, planName: string | null, expiresAt: Date): string {
   const expiry = expiresAt.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
   return `<p>Hi ${name},</p><p>Good news — your payment has been verified and your MedschoolProffs membership is now <strong>active</strong>${planName ? ` (${planName})` : ""}.</p><p>Your access is valid until <strong>${expiry}</strong>.</p><p>Log in any time to pick up where you left off.</p>`;
+}
+
+/**
+ * Was previously just membershipActivatedEmailHtml(name, "Trial access",
+ * expiresAt) — that produced "your membership is now active (Trial
+ * access)", which reads like a paid plan. A trial gets its own wording so
+ * it's clear no payment happened and when free access actually ends.
+ */
+export function trialActivatedEmailHtml(name: string, expiresAt: Date): string {
+  const expiry = expiresAt.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+  return `<p>Hi ${name},</p><p>Your MedschoolProffs trial has started — you now have full access to the platform, free.</p><p>Your trial runs until <strong>${expiry}</strong>. We'll let you know before it ends.</p><p>Log in any time to explore.</p>`;
+}
+
+/** Sent the moment a student submits payment proof, before any admin review. */
+export function paymentSubmittedEmailHtml(name: string, planName: string | null): string {
+  return `<p>Hi ${name},</p><p>We've received your payment submission${planName ? ` for <strong>${planName}</strong>` : ""} and it's now awaiting review.</p><p>We'll email you as soon as it's verified — this usually doesn't take long.</p>`;
+}
+
+/** Sent when an admin rejects a submitted payment, with the reason they gave. */
+export function paymentRejectedEmailHtml(name: string, reason: string): string {
+  return `<p>Hi ${name},</p><p>We weren't able to verify your recent payment submission.</p><p><strong>Reason:</strong> ${reason}</p><p>You're welcome to submit it again with corrected details, or reach out to support if you think this is a mistake.</p>`;
 }

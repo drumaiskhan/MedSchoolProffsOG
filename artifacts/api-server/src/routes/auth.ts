@@ -24,7 +24,7 @@ import {
   SESSION_COOKIE_NAME,
   sessionCookieOptions,
 } from "../lib/auth";
-import { sendEmail, verificationEmailHtml, resetPasswordEmailHtml } from "../lib/email";
+import { sendEmail, verificationEmailHtml, resetPasswordEmailHtml, welcomeEmailHtml } from "../lib/email";
 import { checkRateLimit } from "../lib/rateLimit";
 import { requireAuth } from "../middlewares/auth";
 import { getSetting } from "../lib/settings";
@@ -379,7 +379,14 @@ router.post("/auth/verify-email", async (req, res): Promise<void> => {
   }
 
   await db.update(emailVerificationTokensTable).set({ usedAt: new Date() }).where(eq(emailVerificationTokensTable.id, record.id));
-  await db.update(usersTable).set({ emailVerified: true, status: "VERIFIED" }).where(eq(usersTable.id, record.userId));
+  const [verifiedUser] = await db.update(usersTable).set({ emailVerified: true, status: "VERIFIED" }).where(eq(usersTable.id, record.userId)).returning();
+
+  // Fire-and-forget, same as every other transactional email in this file —
+  // a slow/down mail provider should never delay or fail the verification
+  // response itself.
+  if (verifiedUser) {
+    void sendEmail(verifiedUser.email, "Welcome to MedschoolProffs", welcomeEmailHtml(verifiedUser.name, `${APP_URL}/login`)).catch(() => {});
+  }
 
   res.json({ message: "Email verified. You can now log in." });
 });

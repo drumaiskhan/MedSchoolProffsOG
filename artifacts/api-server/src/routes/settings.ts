@@ -4,6 +4,7 @@ import { auditLogsTable, db } from "@workspace/db";
 import { getAllSettings, setSetting, THEME_KEYS, DEFAULT_THEME } from "../lib/settings";
 import { requireAdmin } from "../middlewares/auth";
 import { resolveFileUrl, testCloudinaryConnection, setCachedCloudinaryCloudName } from "../lib/storage";
+import { sendTestEmail } from "../lib/email";
 
 const router: IRouter = Router();
 
@@ -114,6 +115,26 @@ const EDITABLE_KEYS = [
   "CLOUDINARY_CLOUD_NAME",
   "CLOUDINARY_API_KEY",
   "CLOUDINARY_API_SECRET",
+  // Transactional email — same "configurable from the admin panel, no
+  // server env-var access needed" pattern as AI/Cloudinary above. EMAIL_
+  // PROVIDER picks which of the three sections below is actually used
+  // (see resolveEmailConfig() in lib/email.ts); the other sections' fields
+  // can stay filled in without being active, so switching providers back
+  // and forth doesn't lose anything already typed in. Falls back to the
+  // matching env vars (BREVO_API_KEY, SMTP_HOST, etc.) if EMAIL_PROVIDER
+  // isn't set at all, so an existing env-var-only deployment is unaffected.
+  "EMAIL_PROVIDER", // "brevo" | "smtp" | "custom" | ""
+  "MAIL_FROM",
+  "MAIL_FROM_NAME",
+  "BREVO_API_KEY",
+  "SMTP_HOST",
+  "SMTP_PORT",
+  "SMTP_USER",
+  "SMTP_PASS",
+  "CUSTOM_EMAIL_API_URL",
+  "CUSTOM_EMAIL_API_KEY",
+  "CUSTOM_EMAIL_API_KEY_HEADER",
+  "CUSTOM_EMAIL_API_KEY_PREFIX",
   // Design & Branding — see lib/settings.ts THEME_KEYS/DEFAULT_THEME. Also
   // mirrored into site-content.ts's SITE_CONTENT_KEYS since these need to be
   // public (signed-out pages like /login are themed too), unlike the rest
@@ -165,7 +186,7 @@ function withResolvedMedia(view: Record<string, string>): Record<string, string>
 // masked preview per key and only sends a new value in the PATCH body when
 // the admin is actually changing it (see the blank-value skip in the PATCH
 // handler below).
-const SECRET_KEYS = ["AI_API_KEY", "AI_API_KEY_2", "CLOUDINARY_API_SECRET"] as const;
+const SECRET_KEYS = ["AI_API_KEY", "AI_API_KEY_2", "CLOUDINARY_API_SECRET", "BREVO_API_KEY", "SMTP_PASS", "CUSTOM_EMAIL_API_KEY"] as const;
 function withSecretsMasked(view: Record<string, string>): Record<string, string> {
   const masked: Record<string, string> = {};
   const rest = { ...view };
@@ -220,7 +241,17 @@ router.get("/admin/settings", requireAdmin, async (_req, res): Promise<void> => 
   // set. Checks the DB-backed settings first (the ones the admin can set
   // right here) before falling back to env vars.
   const cloudinaryConfigured = !!((view.CLOUDINARY_CLOUD_NAME && view.CLOUDINARY_API_KEY && view.CLOUDINARY_API_SECRET) || (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET));
-  res.json({ ...withSecretsMasked(withResolvedMedia(withThemeDefaults(view))), CLOUDINARY_CONFIGURED: String(cloudinaryConfigured) });
+  // Same presence-only flag for email — "a provider looks configured,"
+  // not "sending actually works" (use POST /admin/settings/test-email for
+  // that, same distinction as CLOUDINARY_CONFIGURED above).
+  const emailConfigured = !!(
+    (view.EMAIL_PROVIDER === "brevo" && view.BREVO_API_KEY) ||
+    (view.EMAIL_PROVIDER === "smtp" && view.SMTP_HOST && view.SMTP_PORT && view.SMTP_USER && view.SMTP_PASS) ||
+    (view.EMAIL_PROVIDER === "custom" && view.CUSTOM_EMAIL_API_URL) ||
+    process.env.BREVO_API_KEY || process.env.CUSTOM_EMAIL_API_URL ||
+    (process.env.SMTP_HOST && process.env.SMTP_PORT && process.env.SMTP_USER && process.env.SMTP_PASS)
+  );
+  res.json({ ...withSecretsMasked(withResolvedMedia(withThemeDefaults(view))), CLOUDINARY_CONFIGURED: String(cloudinaryConfigured), EMAIL_CONFIGURED: String(emailConfigured) });
 });
 
 const SettingsBody = z.object(Object.fromEntries(EDITABLE_KEYS.map((key) => [key, z.string().max(4000).optional()])) as Record<(typeof EDITABLE_KEYS)[number], z.ZodOptional<z.ZodString>>);
@@ -262,6 +293,28 @@ router.post("/admin/settings/rotate-admin-code", requireAdmin, async (req, res):
 router.post("/admin/settings/test-storage", requireAdmin, async (_req, res): Promise<void> => {
   const cloudinary = await testCloudinaryConnection();
   res.json({ cloudinary });
+});
+
+// Real connectivity check for email, same reasoning as test-storage above —
+// EMAIL_CONFIGURED only means "the fields aren't blank." Sends an actual
+// test email using whatever's currently saved (DB settings, or env vars if
+// none are saved) to an address the admin provides — usually their own —
+// and reports the real provider error if something's wrong (bad API key,
+// wrong SMTP creds, unreachable custom endpoint) instead of a generic
+// failure.
+router.post("/admin/settings/test-email", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = z.object({ to: z.string().email() }).safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: "A valid email address is required" }); return; }
+  try {
+    await sendTestEmail(parsed.data.to);
+    res.json({ ok: true });
+  } catch (err) {
+    // 200, not an error status — same reasoning as POST /test-storage:
+    // the request itself succeeded, it's the *provider* that failed, and
+    // the frontend needs the { ok: false, error } body either way to show
+    // what went wrong, not a thrown ApiRequestError.
+    res.json({ ok: false, error: err instanceof Error ? err.message : "Could not send test email" });
+  }
 });
 
 export default router;

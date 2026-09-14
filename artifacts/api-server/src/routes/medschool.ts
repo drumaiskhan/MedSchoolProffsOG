@@ -74,7 +74,7 @@ import { requireAuth, requireAdmin, requireActiveMembership, isAdminRole } from 
 import { getStudentTargeting, getVisibleModuleIds, getVisibleBlockIds, describeModuleTargeting } from "../lib/contentVisibility";
 import { resolveFileUrl, THUMBNAIL_TRANSFORM } from "../lib/storage";
 import { dbErrorMessage } from "../lib/dbErrors";
-import { sendEmail, membershipActivatedEmailHtml } from "../lib/email";
+import { sendEmail, membershipActivatedEmailHtml, trialActivatedEmailHtml, paymentSubmittedEmailHtml, paymentRejectedEmailHtml } from "../lib/email";
 
 const router: IRouter = Router();
 
@@ -123,6 +123,14 @@ async function hardDeleteMcqs(ids: number[]): Promise<void> {
 async function getSubjectTopicCount(subjectId: number): Promise<number> {
   const [topicCount] = await db.select({ count: sql<number>`count(*)` }).from(topicsTable).where(and(eq(topicsTable.subjectId, subjectId), eq(topicsTable.archived, false)));
   return Number(topicCount?.count ?? 0);
+}
+
+// Counts every MCQ (draft + published) attached to a topic — this route is
+// admin-only, so unlike GET /topics (which hides drafts from students) an
+// admin editing a topic should see the true total, not just what's live.
+async function getTopicMcqCount(topicId: number): Promise<number> {
+  const [mcqCount] = await db.select({ count: sql<number>`count(*)` }).from(mcqsTable).where(and(eq(mcqsTable.topicId, topicId), ne(mcqsTable.status, "archived")));
+  return Number(mcqCount?.count ?? 0);
 }
 
 function planView(plan: typeof membershipPlansTable.$inferSelect) {
@@ -347,6 +355,7 @@ router.post("/payments", requireAuth, async (req, res): Promise<void> => {
     paymentDate: parsed.data.paymentDate, proofPath: parsed.data.proofPath ?? null, status: "PAYMENT_PENDING_REVIEW",
   }).returning();
   await db.update(usersTable).set({ status: "PAYMENT_PENDING_REVIEW" }).where(eq(usersTable.id, req.user!.id));
+  void sendEmail(req.user!.email, "We've received your payment", paymentSubmittedEmailHtml(req.user!.name, plan.name)).catch(() => {});
   res.status(201).json(await paymentView(payment));
 });
 
@@ -388,6 +397,12 @@ router.post("/payments/:id/reject", requireAdmin, async (req, res): Promise<void
   await db.update(usersTable).set({ status: "REJECTED" }).where(eq(usersTable.id, updated.userId));
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "PAYMENT_REJECTED", entity: "payment", entityId: updated.id, metadata: JSON.stringify({ reason: body.data.reason }) });
   await db.insert(notificationsTable).values({ userId: updated.userId, title: "Payment needs attention", body: body.data.reason, type: "warning" });
+
+  const [rejectedStudent] = await db.select({ name: usersTable.name, email: usersTable.email }).from(usersTable).where(eq(usersTable.id, updated.userId));
+  if (rejectedStudent) {
+    void sendEmail(rejectedStudent.email, "Your MedschoolProffs payment needs attention", paymentRejectedEmailHtml(rejectedStudent.name, body.data.reason)).catch(() => {});
+  }
+
   res.json(RejectPaymentResponse.parse(await paymentView(updated)));
 });
 
@@ -791,7 +806,13 @@ router.patch("/topics/:id", requireAdmin, async (req, res): Promise<void> => {
   if (!parsed.success || Number.isNaN(id)) { res.status(400).json({ error: "Invalid topic" }); return; }
   const [row] = await db.update(topicsTable).set(parsed.data).where(eq(topicsTable.id, id)).returning();
   if (!row) { res.status(404).json({ error: "Topic not found" }); return; }
-  res.json({ id: row.id, subjectId: row.subjectId, name: row.name, questionCount: 0, completed: false, displayOrder: row.displayOrder });
+  // Bug fix: this hardcoded questionCount to 0 on every edit (rename,
+  // reorder, activate/deactivate) even for a topic that already had
+  // questions — same bug GET /topics was fixed for elsewhere in this file,
+  // just missed here. Any caller that trusts this response body's count
+  // (rather than refetching the list) would show a topic's question count
+  // silently drop to 0 the moment an admin renamed it.
+  res.json({ id: row.id, subjectId: row.subjectId, name: row.name, questionCount: await getTopicMcqCount(row.id), completed: false, displayOrder: row.displayOrder });
 });
 
 router.delete("/topics/:id", requireAdmin, async (req, res): Promise<void> => {
@@ -1235,7 +1256,7 @@ router.post("/students/:id/trial", requireAdmin, async (req, res): Promise<void>
   await db.update(usersTable).set({ status: "ACTIVE", emailVerified: true }).where(eq(usersTable.id, id));
 
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "STUDENT_TRIAL_STARTED", entity: "user", entityId: id, metadata: JSON.stringify({ durationDays: parsed.data.durationDays, expiresAt }) });
-  void sendEmail(row.email, "Your MedschoolProffs trial is active", membershipActivatedEmailHtml(row.name, "Trial access", expiresAt)).catch(() => {});
+  void sendEmail(row.email, "Your MedschoolProffs trial has started", trialActivatedEmailHtml(row.name, expiresAt)).catch(() => {});
   res.json({ ok: true, expiresAt: expiresAt.toISOString() });
 });
 

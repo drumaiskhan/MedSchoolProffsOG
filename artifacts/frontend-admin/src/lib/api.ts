@@ -99,6 +99,12 @@ export interface PlatformSettings {
   AI_PROVIDER: string; AI_API_KEY_SET: string; AI_API_KEY_MASKED: string; AI_API_KEY: string;
   CLOUDINARY_CLOUD_NAME: string; CLOUDINARY_API_KEY: string; CLOUDINARY_API_SECRET: string; CLOUDINARY_API_SECRET_SET: string; CLOUDINARY_API_SECRET_MASKED: string;
   CLOUDINARY_CONFIGURED: string;
+  EMAIL_PROVIDER: string; MAIL_FROM: string; MAIL_FROM_NAME: string;
+  BREVO_API_KEY: string; BREVO_API_KEY_SET: string; BREVO_API_KEY_MASKED: string;
+  SMTP_HOST: string; SMTP_PORT: string; SMTP_USER: string; SMTP_PASS: string; SMTP_PASS_SET: string; SMTP_PASS_MASKED: string;
+  CUSTOM_EMAIL_API_URL: string; CUSTOM_EMAIL_API_KEY: string; CUSTOM_EMAIL_API_KEY_SET: string; CUSTOM_EMAIL_API_KEY_MASKED: string;
+  CUSTOM_EMAIL_API_KEY_HEADER: string; CUSTOM_EMAIL_API_KEY_PREFIX: string;
+  EMAIL_CONFIGURED: string;
   THEME_PRIMARY: string; THEME_SECONDARY: string; THEME_ACCENT: string;
   THEME_BACKGROUND: string; THEME_CARD: string; THEME_TEXT: string; THEME_MODE: string;
 }
@@ -501,6 +507,7 @@ export const settingsApi = {
   update: (body: Partial<PlatformSettings>) => request<PlatformSettings>('/admin/settings', { method: 'PATCH', body: JSON.stringify(body) }),
   rotateAdminCode: () => request<{ ADMIN_SIGNUP_CODE: string }>('/admin/settings/rotate-admin-code', { method: 'POST' }),
   testStorage: () => request<{ cloudinary: { ok: boolean; error?: string } }>('/admin/settings/test-storage', { method: 'POST' }),
+  testEmail: (to: string) => request<{ ok: boolean; error?: string }>('/admin/settings/test-email', { method: 'POST', body: JSON.stringify({ to }) }),
 };
 
 export const auditApi = {

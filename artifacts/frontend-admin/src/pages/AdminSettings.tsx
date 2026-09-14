@@ -58,15 +58,22 @@ function AdminSettings() {
     mutationFn: settingsApi.testStorage,
     onError: (err: unknown) => toast({ title: 'Could not run the test', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
+  const [testEmailTo, setTestEmailTo] = useState('');
+  const testEmail = useMutation({
+    mutationFn: settingsApi.testEmail,
+    onError: (err: unknown) => toast({ title: 'Could not run the test', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
   const set = (key: string, value: string) => setForm({ ...values, [key]: value });
-  const [tab, setTab] = useState<'general' | 'features' | 'branding' | 'ai' | 'storage' | 'security' | 'notifications'>('general');
+  const [tab, setTab] = useState<'general' | 'features' | 'branding' | 'ai' | 'email' | 'storage' | 'security' | 'notifications'>('general');
   const storageIssue = values.CLOUDINARY_CONFIGURED !== 'true';
+  const emailIssue = values.EMAIL_CONFIGURED !== 'true';
 
   const TABS: Array<{ id: typeof tab; label: string; icon: typeof Sparkles; badge?: boolean }> = [
     { id: 'general', label: 'General', icon: Settings },
     { id: 'features', label: 'Features', icon: ToggleLeft },
     { id: 'branding', label: 'Branding', icon: ImageOff },
     { id: 'ai', label: 'AI', icon: Sparkles },
+    { id: 'email', label: 'Email', icon: Mail, badge: emailIssue },
     { id: 'storage', label: 'Storage', icon: UploadCloud, badge: storageIssue },
     { id: 'security', label: 'Security & access', icon: ShieldCheck },
     { id: 'notifications', label: 'Notifications', icon: Bell },
@@ -130,6 +137,57 @@ function AdminSettings() {
         {values.AI_AUTO_EXPLAIN_ON_IMPORT === 'true' && <label className="mt-4 block text-xs font-bold">Bulk-generation model <span className="font-normal text-muted-foreground">(optional override — e.g. a cheaper/faster model for high-volume auto-explain; leave blank to use the Model field above)</span><input value={values.AI_AUTO_EXPLAIN_MODEL || ''} onChange={(e) => set('AI_AUTO_EXPLAIN_MODEL', e.target.value)} placeholder="e.g. claude-haiku-4-5, gpt-4o-mini" className="mt-2 h-10 w-full max-w-sm rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-ai-auto-explain-model" /></label>}
       </div>
       </div>}
+
+      {tab === 'email' && <>
+        {emailIssue && <div className="rounded-2xl border border-[#efc7bc] bg-[#fff5f0] p-5 text-xs text-[#9e4c39]" data-testid="banner-email-warning"><div className="flex items-center gap-2 font-bold"><CircleHelp size={15} /> No email provider is configured</div><p className="mt-1.5 leading-5 text-[#a96a5b]">Verification, welcome, password reset, membership/trial, and payment emails are all logged to the server console instead of actually sent until one of the providers below is set up.</p></div>}
+        <div className="rounded-2xl border border-border bg-card p-6"><h3 className="flex items-center gap-2 font-bold">Email provider {values.EMAIL_CONFIGURED === 'true' && <Badge tone="green">Configured</Badge>}</h3>
+          <p className="mt-1 text-xs text-muted-foreground">Used for every automated email the platform sends: account verification, welcome, forgot/reset password, membership activated, trial started, and payment submitted/rejected. Pick one provider — the fields for the other two can stay filled in without being used.</p>
+          <label className="mt-4 block text-xs font-bold">Provider<select value={values.EMAIL_PROVIDER || ''} onChange={(e) => set('EMAIL_PROVIDER', e.target.value)} className="mt-2 h-10 w-full max-w-xs rounded-xl border border-border bg-background px-3 text-xs" data-testid="select-email-provider"><option value="">None — use server env vars only</option><option value="brevo">Brevo</option><option value="smtp">SMTP</option><option value="custom">Custom API</option></select></label>
+
+          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            <label className="text-xs font-bold">"From" email<input value={values.MAIL_FROM || ''} onChange={(e) => set('MAIL_FROM', e.target.value)} placeholder="no-reply@yourdomain.com" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-mail-from" /></label>
+            <label className="text-xs font-bold">"From" name<input value={values.MAIL_FROM_NAME || ''} onChange={(e) => set('MAIL_FROM_NAME', e.target.value)} placeholder="MedschoolProffs" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-mail-from-name" /></label>
+          </div>
+
+          {values.EMAIL_PROVIDER === 'brevo' && <div className="mt-5 border-t border-border pt-5">
+            <h4 className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Brevo</h4>
+            <label className="mt-3 block text-xs font-bold">API key{values.BREVO_API_KEY_SET === 'true' && <span className="ml-2 font-normal text-muted-foreground">Currently set · {values.BREVO_API_KEY_MASKED}</span>}<input type="password" value={values.BREVO_API_KEY || ''} onChange={(e) => set('BREVO_API_KEY', e.target.value)} placeholder={values.BREVO_API_KEY_SET === 'true' ? 'Leave blank to keep current key' : 'xkeysib-...'} className="mt-2 h-10 w-full max-w-sm rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-brevo-api-key" /></label>
+            <p className="mt-2 text-[11px] text-muted-foreground">From Brevo: Settings → SMTP &amp; API → API keys.</p>
+          </div>}
+
+          {values.EMAIL_PROVIDER === 'smtp' && <div className="mt-5 border-t border-border pt-5">
+            <h4 className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">SMTP</h4>
+            <div className="mt-3 grid gap-4 sm:grid-cols-2">
+              <label className="text-xs font-bold">Host<input value={values.SMTP_HOST || ''} onChange={(e) => set('SMTP_HOST', e.target.value)} placeholder="smtp.yourprovider.com" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-smtp-host" /></label>
+              <label className="text-xs font-bold">Port<input value={values.SMTP_PORT || ''} onChange={(e) => set('SMTP_PORT', e.target.value.replace(/[^\d]/g, ''))} placeholder="587" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-smtp-port" /></label>
+              <label className="text-xs font-bold">Username<input value={values.SMTP_USER || ''} onChange={(e) => set('SMTP_USER', e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-smtp-user" /></label>
+              <label className="text-xs font-bold">Password{values.SMTP_PASS_SET === 'true' && <span className="ml-2 font-normal text-muted-foreground">Currently set · {values.SMTP_PASS_MASKED}</span>}<input type="password" value={values.SMTP_PASS || ''} onChange={(e) => set('SMTP_PASS', e.target.value)} placeholder={values.SMTP_PASS_SET === 'true' ? 'Leave blank to keep current password' : ''} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-smtp-pass" /></label>
+            </div>
+          </div>}
+
+          {values.EMAIL_PROVIDER === 'custom' && <div className="mt-5 border-t border-border pt-5">
+            <h4 className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Custom API</h4>
+            <p className="mt-1 text-[11px] text-muted-foreground">For any provider that isn't Brevo — Postmark, Resend, an internal mailer, etc. Point this at an endpoint that accepts a JSON body: <code className="rounded bg-background px-1 py-0.5">{'{ to, subject, html, from, fromName }'}</code>.</p>
+            <div className="mt-3 grid gap-4 sm:grid-cols-2">
+              <label className="text-xs font-bold sm:col-span-2">Endpoint URL<input value={values.CUSTOM_EMAIL_API_URL || ''} onChange={(e) => set('CUSTOM_EMAIL_API_URL', e.target.value)} placeholder="https://api.example.com/send-email" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-custom-email-url" /></label>
+              <label className="text-xs font-bold">API key{values.CUSTOM_EMAIL_API_KEY_SET === 'true' && <span className="ml-2 font-normal text-muted-foreground">Currently set · {values.CUSTOM_EMAIL_API_KEY_MASKED}</span>}<input type="password" value={values.CUSTOM_EMAIL_API_KEY || ''} onChange={(e) => set('CUSTOM_EMAIL_API_KEY', e.target.value)} placeholder={values.CUSTOM_EMAIL_API_KEY_SET === 'true' ? 'Leave blank to keep current key' : ''} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-custom-email-key" /></label>
+              <label className="text-xs font-bold">Header name <span className="font-normal text-muted-foreground">(default: Authorization)</span><input value={values.CUSTOM_EMAIL_API_KEY_HEADER || ''} onChange={(e) => set('CUSTOM_EMAIL_API_KEY_HEADER', e.target.value)} placeholder="Authorization" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-custom-email-header" /></label>
+              <label className="text-xs font-bold sm:col-span-2">Header prefix <span className="font-normal text-muted-foreground">(default: "Bearer " — clear this for providers that want the raw key, e.g. an "api-key" header)</span><input value={values.CUSTOM_EMAIL_API_KEY_PREFIX ?? ''} onChange={(e) => set('CUSTOM_EMAIL_API_KEY_PREFIX', e.target.value)} placeholder="Bearer " className="mt-2 h-10 w-full max-w-xs rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-custom-email-prefix" /></label>
+            </div>
+          </div>}
+        </div>
+
+        <div className="rounded-2xl border border-border bg-card p-6">
+          <h3 className="font-bold">Send a test email</h3>
+          <p className="mt-1 text-xs text-muted-foreground">Save your settings first, then send a real test email to confirm the provider above actually works — not just that the fields aren't blank.</p>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <input type="email" value={testEmailTo} onChange={(e) => setTestEmailTo(e.target.value)} placeholder="you@example.com" className="h-10 w-64 rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-test-email-to" />
+            <button type="button" onClick={() => testEmail.mutate(testEmailTo)} disabled={testEmail.isPending || !testEmailTo} className="rounded-xl border border-border bg-background px-4 py-2 text-xs font-bold disabled:opacity-50" data-testid="button-test-email">{testEmail.isPending ? 'Sending…' : 'Send test email'}</button>
+            {testEmail.data && (testEmail.data.ok ? <Badge tone="green">Sent</Badge> : <Badge tone="red">Failed</Badge>)}
+          </div>
+          {testEmail.data && !testEmail.data.ok && <p className="mt-2 rounded-xl bg-[#fff5f0] p-3 text-[11px] text-[#9e4c39]" data-testid="text-email-test-error">{testEmail.data.error}</p>}
+        </div>
+      </>}
 
       {tab === 'storage' && <>
         {storageIssue && <div className="rounded-2xl border border-[#efc7bc] bg-[#fff5f0] p-5 text-xs text-[#9e4c39]" data-testid="banner-storage-warning"><div className="flex items-center gap-2 font-bold"><CircleHelp size={15} /> No file storage is configured</div><p className="mt-1.5 leading-5 text-[#a96a5b]">Every upload (favicon, payment QR code, payment proofs, team photos, MCQ images, books, resources) goes through Cloudinary — there's no fallback, so uploads will fail until it's configured below.</p></div>}

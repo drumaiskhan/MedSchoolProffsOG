@@ -13,7 +13,7 @@ import {
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
   GraduationCap, CalendarDays, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
   RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Wand2, Activity, Layers, BarChart3, GraduationCap, ToggleLeft,
-  Download, Database, Loader2
+  Download, Database, Loader2, GripVertical
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { applyThemeVars, DEFAULT_THEME, readableForegroundHsl } from '@/lib/theme';
@@ -1176,16 +1176,56 @@ export function AdminInstitutionsList({ selectedId, onSelect }: { selectedId: nu
     [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
     reorder.mutate(reordered.map((inst, i) => ({ id: inst.id, displayOrder: i })));
   };
+  // Drag-and-drop reorder — much faster than the up/down arrows below for
+  // moving something more than one or two spots (dragging KMC from #1 to
+  // #12 is one gesture instead of eleven clicks). Native HTML5 DnD, no
+  // extra dependency. The arrows stay alongside it for one-spot nudges and
+  // for anyone who can't (or doesn't want to) drag — same renumber-the-
+  // whole-list reorder() mutation either way, so both controls stay in
+  // sync and neither can produce the duplicate-displayOrder "arrows don't
+  // move anything" bug described above.
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const dropInstitution = (targetIndex: number) => {
+    if (dragIndex === null || dragIndex === targetIndex || reorder.isPending) { setDragIndex(null); setDragOverIndex(null); return; }
+    const reordered = [...orderedInstitutions];
+    const [moved] = reordered.splice(dragIndex, 1);
+    reordered.splice(targetIndex, 0, moved);
+    reorder.mutate(reordered.map((inst, i) => ({ id: inst.id, displayOrder: i })));
+    setDragIndex(null);
+    setDragOverIndex(null);
+  };
 
   return <div className="rounded-2xl border border-border bg-card p-5">
     <h4 className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Institutions</h4>
-    <p className="mt-1 text-[11px] text-muted-foreground">The colleges students can register under, split by MBBS and BDS since they're different institutions — use the arrows to arrange each list in your own order. Manage programmes, years, and batches below.</p>
+    <p className="mt-1 text-[11px] text-muted-foreground">The colleges students can register under, split by MBBS and BDS since they're different institutions — drag a row by its handle to reorder, or use the arrows for a one-spot nudge. Manage programmes, years, and batches below.</p>
     <div className="mt-3 flex gap-1.5 rounded-xl bg-muted p-1">
       {tabs.map((t) => <button key={t.key} type="button" onClick={() => setKindTab(t.key)} className={cn('flex-1 rounded-lg py-1.5 text-[11px] font-bold transition-colors', kindTab === t.key ? 'bg-card text-primary shadow-sm' : 'text-muted-foreground hover:text-foreground')} data-testid={`tab-institution-kind-${t.key || 'unset'}`}>{t.label} <span className="font-mono-app text-[10px] opacity-70">({allInstitutions.filter((i) => (i.kind || '') === t.key).length})</span></button>)}
     </div>
     <div className="mt-3 space-y-1.5">
-      {orderedInstitutions.map((i: Institution, idx) => <div key={i.id} onClick={() => onSelect(i.id)} className={cn('flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs cursor-pointer hover:bg-muted', selectedId === i.id && 'bg-[#eef7f1] font-bold')} data-testid={`row-institution-${i.id}`}>
+      {orderedInstitutions.map((i: Institution, idx) => <div
+        key={i.id}
+        onClick={() => onSelect(i.id)}
+        onDragOver={(e) => { if (dragIndex !== null) { e.preventDefault(); if (dragOverIndex !== idx) setDragOverIndex(idx); } }}
+        onDrop={(e) => { e.preventDefault(); dropInstitution(idx); }}
+        className={cn(
+          'flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs cursor-pointer hover:bg-muted transition-colors',
+          selectedId === i.id && 'bg-[#eef7f1] font-bold',
+          dragIndex === idx && 'opacity-40',
+          dragOverIndex === idx && dragIndex !== idx && 'ring-2 ring-primary/50',
+        )}
+        data-testid={`row-institution-${i.id}`}
+      >
         <div className="flex flex-1 items-center gap-2 min-w-0">
+          <div
+            draggable
+            onClick={(e) => e.stopPropagation()}
+            onDragStart={(e) => { setDragIndex(idx); e.dataTransfer.effectAllowed = 'move'; }}
+            onDragEnd={() => { setDragIndex(null); setDragOverIndex(null); }}
+            className="grid size-5 shrink-0 cursor-grab place-items-center text-muted-foreground hover:text-foreground active:cursor-grabbing"
+            data-testid={`handle-drag-institution-${i.id}`}
+            aria-label="Drag to reorder"
+          ><GripVertical size={13} /></div>
           <div className="flex shrink-0 flex-col" onClick={(e) => e.stopPropagation()}>
             <button type="button" disabled={idx === 0 || reorder.isPending} onClick={() => moveInstitution(idx, -1)} className="grid size-4 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-30" data-testid={`button-move-up-institution-${i.id}`} aria-label="Move up"><ChevronUp size={12} /></button>
             <button type="button" disabled={idx === orderedInstitutions.length - 1 || reorder.isPending} onClick={() => moveInstitution(idx, 1)} className="grid size-4 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-30" data-testid={`button-move-down-institution-${i.id}`} aria-label="Move down"><ChevronDown size={12} /></button>
