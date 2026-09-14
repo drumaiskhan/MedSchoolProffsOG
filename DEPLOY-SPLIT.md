@@ -12,6 +12,14 @@ The app is now three deployable packages:
 
 1. **CORS**: set `APP_URL` on the backend to a comma-separated list of both
    frontend origins.
+1b. **Emails**: also set `PUBLIC_APP_URL` on the backend to the student
+   app's origin alone (no comma, no admin URL). Password-reset/verification/
+   welcome emails link to this one URL — leaving it unset falls back to the
+   first origin in `APP_URL`, but an explicit value here avoids depending on
+   list order. Skipping this in a split deploy is what makes reset-password
+   emails link to something like
+   `https://app...,https://admin.../reset-password?...` instead of a real
+   URL.
 2. **Cookies**: set `COOKIE_CROSS_SITE=true` on the backend whenever a
    frontend is on a different origin than the API (true for basically every
    real deployment of this split). Skipping this is the #1 cause of

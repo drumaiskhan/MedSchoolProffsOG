@@ -417,6 +417,14 @@ export const notificationsApi = {
   // targetedUsers is null when sent to everyone (no program/year filter),
   // otherwise the count of students who matched the filter and got a row.
   broadcast: (body: BroadcastNotificationBody) => request<BroadcastNotificationResponse>('/admin/notifications/broadcast', { method: 'POST', body: JSON.stringify(body) }),
+  // Clears just the signed-in admin's own notification list (their personal
+  // rows deleted, any broadcasts hidden for them only) — same effect as a
+  // student's "Clear all".
+  clearMine: () => request<{ ok: true }>('/notifications/clear', { method: 'POST' }),
+  // Admin-only: wipes every notification for every student and admin. This
+  // is what makes "Clear all" on the admin page remove notifications from
+  // students too, unlike clearMine above.
+  clearAll: () => request<{ ok: true; deleted: number }>('/admin/notifications/clear-all', { method: 'DELETE' }),
 };
 
 // ---------------------------------------------------------------------------

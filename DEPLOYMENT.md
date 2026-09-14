@@ -181,6 +181,7 @@ See `.env.example` for the full list with comments. The essentials:
 | `DATABASE_URL` | Yes | Postgres connection string |
 | `JWT_SECRET` | Yes | Long random string |
 | `APP_URL` | Recommended | Frontend origin(s), comma-separated; used for CORS |
+| `PUBLIC_APP_URL` | Recommended whenever `APP_URL` lists more than one origin | The single canonical URL used in outgoing emails (password reset, verification, welcome). Emails need one link, not a CORS list — see `.env.example` |
 | `PORT` | No | Defaults to 3001 locally; most platforms inject this |
 | `VITE_API_BASE_URL` | Split deploys only | Set on the frontend build |
 | `COOKIE_CROSS_SITE` | Split deploys only | Set on the backend |

@@ -130,4 +130,19 @@ ALTER TABLE med_modules ADD COLUMN IF NOT EXISTS block_id INTEGER;
 -- Round 3, item 7: optional module thumbnail (see schema/medschool.ts).
 ALTER TABLE med_modules ADD COLUMN IF NOT EXISTS icon_path TEXT;
 
+-- New table: per-user dismissal record for a shared (userId IS NULL)
+-- notification, so a student's "Clear all" can hide broadcasts from just
+-- their own view without deleting them for every other student. See
+-- schema/medschool.ts's notificationDismissalsTable comment for the full
+-- rationale, and ensureSchema.ts (this repo's actual boot-time DDL runner)
+-- for the copy that matters in production.
+CREATE TABLE IF NOT EXISTS med_notification_dismissals (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  notification_id INTEGER NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS med_notification_dismissals_user_id_idx ON med_notification_dismissals (user_id);
+
 COMMIT;

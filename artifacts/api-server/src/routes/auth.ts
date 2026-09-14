@@ -28,10 +28,16 @@ import { sendEmail, verificationEmailHtml, resetPasswordEmailHtml, welcomeEmailH
 import { checkRateLimit } from "../lib/rateLimit";
 import { requireAuth } from "../middlewares/auth";
 import { getSetting } from "../lib/settings";
+import { getPublicAppUrl } from "../lib/publicAppUrl";
 
 const router: IRouter = Router();
 
-const APP_URL = process.env.APP_URL || "http://localhost:5173";
+// NOT process.env.APP_URL directly — that var is a comma-separated CORS
+// allow-list (see app.ts), and using it verbatim here is what produced the
+// broken multi-origin reset-password link. getPublicAppUrl() resolves it to
+// the one canonical URL emails should point at. See that helper's comment
+// for the full story.
+const APP_URL = getPublicAppUrl();
 const MAX_LOGIN_ATTEMPTS = 8;
 const LOCKOUT_MS = 15 * 60 * 1000;
 

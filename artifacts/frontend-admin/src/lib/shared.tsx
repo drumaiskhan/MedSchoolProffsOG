@@ -381,6 +381,13 @@ export function ModuleRow({ m, canMoveUp, canMoveDown, onReorder, update, curric
   editProgram: string; setEditProgram: (v: string) => void; editYear: string; setEditYear: (v: string) => void;
   setDeletingId: (id: number) => void;
 }) {
+  // Module name previously had no rename UI at all — the Pencil button only
+  // ever opened program/year targeting below. Blocks/Subjects/Topics could
+  // all be renamed; a Module could not, even though PATCH /modules/:id
+  // already accepts a `name`. Local state (not lifted like editProgram/
+  // editYear) since it's only ever read/written while this row's own edit
+  // panel is open.
+  const [editName, setEditName] = useState(m.name);
   return <div className="border-b border-border p-5 last:border-0" data-testid={`row-content-module-${m.id}`}>
     <div className="flex items-center gap-4">
       <div className="flex flex-col gap-0.5">
@@ -392,10 +399,13 @@ export function ModuleRow({ m, canMoveUp, canMoveDown, onReorder, update, curric
       <button onClick={() => update.mutate({ id: m.id, body: { active: !m.active } })} disabled={update.isPending} data-testid={`button-toggle-published-${m.id}`}><Badge tone={m.active ? 'green' : 'neutral'}>{m.active ? 'published' : 'draft'}</Badge></button>
       <span className="rounded-full bg-muted px-2.5 py-1 text-[10px] font-bold text-muted-foreground" data-testid={`text-targeting-${m.id}`}>{m.targetingLabel || 'All Programs + All Years'}</span>
       <button onClick={() => setCurriculumId(curriculumId === m.id ? null : m.id)} className={cn('rounded-lg px-3 py-2 text-[11px] font-bold', curriculumId === m.id ? 'bg-[#eef7f1] text-primary' : 'border border-border text-muted-foreground hover:bg-muted')} data-testid={`button-manage-curriculum-${m.id}`}>{curriculumId === m.id ? 'Hide subjects' : 'Subjects & topics'}</button>
-      <button onClick={() => { if (editingId === m.id) { setEditingId(null); } else { setEditingId(m.id); setEditProgram(m.programTargetKind || ''); setEditYear(m.yearTargetNumber ? String(m.yearTargetNumber) : ''); } }} className="rounded-lg p-2 text-muted-foreground hover:bg-muted" data-testid={`button-content-menu-${m.id}`}><Pencil size={15} /></button>
+      <button onClick={() => { if (editingId === m.id) { setEditingId(null); } else { setEditingId(m.id); setEditName(m.name); setEditProgram(m.programTargetKind || ''); setEditYear(m.yearTargetNumber ? String(m.yearTargetNumber) : ''); } }} className="rounded-lg p-2 text-muted-foreground hover:bg-muted" data-testid={`button-content-menu-${m.id}`}><Pencil size={15} /></button>
       <button onClick={() => setDeletingId(m.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-module-${m.id}`}><Trash2 size={15} /></button>
     </div>
-    {editingId === m.id && <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-border pt-4"><ModuleTargetingFields programTargetKind={editProgram} yearTargetNumber={editYear} onChange={(patch) => { if (patch.programTargetKind !== undefined) setEditProgram(patch.programTargetKind); if (patch.yearTargetNumber !== undefined) setEditYear(patch.yearTargetNumber); }} /><button onClick={() => update.mutate({ id: m.id, body: { programTargetKind: editProgram || null, yearTargetNumber: editYear ? Number(editYear) : null } }, { onSuccess: () => setEditingId(null) } as never)} className="h-10 rounded-xl bg-primary px-4 text-xs font-bold text-primary-foreground" data-testid={`button-save-targeting-${m.id}`}>Update visibility</button></div>}
+    {editingId === m.id && <div className="mt-4 space-y-3 border-t border-border pt-4">
+      <label className="block text-[11px] font-bold text-muted-foreground">Module name<input value={editName} onChange={(e) => setEditName(e.target.value)} className="mt-1 h-9 w-full max-w-sm rounded-lg border border-border bg-background px-3 text-xs" data-testid={`input-rename-module-${m.id}`} /></label>
+      <div className="flex flex-wrap items-end gap-3"><ModuleTargetingFields programTargetKind={editProgram} yearTargetNumber={editYear} onChange={(patch) => { if (patch.programTargetKind !== undefined) setEditProgram(patch.programTargetKind); if (patch.yearTargetNumber !== undefined) setEditYear(patch.yearTargetNumber); }} /><button onClick={() => { if (!editName.trim()) return; update.mutate({ id: m.id, body: { name: editName.trim(), programTargetKind: editProgram || null, yearTargetNumber: editYear ? Number(editYear) : null } }, { onSuccess: () => setEditingId(null) } as never); }} disabled={!editName.trim() || update.isPending} className="h-10 rounded-xl bg-primary px-4 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid={`button-save-targeting-${m.id}`}>Save changes</button></div>
+    </div>}
     {curriculumId === m.id && <div className="mt-4 border-t border-border pt-4"><SubjectsTopicsManager moduleId={m.id} breadcrumb={`${m.blockName || 'Other modules'} > ${m.name}`} /></div>}
   </div>;
 }

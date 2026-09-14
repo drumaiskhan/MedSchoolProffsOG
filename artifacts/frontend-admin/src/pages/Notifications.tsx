@@ -41,7 +41,7 @@ import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiReq
 // mutations already call invalidateQueries on the specific keys they
 // change, so edits still show up immediately — this only avoids redundant
 // background refetches of data nothing has touched.
-import { EmptyState, SectionHeader, cn } from '@/lib/shared';
+import { ConfirmDialog, EmptyState, SectionHeader, cn } from '@/lib/shared';
 import { queryClient } from '@/lib/query-client';
 
 function Notifications() {
@@ -51,7 +51,20 @@ function Notifications() {
   const unread = ns.filter((n) => !n.read);
   const markAll = () => unread.forEach((n) => markRead.mutate(n.id));
 
-  return <div className="max-w-3xl"><SectionHeader eyebrow="Stay oriented" title="Notifications" action={unread.length > 0 && <button onClick={markAll} className="inline-flex items-center gap-1.5 text-xs font-bold text-primary" data-testid="button-mark-all-read"><CheckCheck size={14} /> Mark all as read</button>} /><div className="overflow-hidden rounded-2xl border border-border bg-card">{ns.map((n) => <div key={n.id} className={cn('flex gap-4 border-b border-border p-5 transition-colors last:border-0', !n.read && 'bg-[#f3f8f3]')} data-testid={`row-notification-${n.id}`}><div className={cn('grid size-10 shrink-0 place-items-center rounded-xl', n.type === 'payment' ? 'bg-[#fff0cb] text-[#94651c]' : n.type === 'milestone' ? 'bg-[#d7eee4] text-[#287058]' : 'bg-[#dceaf1] text-[#32647b]')}><Bell size={17} /></div><div className="flex-1"><div className="flex items-center gap-2 text-sm font-bold">{n.title}{!n.read && <span className="size-1.5 rounded-full bg-[#dc815e]" />}</div><p className="mt-1 text-xs leading-5 text-muted-foreground">{n.body}</p><div className="mt-2 font-mono-app text-[10px] text-muted-foreground">{n.createdAt}</div></div>{!n.read && <button onClick={() => markRead.mutate(n.id)} className="self-start rounded-lg border border-border px-2.5 py-1.5 text-[10px] font-bold text-muted-foreground hover:bg-muted hover:text-foreground" data-testid={`button-mark-read-${n.id}`}>Mark read</button>}</div>)}{!ns.length && <EmptyState icon={Bell} title="All caught up" body="Nothing new right now." />}</div></div>;
+  // Admin "Clear all" is a global wipe (see notificationsApi.clearAll) — it
+  // removes every notification for every student and admin, not just this
+  // admin's own view, so it's gated behind a confirm dialog rather than
+  // firing on a single click like "Mark all as read" does.
+  const [confirmingClearAll, setConfirmingClearAll] = useState(false);
+  const clearAll = useMutation({
+    mutationFn: notificationsApi.clearAll,
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListNotificationsQueryKey() }); setConfirmingClearAll(false); },
+    onError: (err: unknown) => toast({ title: 'Could not clear notifications', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
+
+  return <div className="max-w-3xl"><SectionHeader eyebrow="Stay oriented" title="Notifications" action={<div className="flex items-center gap-4">{unread.length > 0 && <button onClick={markAll} className="inline-flex items-center gap-1.5 text-xs font-bold text-primary" data-testid="button-mark-all-read"><CheckCheck size={14} /> Mark all as read</button>}{ns.length > 0 && <button onClick={() => setConfirmingClearAll(true)} className="inline-flex items-center gap-1.5 text-xs font-bold text-destructive" data-testid="button-clear-all-notifications"><Trash2 size={14} /> Clear all</button>}</div>} /><div className="overflow-hidden rounded-2xl border border-border bg-card">{ns.map((n) => <div key={n.id} className={cn('flex gap-4 border-b border-border p-5 transition-colors last:border-0', !n.read && 'bg-[#f3f8f3]')} data-testid={`row-notification-${n.id}`}><div className={cn('grid size-10 shrink-0 place-items-center rounded-xl', n.type === 'payment' ? 'bg-[#fff0cb] text-[#94651c]' : n.type === 'milestone' ? 'bg-[#d7eee4] text-[#287058]' : 'bg-[#dceaf1] text-[#32647b]')}><Bell size={17} /></div><div className="flex-1"><div className="flex items-center gap-2 text-sm font-bold">{n.title}{!n.read && <span className="size-1.5 rounded-full bg-[#dc815e]" />}</div><p className="mt-1 text-xs leading-5 text-muted-foreground">{n.body}</p><div className="mt-2 font-mono-app text-[10px] text-muted-foreground">{n.createdAt}</div></div>{!n.read && <button onClick={() => markRead.mutate(n.id)} className="self-start rounded-lg border border-border px-2.5 py-1.5 text-[10px] font-bold text-muted-foreground hover:bg-muted hover:text-foreground" data-testid={`button-mark-read-${n.id}`}>Mark read</button>}</div>)}{!ns.length && <EmptyState icon={Bell} title="All caught up" body="Nothing new right now." />}</div>
+    {confirmingClearAll && <ConfirmDialog title="Clear all notifications?" body="This permanently deletes every notification for every student and admin — including announcements students haven't seen yet. There is no undo." confirmLabel="Clear all" onCancel={() => setConfirmingClearAll(false)} onConfirm={() => clearAll.mutate()} pending={clearAll.isPending} />}
+  </div>;
 }
 
 export default Notifications;

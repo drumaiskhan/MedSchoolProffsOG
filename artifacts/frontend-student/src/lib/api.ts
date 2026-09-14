@@ -292,6 +292,10 @@ export const authApi = {
 
 export const notificationsApi = {
   markRead: (id: number) => request<{ ok: true }>(`/notifications/${id}/read`, { method: 'POST' }),
+  // Clears this student's own notification list: their personal
+  // notifications are deleted outright, and any broadcast announcements are
+  // hidden from just their view (other students still see them).
+  clearMine: () => request<{ ok: true }>('/notifications/clear', { method: 'POST' }),
 };
 
 // ---------------------------------------------------------------------------

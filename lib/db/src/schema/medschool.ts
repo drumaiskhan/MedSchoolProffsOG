@@ -647,6 +647,26 @@ export const notificationsTable = pgTable("med_notifications", {
   ...timestamps,
 });
 
+// Per-user "hide this" record for a notification the user doesn't own
+// outright — i.e. a broadcast row (notificationsTable.userId IS NULL) that
+// is shared across every student. A student's own "Clear all" can't just
+// delete those rows (that would erase the announcement for every other
+// student too), so it records a dismissal here instead; GET /notifications
+// excludes any notification the requesting user has dismissed. Rows the
+// user actually owns (userId = them) are hard-deleted by "Clear all"
+// instead of dismissed, so this table only ever holds dismissals of
+// broadcasts. An admin's "Clear all" is a different, global action (see
+// DELETE /admin/notifications/clear-all) that deletes the underlying
+// med_notifications rows entirely, which is what actually removes them for
+// students too — this table is just the per-student "hide" mechanism for
+// the student-facing button.
+export const notificationDismissalsTable = pgTable("med_notification_dismissals", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  notificationId: integer("notification_id").notNull(),
+  ...timestamps,
+});
+
 export const auditLogsTable = pgTable("med_audit_logs", {
   id: serial("id").primaryKey(),
   actorId: integer("actor_id"),

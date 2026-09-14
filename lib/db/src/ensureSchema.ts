@@ -567,6 +567,15 @@ CREATE TABLE IF NOT EXISTS med_notifications (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS med_notification_dismissals (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  notification_id INTEGER NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS med_notification_dismissals_user_id_idx ON med_notification_dismissals (user_id);
+
 CREATE TABLE IF NOT EXISTS med_audit_logs (
   id SERIAL PRIMARY KEY,
   actor_id INTEGER,

@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, asc, desc, eq, gte, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   ApprovePaymentParams,
@@ -53,6 +53,7 @@ import {
   flashcardsTable,
   resourcesTable,
   notificationsTable,
+  notificationDismissalsTable,
   auditLogsTable,
   academicYearsTable,
   programsTable,
@@ -1342,7 +1343,17 @@ router.delete("/students/:id/permanent", requireAdmin, async (req, res): Promise
 });
 
 router.get("/notifications", requireAuth, async (req, res): Promise<void> => {
-  const rows = await db.select().from(notificationsTable).where(or(eq(notificationsTable.userId, req.user!.id), sql`${notificationsTable.userId} IS NULL`)).orderBy(desc(notificationsTable.createdAt));
+  // Broadcasts (userId IS NULL) that this user has dismissed via "Clear
+  // all" (POST /notifications/clear) are excluded — see
+  // notificationDismissalsTable's comment in schema/medschool.ts for why
+  // dismissal, not deletion, is how a student's own clear-all affects a
+  // notification they don't own outright.
+  const dismissedRows = await db.select({ notificationId: notificationDismissalsTable.notificationId }).from(notificationDismissalsTable).where(eq(notificationDismissalsTable.userId, req.user!.id));
+  const dismissedIds = dismissedRows.map((r) => r.notificationId);
+  const rows = await db.select().from(notificationsTable).where(and(
+    or(eq(notificationsTable.userId, req.user!.id), sql`${notificationsTable.userId} IS NULL`),
+    dismissedIds.length ? notInArray(notificationsTable.id, dismissedIds) : undefined,
+  )).orderBy(desc(notificationsTable.createdAt));
   res.json(ListNotificationsResponse.parse(rows.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() }))));
 });
 
@@ -1350,6 +1361,41 @@ router.post("/notifications/:id/read", requireAuth, async (req, res): Promise<vo
   const id = Number(req.params.id);
   await db.update(notificationsTable).set({ read: true }).where(eq(notificationsTable.id, id));
   res.json({ ok: true });
+});
+
+// Student/personal "Clear all" — clears the CURRENT user's own notification
+// list only. Notifications this user actually owns (userId = them, e.g. a
+// personal "Payment needs attention") are hard-deleted; broadcasts they
+// merely see (userId IS NULL) are left in place for every other student and
+// instead recorded as dismissed for this user via
+// notificationDismissalsTable, so this can never wipe an announcement out
+// from under classmates. Contrast with DELETE /admin/notifications/clear-all
+// below, which really does delete everything for everyone — that's the
+// admin-only, cross-user version of "clear".
+router.post("/notifications/clear", requireAuth, async (req, res): Promise<void> => {
+  const userId = req.user!.id;
+  const visibleBroadcasts = await db.select({ id: notificationsTable.id }).from(notificationsTable).where(isNull(notificationsTable.userId));
+  await db.delete(notificationsTable).where(eq(notificationsTable.userId, userId));
+  if (visibleBroadcasts.length) {
+    const existingDismissals = await db.select({ notificationId: notificationDismissalsTable.notificationId }).from(notificationDismissalsTable).where(eq(notificationDismissalsTable.userId, userId));
+    const alreadyDismissed = new Set(existingDismissals.map((r) => r.notificationId));
+    const toDismiss = visibleBroadcasts.filter((n) => !alreadyDismissed.has(n.id));
+    if (toDismiss.length) await db.insert(notificationDismissalsTable).values(toDismiss.map((n) => ({ userId, notificationId: n.id })));
+  }
+  res.json({ ok: true });
+});
+
+// Admin "Clear all" — a genuine global wipe, not a per-user dismissal. This
+// deletes every row in med_notifications (every student's personal
+// notifications AND every broadcast), which is what makes them disappear
+// from students' notification lists too, per how this button is meant to
+// work. The dismissal table is cleared alongside it so it doesn't
+// accumulate orphaned rows pointing at now-deleted notification ids.
+router.delete("/admin/notifications/clear-all", requireAdmin, async (req, res): Promise<void> => {
+  const deleted = await db.delete(notificationsTable).returning({ id: notificationsTable.id });
+  await db.delete(notificationDismissalsTable);
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "NOTIFICATIONS_CLEARED_ALL", entity: "notification", entityId: null, metadata: JSON.stringify({ deletedCount: deleted.length }) });
+  res.json({ ok: true, deleted: deleted.length });
 });
 
 // ---------------------------------------------------------------------------
