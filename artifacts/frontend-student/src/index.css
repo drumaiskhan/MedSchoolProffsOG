@@ -56,10 +56,58 @@
   .btn-pop:active:not(:disabled) { transform: translateY(0) scale(.97); filter: brightness(.98); }
   .brand-spinner { color: hsl(var(--primary)); animation: brandSpin 1.7s ease-in-out infinite; stroke-dasharray: 190; stroke-dashoffset: 190; }
   .brand-spinner path { stroke-dasharray: 190; stroke-dashoffset: 190; animation: brandWaveDraw 1.7s ease-in-out infinite; }
+
+  /* Flashcard flip (grid view + study mode). Previously built from Tailwind
+     arbitrary-value classes ([transform-style:preserve-3d] etc.) plus an
+     inline style={{transform: ...}} on the SAME element that also carried
+     hover:-translate-y-0.5 / active:scale-[.99] and the unlayered
+     `button:active { transform: scale(.98) }` rule below — three different
+     things all fighting to own that element's `transform` property, and
+     the unlayered button rule always wins the cascade over any Tailwind
+     utility (see the CSS Cascade Layers note further down) regardless of
+     which one the inline style meant to express. Dedicated classes here
+     instead, with explicit vendor-prefixed backface-visibility (missing
+     before, which is what actually let the un-rotated face bleed through
+     mirrored/upside-down on browsers that don't infer the prefix) and
+     nothing else touching `transform` on the same elements.
+     Usage: .flip-card (perspective) > .flip-card-inner[.is-flipped]
+     (rotates) > .flip-card-face + .flip-card-face.flip-card-back. */
+  .flip-card { perspective: 1700px; }
+  .flip-card-inner {
+    position: relative;
+    width: 100%;
+    transform: rotateY(0deg);
+    transform-style: preserve-3d;
+    -webkit-transform-style: preserve-3d;
+    transition: transform .5s cubic-bezier(.4, .12, .2, 1);
+  }
+  .flip-card-inner.is-flipped { transform: rotateY(180deg); }
+  .flip-card-face {
+    position: absolute;
+    inset: 0;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    transform: rotateY(0deg);
+  }
+  .flip-card-face.flip-card-back { transform: rotateY(180deg); }
 }
-button { transition: transform .16s ease, box-shadow .16s ease, filter .16s ease, opacity .16s ease; }
-button:hover:not(:disabled) { filter: brightness(1.035); }
-button:active:not(:disabled) { transform: scale(.98); }
+@layer base {
+  /* Previously declared unlayered (no @layer wrapper) further down this
+     file — under CSS Cascade Layers, an unlayered rule always outranks a
+     layered one (any Tailwind utility class, including .flip-card-inner's
+     own 500ms transition and .is-flipped's rotateY) regardless of
+     specificity or source order. That's what made the flashcard flip
+     button's turn always animate over this rule's .16s instead of its own
+     intended 500ms, and always land on `transform: scale(.98)` mid-press
+     instead of whatever rotation state it was meant to be in — moving it
+     into @layer base lets ordinary specificity/layer-order rules decide
+     again, so a more specific utility class (like .flip-card-inner) wins
+     the way it visibly appears to in the markup. */
+  button { transition: transform .16s ease, box-shadow .16s ease, filter .16s ease, opacity .16s ease; }
+  button:hover:not(:disabled) { filter: brightness(1.035); }
+  button:active:not(:disabled) { transform: scale(.98); }
+}
+
 button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid hsl(var(--primary) / .55); outline-offset: 2px; }
 @keyframes pageIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes shimmer { to { background-position: -200% 0; } }

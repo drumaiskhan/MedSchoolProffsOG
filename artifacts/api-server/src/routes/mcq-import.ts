@@ -122,7 +122,17 @@ const CommitBody = z.object({
   topicId: z.number().int().positive().optional(),
   pastPaperId: z.number().int().positive().optional(),
   examId: z.number().int().positive().optional(),
-  status: z.enum(["draft", "published"]).default("draft"),
+  // Defaults to "published": the review UI's "Import as draft" / "Import &
+  // publish immediately" select already lets an admin explicitly choose
+  // draft when they actually want a review step, so this default only
+  // matters for a request that omits the field entirely. Was "draft",
+  // which silently hid every question that took that fallback from
+  // students (they only count towards a module/subject's question total
+  // once published) — that's what produced "I uploaded 406 questions but
+  // the module only shows 380": a batch was imported without explicitly
+  // picking "publish immediately" and sat invisible until manually
+  // published one-by-one.
+  status: z.enum(["draft", "published"]).default("published"),
   mcqs: z.array(z.object({
     question: z.string().min(1),
     options: z.array(z.string().min(1)).min(2).max(6),

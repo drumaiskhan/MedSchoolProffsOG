@@ -383,6 +383,8 @@ CREATE TABLE IF NOT EXISTS med_past_papers (
   institution_id INTEGER,
   program_id INTEGER,
   academic_year_id INTEGER,
+  program_target_kind TEXT,
+  year_target_number INTEGER,
   active BOOLEAN NOT NULL DEFAULT TRUE,
   archived BOOLEAN NOT NULL DEFAULT FALSE,
   display_order INTEGER NOT NULL DEFAULT 0,
@@ -616,5 +618,11 @@ ALTER TABLE med_subjects ADD COLUMN IF NOT EXISTS icon_path TEXT;
 -- Team member category (reviewer / question_setter / ownership) — existing
 -- rows default to 'reviewer' so they don't disappear from every group.
 ALTER TABLE med_team_members ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'reviewer';
+
+-- Past papers: simple program/year targeting, derived automatically from
+-- the existing Degree + Year picker in AdminPastPapers — same columns/
+-- semantics as med_modules/med_blocks already have.
+ALTER TABLE med_past_papers ADD COLUMN IF NOT EXISTS program_target_kind TEXT;
+ALTER TABLE med_past_papers ADD COLUMN IF NOT EXISTS year_target_number INTEGER;
 
 COMMIT;

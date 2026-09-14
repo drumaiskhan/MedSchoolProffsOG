@@ -436,6 +436,18 @@ export const pastPapersTable = pgTable("med_past_papers", {
   institutionId: integer("institution_id"),
   programId: integer("program_id"),
   academicYearId: integer("academic_year_id"),
+  // Simple targeting mirroring modulesTable/blocksTable's programTargetKind +
+  // yearTargetNumber, added alongside the older institutionId/programId/
+  // academicYearId FK trio above. Those FKs require an admin to have set up
+  // Colleges & courses first (most don't — see AdminPastPapers' "No programs
+  // set up yet" notice), so in practice they were almost always left null,
+  // which meant every paper stayed visible to every program/year regardless
+  // of the "Degree/Year" label shown on it. These two columns are instead
+  // derived automatically from that same Degree + Year picker at save time —
+  // no separate setup required — the same way a module or block is targeted.
+  // Null means "all programs" / "all years" on that axis, same convention.
+  programTargetKind: text("program_target_kind"),
+  yearTargetNumber: integer("year_target_number"),
   active: boolean("active").notNull().default(true),
   archived: boolean("archived").notNull().default(false),
   displayOrder: integer("display_order").notNull().default(0),

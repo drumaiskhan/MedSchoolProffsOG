@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db, pastPapersTable, mcqsTable, auditLogsTable, usersTable } from "@workspace/db";
 import { requireAdmin, requireAuth, requireActiveMembership, isAdminRole } from "../middlewares/auth";
 import { deleteMcqsEverywhere } from "../lib/mcqCascade";
+import { getStudentTargeting, isTargetVisible } from "../lib/contentVisibility";
 
 const router: IRouter = Router();
 
@@ -16,17 +17,24 @@ router.get("/past-papers", async (req, res): Promise<void> => {
   const isAdmin = req.user && (isAdminRole(req.user.role));
   const level = typeof req.query.level === "string" ? req.query.level : undefined;
 
-  // Scope students to their own program + academic year, the same way
-  // GET /exams already does via getStudentTargeting/isEligible — a paper
-  // with programId/academicYearId left null is "all programs/years" and
-  // stays visible to everyone; a paper tagged to a specific program/year
-  // is only visible to matching students. Admins see everything.
+  // Scope students to their own program + academic year. Two targeting
+  // mechanisms exist side by side here: the older institutionId/programId/
+  // academicYearId FK trio (which requires "Colleges & courses" to be set
+  // up first — see AdminPastPapers' "No programs set up yet" notice, which
+  // most admins never do), and programTargetKind/yearTargetNumber, which
+  // is derived automatically from the paper's own Degree + Year picker at
+  // save time — same simple convention Modules/Blocks already use, no
+  // separate setup needed. A paper is visible to a student only if it
+  // passes BOTH: left untouched on an axis (null) always passes that axis;
+  // set on either axis means the student's own value has to match it.
   let studentProgramId: number | null = null;
   let studentAcademicYearId: number | null = null;
+  let targeting = { programKind: null as string | null, yearNumber: null as number | null };
   if (req.user && !isAdmin) {
     const [student] = await db.select({ programId: usersTable.programId, academicYearId: usersTable.academicYearId }).from(usersTable).where(eq(usersTable.id, req.user.id));
     studentProgramId = student?.programId ?? null;
     studentAcademicYearId = student?.academicYearId ?? null;
+    targeting = await getStudentTargeting(req.user.id);
   }
 
   const rows = await db.select().from(pastPapersTable).where(and(
@@ -35,7 +43,8 @@ router.get("/past-papers", async (req, res): Promise<void> => {
     isAdmin || !req.user ? undefined : or(isNull(pastPapersTable.programId), eq(pastPapersTable.programId, studentProgramId ?? -1)),
     isAdmin || !req.user ? undefined : or(isNull(pastPapersTable.academicYearId), eq(pastPapersTable.academicYearId, studentAcademicYearId ?? -1)),
   )).orderBy(pastPapersTable.displayOrder);
-  res.json(await Promise.all(rows.map(paperView)));
+  const scoped = isAdmin || !req.user ? rows : rows.filter((row) => isTargetVisible(row.programTargetKind, row.yearTargetNumber, targeting));
+  res.json(await Promise.all(scoped.map(paperView)));
 });
 
 router.get("/past-papers/:id/mcqs", requireAuth, requireActiveMembership, async (req, res): Promise<void> => {
@@ -52,6 +61,11 @@ const PaperBody = z.object({
   institutionId: z.number().int().positive().optional(),
   programId: z.number().int().positive().optional(),
   academicYearId: z.number().int().positive().optional(),
+  // Derived from the Degree + Year picker (see the paperView/GET comment
+  // above) — null/omitted means "every program" / "every year" on that
+  // axis, same convention as Modules/Blocks.
+  programTargetKind: z.string().max(40).nullable().optional(),
+  yearTargetNumber: z.number().int().min(1).max(6).nullable().optional(),
   active: z.boolean().optional(),
   archived: z.boolean().optional(),
   displayOrder: z.number().int().optional(),
@@ -60,7 +74,13 @@ const PaperBody = z.object({
 router.post("/past-papers", requireAdmin, async (req, res): Promise<void> => {
   const parsed = PaperBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message }); return; }
-  const [row] = await db.insert(pastPapersTable).values({ ...parsed.data, active: parsed.data.active ?? true }).returning();
+  const { programTargetKind, yearTargetNumber, ...rest } = parsed.data;
+  const [row] = await db.insert(pastPapersTable).values({
+    ...rest,
+    active: parsed.data.active ?? true,
+    programTargetKind: programTargetKind ? programTargetKind.trim().toUpperCase() : null,
+    yearTargetNumber: yearTargetNumber ?? null,
+  }).returning();
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "PAST_PAPER_CREATED", entity: "past_paper", entityId: row.id });
   res.status(201).json(await paperView(row));
 });
@@ -69,7 +89,12 @@ router.patch("/past-papers/:id", requireAdmin, async (req, res): Promise<void> =
   const id = Number(req.params.id);
   const parsed = PaperBody.partial().safeParse(req.body);
   if (!parsed.success || Number.isNaN(id)) { res.status(400).json({ error: "Invalid request" }); return; }
-  const [row] = await db.update(pastPapersTable).set(parsed.data).where(eq(pastPapersTable.id, id)).returning();
+  const { programTargetKind, yearTargetNumber, ...rest } = parsed.data;
+  const [row] = await db.update(pastPapersTable).set({
+    ...rest,
+    ...(programTargetKind !== undefined ? { programTargetKind: programTargetKind ? programTargetKind.trim().toUpperCase() : null } : {}),
+    ...(yearTargetNumber !== undefined ? { yearTargetNumber } : {}),
+  }).where(eq(pastPapersTable.id, id)).returning();
   if (!row) { res.status(404).json({ error: "Past paper not found" }); return; }
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "PAST_PAPER_UPDATED", entity: "past_paper", entityId: row.id });
   res.json(await paperView(row));

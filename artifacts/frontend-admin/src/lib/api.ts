@@ -302,6 +302,10 @@ export const mcqAdminApi = {
   // that scope so the UI can offer "classify next batch".
   classifyDifficulty: (body: { ids: number[] } | { all: true; filters?: { moduleId?: number; subjectId?: number; topicId?: number } }) =>
     request<{ classified: number; remaining: number; results: Array<{ id: number; difficulty: 'easy' | 'moderate' | 'hard' }> }>('/admin/mcqs/classify-difficulty', { method: 'POST', body: JSON.stringify(body) }),
+  // One-click fix for the "imported 406, module only shows 380" gap — see
+  // mcq-import.ts's CommitBody.status comment. Omit moduleId to publish
+  // every draft in the whole bank.
+  publishDrafts: (moduleId?: number) => request<{ ok: true; published: number }>('/admin/mcqs/publish-drafts', { method: 'PATCH', body: JSON.stringify({ moduleId }) }),
 };
 
 export const mcqImportApi = {
@@ -360,7 +364,7 @@ export const mcqBackupApi = {
   },
 };
 
-export interface PastPaper { id: number; title: string; examBoard: string; year: string; level: string; active: boolean; archived?: boolean; displayOrder: number; mcqCount: number; programId: number | null; academicYearId: number | null }
+export interface PastPaper { id: number; title: string; examBoard: string; year: string; level: string; active: boolean; archived?: boolean; displayOrder: number; mcqCount: number; programId: number | null; academicYearId: number | null; programTargetKind: string | null; yearTargetNumber: number | null }
 export interface NotebookEntry { id: number; userId: number; mcqId: number | null; title: string; content: string; createdAt: string; updatedAt: string }
 export interface SavedSession { id: number; userId: number; name: string; config: Record<string, unknown>; createdAt: string }
 export interface FlaggedMcq { id: number; userId: number; mcqId: number; reason: string; status: 'open' | 'resolved'; createdAt: string }

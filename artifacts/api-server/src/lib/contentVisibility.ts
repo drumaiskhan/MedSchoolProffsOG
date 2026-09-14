@@ -1,5 +1,5 @@
 import { and, eq, isNull, or } from "drizzle-orm";
-import { db, usersTable, programsTable, academicYearsTable, modulesTable } from "@workspace/db";
+import { db, usersTable, programsTable, academicYearsTable, modulesTable, blocksTable } from "@workspace/db";
 
 export interface StudentTargeting {
   programKind: string | null;
@@ -37,6 +37,32 @@ export async function getVisibleModuleIds(targeting: StudentTargeting): Promise<
       or(isNull(modulesTable.yearTargetNumber), targeting.yearNumber !== null ? eq(modulesTable.yearTargetNumber, targeting.yearNumber) : isNull(modulesTable.yearTargetNumber)),
     ));
   return rows.map((r) => r.id);
+}
+
+/** Generic version of the null-means-everyone matching logic GET /modules
+ * already did inline above, factored out so every other content type with
+ * the same programTargetKind/yearTargetNumber pair (Blocks, Past papers —
+ * see their routes) can reuse the exact same rule instead of re-deriving a
+ * subtly different one per route. Null on either axis always passes that
+ * axis; a set value only passes for a student whose own targeting matches
+ * it exactly. */
+export function isTargetVisible(programTargetKind: string | null, yearTargetNumber: number | null, targeting: StudentTargeting): boolean {
+  const programOk = !programTargetKind || (targeting.programKind !== null && targeting.programKind === programTargetKind);
+  const yearOk = !yearTargetNumber || (targeting.yearNumber !== null && targeting.yearNumber === yearTargetNumber);
+  return programOk && yearOk;
+}
+
+/** Blocks equivalent of getVisibleModuleIds — was previously missing
+ * entirely, which is why GET /blocks (medschool.ts) used to show every
+ * block to every student regardless of its own programTargetKind/
+ * yearTargetNumber (a block's targeting only ever affected the admin
+ * badge, never actual visibility). */
+export async function getVisibleBlockIds(targeting: StudentTargeting): Promise<number[]> {
+  const rows = await db
+    .select({ id: blocksTable.id, programTargetKind: blocksTable.programTargetKind, yearTargetNumber: blocksTable.yearTargetNumber })
+    .from(blocksTable)
+    .where(eq(blocksTable.active, true));
+  return rows.filter((r) => isTargetVisible(r.programTargetKind, r.yearTargetNumber, targeting)).map((r) => r.id);
 }
 
 /** Human-readable summary of a module's targeting, for admin UI badges. */

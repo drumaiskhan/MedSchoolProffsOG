@@ -71,7 +71,7 @@ import {
   examQuestionsTable,
 } from "@workspace/db";
 import { requireAuth, requireAdmin, requireActiveMembership, isAdminRole } from "../middlewares/auth";
-import { getStudentTargeting, getVisibleModuleIds, describeModuleTargeting } from "../lib/contentVisibility";
+import { getStudentTargeting, getVisibleModuleIds, getVisibleBlockIds, describeModuleTargeting } from "../lib/contentVisibility";
 import { resolveFileUrl, THUMBNAIL_TRANSFORM } from "../lib/storage";
 import { dbErrorMessage } from "../lib/dbErrors";
 import { sendEmail, membershipActivatedEmailHtml } from "../lib/email";
@@ -430,8 +430,19 @@ router.delete("/payments/:id/permanent", requireAdmin, async (req, res): Promise
 
 router.get("/blocks", requireAuth, async (req, res): Promise<void> => {
   const isAdmin = isAdminRole(req.user!.role);
+  // Bug fix: this never applied programTargetKind/yearTargetNumber at all
+  // (unlike GET /modules, which has always used getVisibleModuleIds) — a
+  // block's targeting only ever showed up as an admin-facing badge, so a
+  // Year-1-only block was visible to every year, including 3rd year. Same
+  // null-means-everyone matching Modules/Past papers use, via the new
+  // getVisibleBlockIds helper.
+  let visibleIds: number[] | null = null;
+  if (!isAdmin) {
+    const targeting = await getStudentTargeting(req.user!.id);
+    visibleIds = await getVisibleBlockIds(targeting);
+  }
   const rows = await db.select().from(blocksTable)
-    .where(isAdmin ? undefined : eq(blocksTable.active, true))
+    .where(and(isAdmin ? undefined : eq(blocksTable.active, true), visibleIds ? inArray(blocksTable.id, visibleIds) : undefined))
     .orderBy(blocksTable.displayOrder);
   res.json(rows.map((row) => ({
     id: row.id,
@@ -937,6 +948,24 @@ router.delete("/admin/mcqs/bulk", requireAdmin, async (req, res): Promise<void> 
   res.json({ ok: true, deleted: idsToDelete.length });
 });
 
+// One-click fix for a module stuck showing fewer questions than were
+// actually imported into it (see the CommitBody.status comment in
+// mcq-import.ts for the root cause) — flips every draft MCQ scoped to a
+// module (or every draft MCQ in the whole bank, if moduleId is omitted)
+// to "published" in one request, instead of the admin opening each one.
+router.patch("/admin/mcqs/publish-drafts", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = z.object({ moduleId: z.number().int().positive().optional() }).safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const rows = await db.update(mcqsTable).set({ status: "published" }).where(and(
+    eq(mcqsTable.status, "draft"),
+    parsed.data.moduleId ? eq(mcqsTable.moduleId, parsed.data.moduleId) : undefined,
+  )).returning({ id: mcqsTable.id });
+  if (rows.length) {
+    await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MCQS_DRAFTS_PUBLISHED", entity: "mcq", entityId: parsed.data.moduleId ?? 0, metadata: JSON.stringify({ moduleId: parsed.data.moduleId ?? null, count: rows.length }) });
+  }
+  res.json({ ok: true, published: rows.length });
+});
+
 // Bulk create for the "Add multiple MCQs" admin flow — accepts an array of
 // MCQ payloads shaped like CreateMcqBody and inserts them in one request.
 router.post("/admin/mcqs/bulk", requireAdmin, async (req, res): Promise<void> => {
@@ -1280,7 +1309,13 @@ router.post("/admin/notifications/broadcast", requireAdmin, async (req, res): Pr
   // GET /notifications already treats as "visible to everyone".
   if (!normalizedKind && !yearTargetNumber) {
     const [row] = await db.insert(notificationsTable).values({ userId: null, title, body, type: type ?? "info" }).returning();
-    await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "NOTIFICATION_BROADCAST", entity: "notification", entityId: row.id });
+    // metadata lets the admin's "Recently sent" panel (NotificationBroadcastPanel)
+    // show proof a broadcast actually went out — see that panel's comment
+    // for why this exists: a targeted broadcast never lands in the sending
+    // admin's own bell (admins are excluded from the student match below),
+    // so without this there was no confirmation trail at all beyond a
+    // toast that's gone the moment you dismiss it.
+    await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "NOTIFICATION_BROADCAST", entity: "notification", entityId: row.id, metadata: JSON.stringify({ title, body, scope: "All programs · All years", targetedUsers: null }) });
     res.json({ ok: true, targetedUsers: null });
     return;
   }
@@ -1302,9 +1337,21 @@ router.post("/admin/notifications/broadcast", requireAdmin, async (req, res): Pr
     })
     .map((s) => s.id);
 
-  if (!targetIds.length) { res.json({ ok: true, targetedUsers: 0 }); return; }
+  const scope = `${normalizedKind || "All programs"} · ${yearTargetNumber ? `Year ${yearTargetNumber}` : "All years"}`;
+  if (!targetIds.length) {
+    // Still logged (with targetedUsers: 0) rather than silently skipped —
+    // this is exactly the case that used to look like "I sent it and
+    // nothing happened": the request succeeds, a toast flashes past, and
+    // there's zero recipients to leave any other trace. Now it shows up in
+    // "Recently sent" with 0 matching students, which tells the admin
+    // *why* it didn't reach anyone (no student is currently in that
+    // program/year) instead of leaving them wondering if sending failed.
+    await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "NOTIFICATION_BROADCAST", entity: "notification", entityId: 0, metadata: JSON.stringify({ title, body, scope, targetedUsers: 0 }) });
+    res.json({ ok: true, targetedUsers: 0 });
+    return;
+  }
   await db.insert(notificationsTable).values(targetIds.map((userId) => ({ userId, title, body, type: type ?? "info" })));
-  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "NOTIFICATION_BROADCAST", entity: "notification", entityId: targetIds[0] });
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "NOTIFICATION_BROADCAST", entity: "notification", entityId: targetIds[0], metadata: JSON.stringify({ title, body, scope, targetedUsers: targetIds.length }) });
   res.json({ ok: true, targetedUsers: targetIds.length });
 });
 

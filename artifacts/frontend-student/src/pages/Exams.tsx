@@ -1,0 +1,80 @@
+// Auto-extracted route page — code-split via React.lazy() in App.tsx.
+import { type ReactNode, type ComponentProps, type TouchEvent, useState, useEffect, useRef, createContext, useContext } from 'react';
+import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, Route, Switch, useLocation, useParams, useSearch, Router as WouterRouter } from 'wouter';
+import {
+  ArrowLeft, ArrowRight, BookOpen, Check, CheckCircle2, ChevronRight,
+  CircleHelp, Clock3, CreditCard, FileText, Flame, FolderOpen,
+  LayoutDashboard, Library, LockKeyhole, LogOut, Menu, MoreHorizontal, Pencil, Plus,
+  ReceiptText, Search, Settings, ShieldCheck, Sparkles, Stethoscope, Target, Trash2,
+  TrendingUp, TrendingDown, Minus, Users, X, Zap, Bell, SlidersHorizontal, FileStack, NotebookPen, Bookmark,
+  Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
+  GraduationCap, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
+  RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Link2 as LinkIcon, Lightbulb,
+  LayoutGrid, Presentation, Wand2, Crown, Globe, Star, Activity
+} from 'lucide-react';
+import { applyThemeVars } from '@/lib/theme';
+import {
+  getListMembershipPlansQueryKey, getListPaymentsQueryKey, getListMcqsQueryKey, getListModulesQueryKey, getListStudentsQueryKey, getListNotificationsQueryKey, getGetCurrentUserQueryKey,
+  useApprovePayment, useCreateMembershipPlan, useCreateMcq, useCreateModule, useGetAdminDashboard,
+  useGetCurrentUser, useGetStudentDashboard, useListFlashcards, useListMembershipPlans,
+  useListMcqs, useListModules, useListNotifications, useListPayments, useListResources,
+  useListStudents, useListSubjects, useListTopics, useRejectPayment,
+  useSubmitPayment, useUpdateMembershipPlan,
+} from '@workspace/api-client-react';
+import type {
+  AdminDashboard, Flashcard, Mcq, MembershipPlan, Module, Notification, Payment, Resource,
+  Student, Subject, Topic, User
+} from '@workspace/api-client-react';
+import { ErrorBoundary } from '@/components/error-boundary';
+import { Toaster } from '@/components/ui/toaster';
+import { toast } from '@/hooks/use-toast';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import NotFound from '@/pages/not-found';
+import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, type MyFeedbackEntry, analyticsApi, type ProgressTrend, mcqImportApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blocksApi, type Block, examsAdminApi, examsApi, explanationsApi, booksApi, type AdminBookStudent, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type StudentDetail, type SiteContent, type TeamMember, TEAM_CATEGORIES, TEAM_CATEGORY_LABELS, type AdminModule, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type PaymentDetails, type PaymentMethodConfig, aiVisualizerApi, type VisualizationSpec, LeaderboardRow } from '@/lib/api';
+import { VisualizationRenderer, isStepBased } from '@/components/visualizer/VisualizationRenderer';
+import { StepControls } from '@/components/visualizer/StepControls';
+import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
+
+// Round 3, item 10 (performance) — this was `new QueryClient()` with no
+// options, meaning every query defaulted to `staleTime: 0` and refetched
+// on every component mount AND every window refocus. For a study app where
+// most data (modules, subjects, MCQs, progress) doesn't change
+// second-to-second, that's a real over-fetching cost on every navigation
+// and every alt-tab back to the app — exactly the "waterfalls/refetch on
+// every mount" pattern item 10 flagged as a likely culprit. A 30s
+// staleTime means switching between pages you've already visited in the
+// last 30s reuses cached data instead of re-hitting the API, and turning
+// off refetch-on-window-focus stops a background-tab refocus from firing
+// a full page's worth of requests. Individual queries that DO need to
+// react fast (the live leaderboard's refetchInterval, mutations that
+// invalidateQueries after a save) already set their own options, which
+// override these defaults per-query — this only changes the fallback for
+// queries that didn't specify anything.
+import { SectionHeader } from '@/lib/shared';
+
+function Exams() {
+  const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
+  const q = useQuery({ queryKey: ['exams'], queryFn: examsApi.list });
+  const start = useMutation({
+    mutationFn: examsApi.start,
+    onSuccess: (res) => setLocation(`/exams/take/${res.attemptId}`),
+    onError: (err: unknown) => {
+      // Previously this failed completely silently — clicking "Start
+      // exam" would just do nothing if the server rejected it (no
+      // questions attached, window closed between page-load and click,
+      // attempts exhausted, etc.). Now the real reason actually reaches
+      // the student instead of looking like a dead button.
+      toast({ title: 'Could not start this exam', description: err instanceof ApiRequestError ? err.message : 'Something went wrong — please try again.', variant: 'destructive' });
+      queryClient.invalidateQueries({ queryKey: ['exams'] });
+    },
+  });
+  const exams = q.data || [];
+  return <div><SectionHeader eyebrow="Assessment" title="Pre-Proffs Exams" action={<span className="text-[10px] text-muted-foreground">Timed · results follow your admin's release settings</span>} />
+    <div className="grid gap-3 sm:grid-cols-2">{exams.map((exam) => <ExamCard key={exam.id} exam={exam} onStart={() => start.mutate(exam.id)} />)}{!exams.length && <EmptyState icon={ClipboardCheck} title="No exams scheduled" body="Your admin hasn't published an exam for your program and year yet." />}</div>
+  </div>;
+}
+
+export default Exams;

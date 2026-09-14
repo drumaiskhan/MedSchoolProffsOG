@@ -1,0 +1,241 @@
+// Auto-extracted route page — code-split via React.lazy() in App.tsx.
+import { type ReactNode, type ComponentProps, type TouchEvent, useState, useEffect, useRef, createContext, useContext } from 'react';
+import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, Route, Switch, useLocation, useParams, useSearch, Router as WouterRouter } from 'wouter';
+import {
+  ArrowLeft, ArrowRight, BookOpen, Check, CheckCircle2, ChevronRight,
+  CircleHelp, Clock3, CreditCard, FileText, Flame, FolderOpen,
+  LayoutDashboard, Library, LockKeyhole, LogOut, Menu, MoreHorizontal, Pencil, Plus,
+  ReceiptText, Search, Settings, ShieldCheck, Sparkles, Stethoscope, Target, Trash2,
+  TrendingUp, TrendingDown, Minus, Users, X, Zap, Bell, SlidersHorizontal, FileStack, NotebookPen, Bookmark,
+  Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
+  GraduationCap, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
+  RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Link2 as LinkIcon, Lightbulb,
+  LayoutGrid, Presentation, Wand2, Crown, Globe, Star, Activity
+} from 'lucide-react';
+import { applyThemeVars } from '@/lib/theme';
+import {
+  getListMembershipPlansQueryKey, getListPaymentsQueryKey, getListMcqsQueryKey, getListModulesQueryKey, getListStudentsQueryKey, getListNotificationsQueryKey, getGetCurrentUserQueryKey,
+  useApprovePayment, useCreateMembershipPlan, useCreateMcq, useCreateModule, useGetAdminDashboard,
+  useGetCurrentUser, useGetStudentDashboard, useListFlashcards, useListMembershipPlans,
+  useListMcqs, useListModules, useListNotifications, useListPayments, useListResources,
+  useListStudents, useListSubjects, useListTopics, useRejectPayment,
+  useSubmitPayment, useUpdateMembershipPlan,
+} from '@workspace/api-client-react';
+import type {
+  AdminDashboard, Flashcard, Mcq, MembershipPlan, Module, Notification, Payment, Resource,
+  Student, Subject, Topic, User
+} from '@workspace/api-client-react';
+import { ErrorBoundary } from '@/components/error-boundary';
+import { Toaster } from '@/components/ui/toaster';
+import { toast } from '@/hooks/use-toast';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import NotFound from '@/pages/not-found';
+import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, type MyFeedbackEntry, analyticsApi, type ProgressTrend, mcqImportApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blocksApi, type Block, examsAdminApi, examsApi, explanationsApi, booksApi, type AdminBookStudent, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type StudentDetail, type SiteContent, type TeamMember, TEAM_CATEGORIES, TEAM_CATEGORY_LABELS, type AdminModule, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type PaymentDetails, type PaymentMethodConfig, aiVisualizerApi, type VisualizationSpec, LeaderboardRow } from '@/lib/api';
+import { VisualizationRenderer, isStepBased } from '@/components/visualizer/VisualizationRenderer';
+import { StepControls } from '@/components/visualizer/StepControls';
+import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
+
+// Round 3, item 10 (performance) — this was `new QueryClient()` with no
+// options, meaning every query defaulted to `staleTime: 0` and refetched
+// on every component mount AND every window refocus. For a study app where
+// most data (modules, subjects, MCQs, progress) doesn't change
+// second-to-second, that's a real over-fetching cost on every navigation
+// and every alt-tab back to the app — exactly the "waterfalls/refetch on
+// every mount" pattern item 10 flagged as a likely culprit. A 30s
+// staleTime means switching between pages you've already visited in the
+// last 30s reuses cached data instead of re-hitting the API, and turning
+// off refetch-on-window-focus stops a background-tab refocus from firing
+// a full page's worth of requests. Individual queries that DO need to
+// react fast (the live leaderboard's refetchInterval, mutations that
+// invalidateQueries after a save) already set their own options, which
+// override these defaults per-query — this only changes the fallback for
+// queries that didn't specify anything.
+import { Badge, EmptyState, Progress, SkeletonPage, TopicBadge, cn, topicAccentStyles, topicColorVar } from '@/lib/shared';
+
+function Flashcards() {
+  const search = useSearch();
+  const [, navigate] = useLocation();
+  const urlTopicId = Number(new URLSearchParams(search).get('topic')) || undefined;
+  const modulesQ = useListModules();
+  const modules = modulesQ.data ?? [];
+  const [moduleId, setModuleId] = useState('');
+  const subjectsQ = useListSubjects(moduleId ? { moduleId: Number(moduleId) } : undefined);
+  // Unfiltered — used only to compute the "Subjects"/"Topics" stat cards
+  // across everything the student can see, independent of the cascading
+  // module/subject/topic filter below.
+  const allSubjectsQ = useListSubjects();
+  const allTopicsQ = useListTopics();
+  const [subjectId, setSubjectId] = useState('');
+  const topicsQ = useListTopics(subjectId ? { subjectId: Number(subjectId) } : undefined);
+  const [topicId, setTopicId] = useState(urlTopicId ? String(urlTopicId) : '');
+  const activeTopicId = Number(topicId) || undefined;
+  const [queryText, setQueryText] = useState('');
+  const [view, setView] = useState<'grid' | 'study'>('grid');
+  const [flippedIds, setFlippedIds] = useState<Set<number>>(new Set());
+  // Streak badge (top-right) — same data source as the dashboard's streak card.
+  const streakQ = useQuery({ queryKey: ['analytics', '7d'], queryFn: () => analyticsApi.get('7d') });
+
+  // Program/year scoping already happens server-side via getVisibleModuleIds
+  // (same as past papers/exams) — these selects just let the student narrow
+  // *within* what they can already see, so they get flashcards relevant to
+  // what they're actually studying instead of a random mixed deck.
+  const q = useListFlashcards(activeTopicId ? { topicId: activeTopicId } : undefined);
+  // Unfiltered — drives the "Total Available" stat regardless of the
+  // module/subject/topic filter currently applied to the deck/grid below.
+  const allCardsQ = useListFlashcards();
+  const [index, setIndex] = useState(0);
+  const [flipped, setFlipped] = useState(false);
+  const [known, setKnown] = useState<Record<number, boolean>>({});
+  const cards: Flashcard[] = q.data ?? [];
+  const visibleCards = queryText.trim() ? cards.filter((c) => c.front.toLowerCase().includes(queryText.trim().toLowerCase()) || c.back.toLowerCase().includes(queryText.trim().toLowerCase())) : cards;
+  const card = cards[index % Math.max(cards.length, 1)];
+  const knownCount = Object.values(known).filter(Boolean).length;
+  const askAi = useMutation({ mutationFn: () => explanationsApi.askAiFlashcard(card!.id) });
+
+  const advance = (isKnown: boolean) => { setKnown((prev) => ({ ...prev, [card.id]: isKnown })); setIndex((i) => i + 1); setFlipped(false); askAi.reset(); };
+  const resetDeck = () => { setIndex(0); setKnown({}); setFlipped(false); askAi.reset(); };
+  const toggleGridFlip = (id: number) => setFlippedIds((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
+
+  const stats: Array<[string, number]> = [
+    ['Total Available', allCardsQ.data?.length ?? 0],
+    ['Topics', allTopicsQ.data?.length ?? 0],
+    ['Subjects', allSubjectsQ.data?.length ?? 0],
+    ['Modules', modules.length],
+  ];
+
+  const header = <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+    <div className="flex items-start gap-3"><div className="grid size-11 shrink-0 place-items-center rounded-xl bg-[#164b4b] text-white"><Zap size={20} /></div><div><h2 className="text-[22px] font-extrabold tracking-[-.03em]">Study Flashcards</h2><p className="mt-0.5 text-xs text-muted-foreground">Master your knowledge with interactive flashcards</p></div></div>
+    {(streakQ.data?.currentStreak ?? 0) > 0 && <span className="inline-flex items-center gap-1.5 rounded-full bg-[#fff0cb] px-3 py-1.5 text-[11px] font-bold text-[#8d6420]" data-testid="text-flashcard-streak"><Flame size={13} /> {streakQ.data?.currentStreak} day streak</span>}
+  </div>;
+
+  const toolbar = <div className="mb-5 flex flex-wrap items-center gap-2">
+    <div className="flex overflow-hidden rounded-xl border border-border bg-card">
+      <button onClick={() => setView('grid')} className={cn('grid size-9 place-items-center', view === 'grid' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')} title="Grid view" data-testid="button-flashcard-view-grid"><LayoutGrid size={15} /></button>
+      <button onClick={() => setView('study')} className={cn('grid size-9 place-items-center border-l border-border', view === 'study' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')} title="Study mode" data-testid="button-flashcard-view-study"><Presentation size={15} /></button>
+    </div>
+    <button onClick={() => { resetDeck(); setFlippedIds(new Set()); }} className="grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted" title="Restart" data-testid="button-flashcard-refresh"><RotateCcw size={15} /></button>
+  </div>;
+
+  const statCards = <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">{stats.map(([label, value]) => <div key={label} className="rounded-2xl border border-border bg-card p-4 text-center"><div className="font-display text-2xl">{value}</div><div className="mt-1 text-[11px] font-semibold text-muted-foreground">{label}</div></div>)}</div>;
+
+  const filterBar = <div className="mb-5 space-y-2 rounded-2xl border border-border bg-card p-4">
+    <select value={moduleId} onChange={(e) => { setModuleId(e.target.value); setSubjectId(''); setTopicId(''); navigate('/flashcards'); resetDeck(); }} className="h-10 w-full rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-flashcard-module"><option value="">All Modules</option>{modules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
+    <select value={subjectId} onChange={(e) => { setSubjectId(e.target.value); setTopicId(''); resetDeck(); }} disabled={!moduleId} className="h-10 w-full rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-flashcard-subject"><option value="">All Subjects</option>{(subjectsQ.data || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+    <select value={topicId} onChange={(e) => { setTopicId(e.target.value); resetDeck(); }} disabled={!subjectId} className="h-10 w-full rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-flashcard-topic"><option value="">All Topics</option>{(topicsQ.data || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
+    <div className="relative"><Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><input value={queryText} onChange={(e) => setQueryText(e.target.value)} placeholder="Search flashcards..." className="h-10 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-xs" data-testid="input-flashcard-search" /></div>
+  </div>;
+
+  if (!q.isLoading && !cards.length) {
+    return <div className="mx-auto max-w-3xl">{header}{toolbar}{statCards}{filterBar}<EmptyState icon={Zap} title={activeTopicId ? 'No flashcards here yet' : 'No flashcards yet'} body={activeTopicId ? "Your academic team hasn't published flashcards for this topic yet." : "Your academic team hasn't published any flashcards yet."} /></div>;
+  }
+  if (q.isLoading || !card) return <div className="mx-auto max-w-3xl">{header}{toolbar}{statCards}{filterBar}<SkeletonPage /></div>;
+
+  if (view === 'grid') {
+    return <div className="mx-auto max-w-3xl">{header}{toolbar}{statCards}{filterBar}
+      {!visibleCards.length ? <EmptyState icon={Search} title="No matches" body="No flashcards match your search — try a different term." /> : <div className="space-y-5">{visibleCards.map((c, i) => {
+        const isFlipped = flippedIds.has(c.id);
+        const accent = topicAccentStyles(c.topic || c.module);
+        return <div key={c.id} className="flip-card" data-testid={`card-flashcard-grid-${c.id}`}>
+          <button
+            onClick={() => toggleGridFlip(c.id)}
+            className={cn('flip-card-inner group block min-h-[220px] rounded-2xl text-left', isFlipped && 'is-flipped')}
+            data-testid={`button-flip-flashcard-${c.id}`}
+          >
+            {/* Front — the question */}
+            <div className="flip-card-face card-lift flex flex-col overflow-hidden rounded-2xl border bg-card p-6" style={{ ...accent.border, ...accent.wash }}>
+              <div aria-hidden className="pointer-events-none absolute -right-6 -top-8 size-24 rotate-12 rounded-2xl border-[8px] border-current opacity-[0.06]" />
+              <div className="flex flex-wrap items-center gap-2"><span className="rounded-full border border-border bg-card px-2.5 py-1 text-[10px] font-bold">Question {i + 1}</span><TopicBadge label={c.topic} /></div>
+              <div className="flex flex-1 items-center justify-center"><p className="text-center text-base font-bold leading-7">{c.front}</p></div>
+              <div className="flex flex-wrap items-center justify-center gap-2"><Badge tone="neutral">{c.module}</Badge></div>
+              <div className="mt-3 text-center text-[11px] font-semibold text-muted-foreground transition-colors group-hover:text-foreground">Click to reveal the answer</div>
+            </div>
+            {/* Back — the answer, distinct tint so flip state is unmistakable */}
+            <div className="flip-card-face flip-card-back flex flex-col overflow-hidden rounded-2xl border p-6 shadow-sm" style={{ ...accent.border, background: 'hsl(var(--card))' }}>
+              <div aria-hidden className="pointer-events-none absolute -bottom-8 -left-6 size-20 rounded-full border-[8px] border-current opacity-[0.06]" />
+              <div className="flex flex-wrap items-center gap-2"><span className="rounded-full px-2.5 py-1 text-[10px] font-bold" style={accent.badge}>Answer {i + 1}</span><TopicBadge label={c.topic} /></div>
+              <div className="flex flex-1 items-center justify-center"><p className="text-center text-base font-bold leading-7">{c.back}</p></div>
+              <div className="flex flex-wrap items-center justify-center gap-2"><Badge tone="neutral">{c.module}</Badge></div>
+              <div className="mt-3 text-center text-[11px] font-semibold text-muted-foreground">Click to flip back</div>
+            </div>
+          </button>
+        </div>;
+      })}</div>}
+    </div>;
+  }
+
+  const cardAccent = topicAccentStyles(card.topic || card.module);
+  const stillLearningCount = Object.values(known).filter((v) => v === false).length;
+  const reviewedCount = Object.keys(known).length;
+  const cardNumber = (index % cards.length) + 1;
+
+  const goPrev = () => { setIndex((i) => Math.max(0, i - 1)); setFlipped(false); askAi.reset(); };
+  const goNext = () => { setIndex((i) => (i + 1) % cards.length); setFlipped(false); askAi.reset(); };
+
+  // Minimal inline swipe hook — horizontal drag past a 50px threshold
+  // triggers Next (swipe left) / Previous (swipe right). No library needed
+  // for one gesture; small enough to keep next to the component that uses it.
+  const touchStartX = { current: 0 };
+  const onTouchStart = (e: TouchEvent) => { touchStartX.current = e.touches[0].clientX; };
+  const onTouchEnd = (e: TouchEvent) => {
+    const delta = e.changedTouches[0].clientX - touchStartX.current;
+    if (Math.abs(delta) < 50) return;
+    if (delta < 0) goNext(); else goPrev();
+  };
+
+  // Slim top strip (back arrow + page name + "x / y" progress) matching
+  // the reference design's study-mode header, layered above the existing
+  // richer header/toolbar/stat-card block rather than replacing it.
+  const studyTopStrip = <div className="mb-4 flex items-center gap-3">
+    <Link href="/dashboard" className="grid size-8 shrink-0 place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:bg-muted" data-testid="link-flashcards-back" aria-label="Back"><ArrowLeft size={15} /></Link>
+    <span className="text-sm font-extrabold">Flashcards</span>
+    <div className="ml-auto flex items-center gap-2"><div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted sm:w-40"><div className="h-full rounded-full bg-primary transition-all" style={{ width: `${(cardNumber / cards.length) * 100}%` }} /></div><span className="font-mono-app text-[11px] text-muted-foreground">{cardNumber} / {cards.length}</span></div>
+  </div>;
+
+  return <div className="mx-auto max-w-3xl">{studyTopStrip}{header}{toolbar}{statCards}{filterBar}
+    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+      <span className="font-mono-app text-[11px] text-muted-foreground">Card {cardNumber} of {cards.length}</span>
+      <div className="flex items-center gap-2 text-[11px] font-bold">
+        {knownCount > 0 && <span className="inline-flex items-center gap-1 rounded-full bg-[#d7eee4] px-2.5 py-1 text-[#287058]"><ThumbsUp size={11} /> {knownCount} known</span>}
+        {stillLearningCount > 0 && <span className="inline-flex items-center gap-1 rounded-full bg-[#fff0cb] px-2.5 py-1 text-[#8d6420]"><ThumbsDown size={11} /> {stillLearningCount} learning</span>}
+      </div>
+    </div>
+    <div className="mb-4"><Progress value={(reviewedCount / cards.length) * 100} color="bg-primary" /></div>
+    <div className="mb-4 flex justify-center gap-1.5">{cards.map((c, i) => <div key={c.id} className={cn('h-1.5 w-6 rounded-full transition-colors', i === index % cards.length ? 'bg-primary' : known[c.id] === true ? 'bg-[#8bcbb8]' : known[c.id] === false ? 'bg-[#e5a952]' : 'bg-muted')} />)}</div>
+    <div className="flex items-center gap-2 sm:gap-4">
+      <button onClick={goPrev} disabled={index === 0} className="hidden size-11 shrink-0 rounded-full border border-border bg-card text-muted-foreground disabled:opacity-30 disabled:pointer-events-none hover:bg-muted sm:grid sm:place-items-center" data-testid="button-flashcard-prev" aria-label="Previous card"><ArrowLeft size={16} /></button>
+      <div className="flip-card flex-1" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}><button onClick={() => setFlipped(!flipped)} className={cn('flip-card-inner min-h-[350px] md:min-h-[420px]', flipped && 'is-flipped')} data-testid="button-flashcard">
+        {/* Front — same badge row / footer language as the grid card's front face, just at single-card scale, plus 3 low-opacity decorative shapes behind the content so grid and study read as one design language. */}
+        <div className="flip-card-face flex flex-col overflow-hidden rounded-3xl border p-9 text-left text-[#eaf2e9] shadow-lg md:p-14" style={{ background: `linear-gradient(155deg, hsl(var(${topicColorVar(card.topic || card.module)}) / 0.92), hsl(208 40% 14%))` }}>
+          <div aria-hidden className="pointer-events-none absolute -right-10 -top-14 size-48 rotate-12 rounded-[2rem] border-[14px] border-white/10" />
+          <div aria-hidden className="pointer-events-none absolute -bottom-16 -left-8 size-40 rounded-full border-[10px] border-white/10" />
+          <div className="relative flex flex-wrap items-center gap-2"><span className="rounded-full border border-white/20 bg-white/10 px-2.5 py-1 text-[10px] font-bold">Question {cardNumber}</span><TopicBadge label={card.topic} /></div>
+          <div className="relative flex flex-1 items-center justify-center text-center"><h2 className="mx-auto max-w-xl font-display text-3xl leading-tight md:text-5xl">{card.front}</h2></div>
+          <div className="relative flex flex-wrap items-center justify-center gap-2"><Badge tone="neutral">{card.module}</Badge></div>
+          <div className="relative mt-3 flex justify-center text-xs text-[#eaf2e9]/70">Click to reveal the answer <ArrowRight size={14} className="ml-2" /></div>
+        </div>
+        {/* Back — same tinted-card language as the grid card's back face */}
+        <div className="flip-card-face flip-card-back flex flex-col overflow-hidden rounded-3xl border p-9 text-left shadow-lg md:p-14" style={{ background: `hsl(var(${topicColorVar(card.topic || card.module)}) / 0.1)`, ...cardAccent.border }}>
+          <div aria-hidden className="pointer-events-none absolute -right-8 -bottom-12 size-40 rotate-12 rounded-[2rem]" style={{ ...cardAccent.wash }} />
+          <div className="relative flex flex-wrap items-center gap-2"><span className="rounded-full px-2.5 py-1 text-[10px] font-bold" style={cardAccent.badge}>Answer {cardNumber}</span><TopicBadge label={card.topic} /></div>
+          <div className="relative flex flex-1 items-center justify-center text-center"><h2 className="mx-auto max-w-xl font-display text-2xl leading-tight text-[#164b4b] md:text-4xl">{card.back}</h2></div>
+          <div className="relative flex flex-wrap items-center justify-center gap-2"><Badge tone="neutral">{card.module}</Badge></div>
+          <div className="relative mt-3 text-center text-xs" style={{ color: `hsl(var(${topicColorVar(card.topic || card.module)}))` }}>Click to flip back</div>
+        </div>
+      </button></div>
+      <button onClick={goNext} className="hidden size-11 shrink-0 rounded-full border border-border bg-card text-muted-foreground hover:bg-muted sm:grid sm:place-items-center" data-testid="button-flashcard-next" aria-label="Next card"><ArrowRight size={16} /></button>
+    </div>
+    {/* Mobile equivalents of the Prev/Next buttons above, hidden on sm+ where the flanking arrows already do the job */}
+    <div className="mt-3 flex justify-center gap-3 sm:hidden">
+      <button onClick={goPrev} disabled={index === 0} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold text-muted-foreground disabled:opacity-30" data-testid="button-flashcard-prev-mobile"><ArrowLeft size={13} /> Previous</button>
+      <button onClick={goNext} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold text-muted-foreground" data-testid="button-flashcard-next-mobile">Next <ArrowRight size={13} /></button>
+    </div>
+    {flipped && <div className="mt-4 flex justify-center">{!askAi.data ? <button onClick={() => askAi.mutate()} disabled={askAi.isPending} className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-[#eef7f1] px-3 py-1.5 text-[11px] font-bold text-primary disabled:opacity-50" data-testid="button-ask-ai-flashcard">{askAi.isPending ? 'Thinking…' : <><Sparkles size={11} /> Ask AI to explain differently</>}</button> : <div className="max-w-xl rounded-xl bg-[#eef7f1] p-3 text-xs leading-5"><div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-primary"><Sparkles size={10} /> AI explanation</div>{askAi.data.explanation}</div>}{askAi.isError && <p className="mt-2 text-[11px] font-semibold text-destructive">{askAi.error instanceof ApiRequestError ? askAi.error.message : 'Could not reach AI right now.'}</p>}</div>}
+    <div className="mt-6 flex justify-center gap-3">{flipped ? <><button onClick={() => advance(false)} className="inline-flex items-center gap-2 rounded-xl border border-[#e5a952] bg-[#fff0cb] px-5 py-3 text-xs font-bold text-[#8a5a12] transition-transform hover:-translate-y-0.5" data-testid="button-still-learning"><ThumbsDown size={14} /> Still learning</button><button onClick={() => advance(true)} className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-xs font-bold text-primary-foreground transition-transform hover:-translate-y-0.5" data-testid="button-know-it"><ThumbsUp size={14} /> I know this</button></> : <button onClick={() => setFlipped(true)} className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-xs font-bold text-primary-foreground hover:opacity-90" data-testid="button-reveal-card">Show Answer <ChevronRight size={14} /></button>}</div>
+    <div className="mt-2 flex justify-center text-[11px] text-muted-foreground">Tap the card to flip</div>
+    <div className="mt-3 flex justify-center"><button onClick={resetDeck} className="inline-flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground hover:text-foreground" data-testid="button-restart-deck"><RotateCcw size={12} /> Restart deck</button></div>
+  </div>;
+}
+
+export default Flashcards;
