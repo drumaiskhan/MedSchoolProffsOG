@@ -127,3 +127,59 @@ chosen number of days without a payment, and revoke it early.
   branded loader instead of blank white; and the new Trial access panel
   end-to-end (start a trial, confirm the student can access gated content,
   end it early, confirm they're locked out again).
+
+---
+
+## v21 addendum — two follow-up requests
+
+### 5. Blank-loading fix, extended to the other two spots that had it
+
+Beyond the route-level `Suspense` fallback fixed above, both apps' `Shell`
+component had one more near-blank full-page state: `if (!user) return
+<div className="grid min-h-[100dvh] place-items-center bg-background">
+<SkeletonPage /></div>;` — this fires for the brief moment between the
+session query resolving "not signed in" and the effect just above it
+actually redirecting to `/login`. Same class of bug as #2 above (a content
+skeleton with no header/sidebar, standing in for what's really just a
+loading gap), just not caught the first pass since it isn't the Suspense
+fallback. Fixed in both `frontend-admin/src/lib/shared.tsx` and
+`frontend-student/src/lib/shared.tsx` — both now return
+`<BrandedLoadingScreen />` there too. Every other `<SkeletonPage />` in
+both apps is a legitimate in-context loading state (shown *inside* `Shell`,
+header and sidebar still visible, just the content area shimmering while
+a query loads) and was left alone.
+
+### 6. Past papers: admin tree now groups by study year, not calendar year
+
+`frontend-admin/src/pages/AdminPastPapers.tsx` previously grouped papers
+into MBBS/BDS, then by the paper's own free-text `year` field (2024, 2023,
+…) — that's the "MBBS COLLEGES > 2024 > 2023…" tree in the screenshot the
+owner sent. Changed the second grouping level to the paper's *study* year
+(1st Year, 2nd Year, 3rd Year, 4th Year, Final Year) instead, so a batch
+of papers uploaded under "MBBS - 1st Year" now collapses under a "1st Year
+MBBS" section, matching how the owner actually organizes uploads. The
+paper's calendar year is untouched as data and still shows in each paper
+row's subtitle — it's just no longer its own collapsible level.
+
+This reads off fields that already exist and are already populated by the
+existing Degree + Year picker on the create form (`yearTargetNumber` /
+`programTargetKind`, added in an earlier round specifically for this kind
+of targeting) — nothing new to fill in, and every paper already uploaded
+through that form groups correctly with no data migration. For the rare
+legacy paper missing those structured fields, it falls back to parsing the
+same "Degree - Year" text out of the `level` field the old grouping used.
+
+Implementation note: `groupByDegreeYear()` (in `lib/shared.tsx`, shared
+with the Pre-Proffs Exams page) got a new *optional* fourth parameter,
+`getYearSortKey`, so groups can sort by a real number (1, 2, 3…) instead
+of comparing year labels as strings — needed because "Final Year" has no
+leading digit for the old string-based sort to line up correctly against
+"4th Year" etc. Existing callers that don't pass it (Pre-Proffs Exams,
+and Past Papers' own degree-level grouping) are unaffected — same
+descending string sort as before.
+
+Not changed: the student-facing Past Papers page (`frontend-student/src/pages/PastPapers.tsx`)
+still filters by calendar year via a dropdown rather than a collapsible
+tree — different UI pattern entirely, and the request was specifically
+about the admin tree shown in the screenshot. Say the word if the student
+side should also switch to a study-year filter.

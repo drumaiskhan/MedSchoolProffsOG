@@ -68,10 +68,26 @@ function AdminPastPapers() {
   // so the same college is always spelled the same way, instead of drifting
   // into near-duplicates that would then group/filter inconsistently.
   const collegeOptions = Array.from(new Set((papers.data || []).map((p) => p.examBoard).filter(Boolean))).sort();
-  // MBBS/BDS then calendar-year classification (see groupByDegreeYear) —
-  // degree comes off the "Degree - Year" Level label every paper is saved
-  // with; year is the paper's own Year field.
-  const grouped = groupByDegreeYear(papers.data || [], (p) => (p.level || '').split(' - ')[0].trim(), (p) => p.year || '');
+  // Classified into MBBS / BDS, then by study year (1st Year … Final Year)
+  // instead of the paper's calendar Year field — the study year is what an
+  // admin actually thinks in terms of when uploading a batch ("here are
+  // all of First Year's papers"), and it's already captured by the same
+  // Degree + Year picker the create form uses (yearTargetNumber, with a
+  // fallback to parsing the old "Degree - Year" text `level` field for any
+  // paper saved before that structured field existed). The paper's own
+  // calendar year still shows in its row subtitle below, just not as a
+  // separate collapsible level anymore.
+  const paperDegree = (p: PastPaper) => p.programTargetKind || (p.level || '').split(' - ')[0].trim();
+  const paperStudyYear = (p: PastPaper): string => {
+    const degree = paperDegree(p);
+    if (p.yearTargetNumber) {
+      const label = (DEGREE_YEAR_OPTIONS[degree] || DEGREE_YEAR_OPTIONS.MBBS)[p.yearTargetNumber - 1];
+      if (label) return label;
+    }
+    return (p.level || '').split(' - ')[1]?.trim() || '';
+  };
+  const paperStudyYearSortKey = (p: PastPaper) => p.yearTargetNumber ?? studyYearToNumber(paperDegree(p), paperStudyYear(p));
+  const grouped = groupByDegreeYear(papers.data || [], paperDegree, paperStudyYear, paperStudyYearSortKey);
 
   return <div><SectionHeader eyebrow="Content" title="Past papers" action={<button onClick={() => setOpen(true)} className="btn-pop inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground shadow-sm sm:w-auto" data-testid="button-create-paper"><Plus size={15} /> Add paper</button>} />
     <datalist id="past-paper-college-options">{collegeOptions.map((c) => <option key={c} value={c} />)}</datalist>
@@ -125,13 +141,12 @@ function AdminPastPapers() {
 
     {!papers.data?.length && <EmptyState icon={FileStack} title="No past papers yet" body="Add a paper, then upload its questions or attach them from the MCQ bank." />}
 
-    {/* Classified into MBBS / BDS, then by year, instead of one flat list —
-        see groupByDegreeYear above — and collapsible the same way the MCQ
-        bank's Module -> Subject -> Topic tree is (McqTreeModule), so a
-        long list of papers across many years doesn't turn into one
-        endless scroll. */}
+    {/* Classified into MBBS / BDS, then by study year — see the grouping
+        setup above — and collapsible the same way the MCQ bank's Module ->
+        Subject -> Topic tree is (McqTreeModule), so a long list of papers
+        across many years doesn't turn into one endless scroll. */}
     {grouped.map((g) => <CollapsibleGroup key={g.degree || 'unspecified'} defaultOpen icon={<GraduationCap size={14} />} title={g.degree === 'MBBS' || g.degree === 'BDS' ? `${g.degree} colleges` : 'Unspecified degree'} count={g.groups.reduce((sum, yg) => sum + yg.items.length, 0)} testId={`degree-${g.degree || 'unspecified'}`}>
-      {g.groups.map((yg) => <CollapsibleGroup key={yg.year || 'no-year'} defaultOpen={false} title={yg.year || 'No year set'} count={yg.items.length} nested testId={`year-${g.degree || 'unspecified'}-${yg.year || 'no-year'}`}>
+      {g.groups.map((yg) => <CollapsibleGroup key={yg.year || 'no-year'} defaultOpen={false} title={yg.year ? [yg.year, (g.degree === 'MBBS' || g.degree === 'BDS') ? g.degree : ''].filter(Boolean).join(' ') : 'No year set'} count={yg.items.length} nested testId={`year-${g.degree || 'unspecified'}-${yg.year || 'no-year'}`}>
         <div className="rounded-2xl border border-border bg-card">{yg.items.map((p) => <div key={p.id} className="border-b border-border p-5 last:border-0" data-testid={`row-admin-paper-${p.id}`}>
           <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap sm:gap-4"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#dceaf1] text-[#32647b]"><FileStack size={17} /></div><div className="min-w-[160px] flex-1"><div className="text-sm font-bold">{p.title}</div><div className="mt-1 text-xs text-muted-foreground">{[p.examBoard, p.year, p.level].filter(Boolean).join(' · ')} · {p.mcqCount} MCQs linked</div></div><div className="flex flex-wrap items-center gap-2">
             <button onClick={() => setViewingId(viewingId === p.id ? null : p.id)} className={cn('btn-pop inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-bold', viewingId === p.id ? 'bg-[#eef7f1] text-primary' : 'border border-border text-muted-foreground hover:bg-muted')} data-testid={`button-view-paper-questions-${p.id}`}><CircleHelp size={12} /> View questions</button>

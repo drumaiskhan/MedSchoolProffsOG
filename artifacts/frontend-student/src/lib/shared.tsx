@@ -13,7 +13,7 @@ import {
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
   GraduationCap, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
   RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Link2 as LinkIcon, Lightbulb,
-  LayoutGrid, Presentation, Wand2, Crown, Globe, Star, Activity
+  LayoutGrid, Presentation, Wand2, Crown, Globe, Star
 } from 'lucide-react';
 import { applyThemeVars } from '@/lib/theme';
 import { queryClient } from '@/lib/query-client';
@@ -171,9 +171,17 @@ export function ConfirmDialog({ title, body, confirmLabel = 'Delete', onConfirm,
 }
 
 export function Logo({ dark = false, href = '/' }: { dark?: boolean; href?: string }) {
-  return <Link href={href} className="flex items-center gap-2" data-testid="link-logo">
-    <Activity size={20} strokeWidth={2.4} className={dark ? 'text-sidebar-primary' : 'text-primary'} aria-hidden="true" />
-    <span className={cn('text-[15px] font-extrabold tracking-[-.03em]', dark ? 'text-sidebar-foreground' : 'text-primary')}>MedschoolProffs</span>
+  return <Link href={href} className="group flex items-center gap-2" data-testid="link-logo">
+    <AnimatedBrandMark size={22} className={dark ? 'text-sidebar-primary' : 'text-primary'} />
+    <span
+      className={cn(
+        'bg-clip-text text-[15px] font-extrabold tracking-[-.03em] text-transparent transition-[background-position] duration-700 ease-out group-hover:[background-position:0%]',
+        dark
+          ? 'bg-[linear-gradient(100deg,hsl(var(--sidebar-foreground))_35%,hsl(var(--sidebar-primary))_50%,hsl(var(--sidebar-foreground))_65%)]'
+          : 'bg-[linear-gradient(100deg,hsl(var(--primary))_35%,hsl(var(--accent))_50%,hsl(var(--primary))_65%)]',
+      )}
+      style={{ backgroundSize: '250% 100%', backgroundPosition: '100%' }}
+    >MedschoolProffs</span>
   </Link>;
 }
 
@@ -328,12 +336,24 @@ export function Shell({ children }: { children: ReactNode }) {
   }, [user, userQuery.isLoading, setLocation]);
 
   if (userQuery.isLoading) return <BrandedLoadingScreen />;
-  if (!user) return <div className="grid min-h-[100dvh] place-items-center bg-background"><SkeletonPage /></div>;
+  // Same fix as the admin app's Shell (see its matching comment): this
+  // branch is the brief gap between the query resolving "no user" and the
+  // effect above redirecting to /login — not real content-loading, so it
+  // gets the branded loader instead of a near-blank skeleton-on-white page.
+  if (!user) return <BrandedLoadingScreen />;
   // Admin accounts are allowed to browse the student portal too (e.g. to see
   // what students see) — the reverse is not true, see the equivalent check
   // in frontend-admin/src/App.tsx's Shell, which still blocks students.
 
   const { pageTitle } = useContext(PageTitleContext);
+  // General trial mode — same site-content query SideNav already runs
+  // (shared queryKey, so this doesn't add an extra request), just read
+  // here too for a top banner reminding the student (and admin, if
+  // browsing as one) that every membership-gated page is unlocked for
+  // everyone right now. Hidden in focus mode so it doesn't crowd the
+  // distraction-free exam/practice header.
+  const siteContentQ = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get });
+  const globalTrialMode = siteContentQ.data?.GLOBAL_TRIAL_MODE === 'true';
   // Was hardcoded to "Good morning" regardless of the time of day — the
   // Dashboard's own welcome card already computed the correct greeting via
   // greetingForHour(), so this header text disagreed with it (e.g. showing
@@ -364,6 +384,7 @@ export function Shell({ children }: { children: ReactNode }) {
     <div className={cn(!focusMode && menuOpen ? 'block' : 'hidden', 'fixed inset-0 z-30 bg-[#071e2b]/45 md:hidden')} onClick={() => setMenuOpen(false)} />
     <div className={cn(focusMode ? 'hidden' : (menuOpen || !isMobile) ? 'block' : 'hidden')}><SideNav user={user} onClose={() => setMenuOpen(false)} /></div>
     <main className="min-w-0 flex-1">
+      {!focusMode && globalTrialMode && <div className="sticky top-0 z-20 flex items-center justify-center gap-2 bg-[#e5a952] px-4 py-1.5 text-center text-[11px] font-bold text-[#183844]" data-testid="banner-global-trial-mode"><Sparkles size={12} /> Trial mode is on — every feature is free to use right now.</div>}
       {focusMode
         ? <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border/70 bg-background/90 px-4 backdrop-blur-md md:px-8">{strictFocusMode ? <span className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold text-muted-foreground" data-testid="text-exam-locked"><LockKeyhole size={13} /> Exam in progress</span> : <button onClick={() => setLocation('/dashboard')} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold text-muted-foreground hover:bg-muted" data-testid="button-exit-focus-mode"><ArrowLeft size={15} /> Exit</button>}<span className="text-xs font-bold capitalize text-foreground">{title}</span></header>
         : <header className="sticky top-0 z-20 flex h-[66px] items-center justify-between border-b border-border/70 bg-background/92 px-4 backdrop-blur-md md:px-8"><div className="flex min-w-0 items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} data-testid="button-open-menu"><Menu size={20} /></button><div className="min-w-0"><div className="font-mono-app text-[9px] uppercase tracking-[.16em] text-muted-foreground">{today}</div><h1 className="mt-1 truncate text-[16px] font-bold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="relative flex items-center gap-2"><button onClick={() => { setQuickJumpOpen((current) => !current); setQuickJumpValue(''); }} className="hidden h-9 w-[220px] items-center gap-2 rounded-lg border border-border bg-card px-3 text-left text-[11px] text-muted-foreground shadow-sm hover:border-primary/50 sm:flex md:w-[340px]" data-testid="button-open-quick-jump"><Search size={14} /><span className="truncate">Search modules, topics, MCQs...</span><span className="ml-auto rounded border border-border px-1 text-[9px]">⌘K</span></button><Link href="/notifications" className="relative grid size-9 place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:bg-muted" data-testid="link-notifications"><Bell size={16} /></Link><Link href="/profile" className="ml-1 grid size-8 place-items-center rounded-full bg-[#cdebf0] text-[10px] font-extrabold text-[#0d5267]" data-testid="link-header-profile">{initials(user.name)}</Link><QuickJump open={quickJumpOpen} value={quickJumpValue} onChange={setQuickJumpValue} onClose={() => setQuickJumpOpen(false)} /></div></header>}

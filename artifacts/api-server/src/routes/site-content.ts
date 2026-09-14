@@ -28,6 +28,12 @@ const SITE_CONTENT_KEYS = [
   // Visualizer" link — public/authenticated-student-visible by design,
   // same as everything else in this list.
   "AI_VISUALIZER_ENABLED",
+  // General Trial Mode — public/student-visible (same reasoning as
+  // AI_VISUALIZER_ENABLED above) so the student app can show a banner
+  // while it's on. The actual access grant is enforced server-side in
+  // requireActiveMembership (middlewares/auth.ts), not by this flag being
+  // readable — a student can't unlock anything just by knowing this value.
+  "GLOBAL_TRIAL_MODE",
   // Optional decorative photo for the student Dashboard's greeting card —
   // public (not admin-gated) since students need to see it, resolved to
   // dashboardHeroImageUrl below the same way SITE_FAVICON_PATH resolves to

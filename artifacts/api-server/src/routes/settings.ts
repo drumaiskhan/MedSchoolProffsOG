@@ -27,6 +27,18 @@ const EDITABLE_KEYS = [
   // Visualizer" link from the student sidebar (frontend-student's SideNav)
   // and the route itself refuses direct access; on brings both back.
   "AI_VISUALIZER_ENABLED",
+  // General Trial Mode — unlike REGISTRATION_ENABLED/AI_VISUALIZER_ENABLED
+  // above (which default to ON, "false" is the opt-out), this defaults to
+  // OFF: only the exact string "true" enables it (see
+  // requireActiveMembership in middlewares/auth.ts). While on, every
+  // signed-in student gets full access to every membership-gated route
+  // regardless of their own membership/payment status — no individual
+  // med_memberships rows are created or changed, so switching it back off
+  // instantly restores normal per-student gating with nothing to clean up.
+  // Distinct from the existing per-student POST /students/:id/trial grant,
+  // which is unaffected either way. Also readable by students (mirrored
+  // into site-content.ts) so the app can show a "trial mode is on" banner.
+  "GLOBAL_TRIAL_MODE",
   // Optional decorative photo for the student Dashboard's greeting card
   // (see frontend-student's Dashboard component) — falls back to a plain
   // decorative pattern when unset.

@@ -122,6 +122,13 @@ export interface SiteContent {
   SOCIAL_FACEBOOK: string; SOCIAL_YOUTUBE: string; SOCIAL_LINKEDIN: string; SOCIAL_INSTAGRAM: string;
   CONTACT_EMAIL: string; CONTACT_LOCATION: string; SUPPORT_HOURS: string; COPYRIGHT_NOTICE: string; SUPPORT_WHATSAPP: string;
   AI_VISUALIZER_ENABLED: string;
+  // Admin-wide switch that grants every signed-in student full access
+  // regardless of their own membership status — see requireActiveMembership
+  // (api-server middlewares/auth.ts). Exact string "true" means on; anything
+  // else (including missing/unset) means off. Used here just to show a
+  // banner — the student app never needs to enforce this itself, the API
+  // already grants/denies access based on the same flag server-side.
+  GLOBAL_TRIAL_MODE: string;
   features: string[]; quickLinks: Array<{ label: string; url: string }>; team: TeamMember[];
   faviconUrl: string | null;
   dashboardHeroImageUrl: string | null;

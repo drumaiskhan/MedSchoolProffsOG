@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import { eq } from "drizzle-orm";
 import { db, usersTable } from "@workspace/db";
 import { SESSION_COOKIE_NAME, verifySession } from "../lib/auth";
+import { getSetting } from "../lib/settings";
 
 export interface AuthedUser {
   id: number;
@@ -104,15 +105,31 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
 }
 
 /** Blocks students whose membership isn't ACTIVE (admins always pass). */
-export function requireActiveMembership(req: Request, res: Response, next: NextFunction): void {
+export async function requireActiveMembership(req: Request, res: Response, next: NextFunction): Promise<void> {
   if (!req.user) {
     res.status(401).json({ error: "Please sign in to continue." });
     return;
   }
-  if (isAdminRole(req.user.role)) return next();
-  if (req.user.status !== "ACTIVE") {
-    res.status(403).json({ error: "An active membership is required to access this content." });
-    return;
+  if (isAdminRole(req.user.role)) { next(); return; }
+  if (req.user.status === "ACTIVE") { next(); return; }
+
+  // General Trial Mode — an admin-flipped, platform-wide switch (separate
+  // from any individual student's membership/status, and from the existing
+  // per-student POST /students/:id/trial grant) that opens every
+  // membership-gated route to every signed-in student at once, e.g. for a
+  // free trial week or launch promo, without creating/touching a single
+  // med_memberships row. See GET/PATCH /admin/settings's GLOBAL_TRIAL_MODE
+  // key and AdminSettings.tsx's "General trial mode" toggle. Defaults to
+  // off — the setting must be the exact string "true" — so a missing/unset
+  // key (fresh install, or the settings lookup itself failing below) never
+  // accidentally opens the whole site.
+  let globalTrialEnabled = false;
+  try {
+    globalTrialEnabled = (await getSetting("GLOBAL_TRIAL_MODE", "false")) === "true";
+  } catch {
+    globalTrialEnabled = false;
   }
-  next();
+  if (globalTrialEnabled) { next(); return; }
+
+  res.status(403).json({ error: "An active membership is required to access this content." });
 }

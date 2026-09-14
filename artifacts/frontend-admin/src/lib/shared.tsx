@@ -163,7 +163,13 @@ export function Shell({ children }: { children: ReactNode }) {
   }, [user, userQuery.isLoading, setLocation]);
 
   if (userQuery.isLoading) return <BrandedLoadingScreen />;
-  if (!user || user.role !== 'admin') return <div className="grid min-h-[100dvh] place-items-center bg-background"><SkeletonPage /></div>;
+  // Was a bare skeleton on a plain white background here — this branch
+  // renders on every signed-out page load for the instant before the
+  // effect above fires its redirect to /login (see that effect's own
+  // comment), so it's not really a "content still loading" state, it's a
+  // brief full-page gap exactly like the route Suspense fallback used to
+  // be. Same fix: the branded loader instead of a blank-looking page.
+  if (!user || user.role !== 'admin') return <BrandedLoadingScreen />;
 
   const title = location.slice(1).split('/').map((part) => part.replaceAll('-', ' ')).join(' / ') || 'Overview';
   return <div className="admin-shell flex min-h-[100dvh] bg-background"><div className={cn(menuOpen ? 'block' : 'hidden', 'fixed inset-0 z-30 bg-[#102c37]/40 md:hidden')} onClick={() => setMenuOpen(false)} />{(menuOpen || !isMobile) && <SideNav user={user} onClose={() => setMenuOpen(false)} />}<main className="admin-main min-w-0 flex-1"><header className="admin-header sticky top-0 z-20 flex h-[72px] items-center justify-between border-b border-border/70 bg-background/90 px-5 backdrop-blur-md md:px-10"><div className="flex items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} data-testid="button-open-menu"><Menu size={20} /></button><div><div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-muted-foreground">MedschoolProffs / Admin</div><h1 className="mt-1 text-[17px] font-bold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="flex items-center gap-2"><span className="hidden items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-[10px] font-semibold text-muted-foreground sm:inline-flex"><span className="size-1.5 rounded-full bg-primary" />Workspace live</span><Link href="/notifications" className="relative grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted" data-testid="link-notifications"><Bell size={17} /></Link><Link href="/profile" className="ml-1 grid size-9 place-items-center rounded-full bg-[#d7eee4] text-xs font-extrabold text-[#164b4b]" data-testid="link-header-profile">{initials(user.name)}</Link></div></header><div className="admin-content page-enter px-5 py-7 md:px-10 md:py-9">{children}</div></main></div>;
@@ -1479,8 +1485,16 @@ export function studyYearToNumber(degree: string, studyYear: string): number | u
 // study year for exams. Keeps MBBS before BDS before anything unset, and
 // sorts years newest-first within a degree so the page reads as organized
 // sections instead of one long flat list.
-
-export function groupByDegreeYear<T>(items: T[], getDegree: (item: T) => string, getYear: (item: T) => string) {
+//
+// Optional `getYearSortKey`: when the year groups are actually a study
+// year (1st/2nd/.../Final) rather than a calendar year, plain string
+// sorting gets "Final Year" wrong (no leading digit to compare against
+// "4th Year" etc.) — pass a numeric key per item (e.g. yearTargetNumber)
+// and groups sort ascending by it (1st Year first) instead, with any
+// group that has no resolvable key sorted last. Omit it to keep the
+// original newest-first string sort (past papers' calendar-year grouping,
+// and exams' existing behavior — both unaffected by this addition).
+export function groupByDegreeYear<T>(items: T[], getDegree: (item: T) => string, getYear: (item: T) => string, getYearSortKey?: (item: T) => number | undefined) {
   const DEGREE_ORDER = ['MBBS', 'BDS'];
   const byDegree = new Map<string, T[]>();
   for (const item of items) {
@@ -1497,7 +1511,19 @@ export function groupByDegreeYear<T>(items: T[], getDegree: (item: T) => string,
       if (!byYear.has(y)) byYear.set(y, []);
       byYear.get(y)!.push(item);
     }
-    const years = [...byYear.keys()].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+    let years: string[];
+    if (getYearSortKey) {
+      const keyOf = (y: string) => byYear.get(y)!.map(getYearSortKey).find((k) => k !== undefined && !Number.isNaN(k));
+      years = [...byYear.keys()].sort((a, b) => {
+        const ka = keyOf(a); const kb = keyOf(b);
+        if (ka === undefined && kb === undefined) return a.localeCompare(b);
+        if (ka === undefined) return 1;
+        if (kb === undefined) return -1;
+        return ka - kb;
+      });
+    } else {
+      years = [...byYear.keys()].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+    }
     return { degree, groups: years.map((year) => ({ year, items: byYear.get(year)! })) };
   });
 }
