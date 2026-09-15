@@ -148,10 +148,20 @@ router.get("/feedback", requireAdmin, async (_req, res): Promise<void> => {
 });
 
 router.post("/feedback", requireAuth, async (req, res): Promise<void> => {
-  const parsed = z.object({ category: z.string().max(60).optional(), message: z.string().min(1).max(4000) }).safeParse(req.body);
+  const parsed = z.object({ category: z.string().max(60).optional(), message: z.string().min(1).max(4000), rating: z.number().int().min(1).max(5).optional() }).safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "A message is required" }); return; }
-  const [row] = await db.insert(feedbackTable).values({ userId: req.user!.id, category: parsed.data.category ?? "general", message: parsed.data.message }).returning();
+  const [row] = await db.insert(feedbackTable).values({ userId: req.user!.id, category: parsed.data.category ?? "general", message: parsed.data.message, rating: parsed.data.rating ?? null }).returning();
   res.status(201).json(row);
+});
+
+// Admins clearing out the inbox — permanent delete, replies cascade with it
+// since there's no point keeping an orphaned reply thread around.
+router.delete("/feedback/:id", requireAdmin, async (req, res): Promise<void> => {
+  const feedbackId = Number(req.params.id);
+  await db.delete(feedbackRepliesTable).where(eq(feedbackRepliesTable.feedbackId, feedbackId));
+  const [row] = await db.delete(feedbackTable).where(eq(feedbackTable.id, feedbackId)).returning();
+  if (!row) { res.status(404).json({ error: "Feedback not found" }); return; }
+  res.json({ ok: true });
 });
 
 router.patch("/feedback/:id", requireAdmin, async (req, res): Promise<void> => {

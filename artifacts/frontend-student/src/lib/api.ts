@@ -130,6 +130,11 @@ export interface SiteContent {
   SOCIAL_FACEBOOK: string; SOCIAL_YOUTUBE: string; SOCIAL_LINKEDIN: string; SOCIAL_INSTAGRAM: string;
   CONTACT_EMAIL: string; CONTACT_LOCATION: string; SUPPORT_HOURS: string; COPYRIGHT_NOTICE: string; SUPPORT_WHATSAPP: string;
   AI_VISUALIZER_ENABLED: string;
+  // Controls the "Ask AI to explain differently" button on Practice.tsx
+  // (MCQs, incl. past papers, which practice through the same screen) and
+  // Flashcards.tsx. "false" = hidden; anything else = shown. Same
+  // convention as AI_VISUALIZER_ENABLED above.
+  AI_EXPLAIN_ENABLED: string;
   // Admin-wide switch that grants every signed-in student full access
   // regardless of their own membership status — see requireActiveMembership
   // (api-server middlewares/auth.ts). Exact string "true" means on; anything
@@ -276,7 +281,7 @@ export interface PastPaper { id: number; title: string; examBoard: string; year:
 export interface NotebookEntry { id: number; userId: number; mcqId: number | null; title: string; content: string; createdAt: string; updatedAt: string }
 export interface SavedSession { id: number; userId: number; name: string; config: Record<string, unknown>; createdAt: string }
 export interface FlaggedMcq { id: number; userId: number; mcqId: number; reason: string; status: 'open' | 'resolved'; createdAt: string; question: string | null; path: string | null; mcqDeleted: boolean }
-export interface FeedbackEntry { id: number; userId: number | null; category: string; message: string; status: 'open' | 'replied' | 'reviewed'; createdAt: string; user: { name: string; email: string } | null }
+export interface FeedbackEntry { id: number; userId: number | null; category: string; message: string; status: 'open' | 'replied' | 'reviewed'; rating: number | null; createdAt: string; user: { name: string; email: string } | null }
 export interface FeedbackReply { id: number; feedbackId: number; authorId: number; authorRole: 'admin' | 'student'; message: string; createdAt: string }
 export interface MyFeedbackEntry extends FeedbackEntry { replies: FeedbackReply[] }
 export interface Analytics { range: string; totalSessions: number; averageScore: number; questionsAnswered: number; timeSpentMinutes: number; currentStreak: number; longestStreak: number }
@@ -397,7 +402,7 @@ export const flaggedMcqsApi = {
 export const feedbackApi = {
   listAll: () => request<FeedbackEntry[]>('/feedback'),
   mine: () => request<MyFeedbackEntry[]>('/feedback/mine'),
-  create: (body: { category?: string; message: string }) => request<FeedbackEntry>('/feedback', { method: 'POST', body: JSON.stringify(body) }),
+  create: (body: { category?: string; message: string; rating?: number }) => request<FeedbackEntry>('/feedback', { method: 'POST', body: JSON.stringify(body) }),
   updateStatus: (id: number, status: 'open' | 'replied' | 'reviewed') => request<FeedbackEntry>(`/feedback/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   reply: (id: number, message: string) => request<FeedbackReply>(`/feedback/${id}/replies`, { method: 'POST', body: JSON.stringify({ message }) }),
 };

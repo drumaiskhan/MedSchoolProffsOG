@@ -307,6 +307,19 @@ export function useExamLock(active: boolean) {
 // rendering real content — a signed-out or under-privileged user should never
 // see so much as a flash of the dashboard/admin UI underneath.
 
+// ANNOUNCEMENT_BANNER is stored as a JSON array of strings so admins can
+// queue up more than one (see AdminSettings.tsx). Falls back to treating
+// the raw value as a single announcement when it isn't valid JSON, so a
+// site with the old plain-text value already saved keeps showing it.
+function parseAnnouncements(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.map((x) => String(x).trim()).filter(Boolean);
+  } catch { /* not JSON — fall through to legacy plain-text handling below */ }
+  return raw.trim() ? [raw.trim()] : [];
+}
+
 export function Shell({ children }: { children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [quickJumpOpen, setQuickJumpOpen] = useState(false);
@@ -392,10 +405,24 @@ export function Shell({ children }: { children: ReactNode }) {
   // read ANNOUNCEMENT_BANNER or rendered it — so it silently did nothing
   // no matter what an admin typed in. Wired up the same way
   // globalTrialMode's banner already works: read from the same
-  // site-content query (no extra request), trimmed so pure whitespace
-  // counts as "blank", hidden in focus mode, and dismissible per-session.
-  const announcementText = siteContentQ.data?.ANNOUNCEMENT_BANNER?.trim() || null;
+  // site-content query (no extra request), hidden in focus mode, and
+  // dismissible per-session.
+  //
+  // ANNOUNCEMENT_BANNER is a JSON array of strings (admin's Settings page
+  // can queue up more than one), with a fallback for a site that still has
+  // the old plain-text value saved so it keeps showing instead of
+  // vanishing. Multiple announcements are joined into one continuous
+  // scrolling line, separated by a dot.
+  const announcements = parseAnnouncements(siteContentQ.data?.ANNOUNCEMENT_BANNER);
+  const announcementText = announcements.length ? announcements.join('   •   ') : null;
   const showAnnouncement = Boolean(announcementText) && announcementText !== dismissedAnnouncement;
+  // The banner text used to be truncated with an ellipsis, which on a
+  // narrow phone screen often cut off most of a longer announcement
+  // entirely. It now scrolls continuously instead (two copies of the text
+  // back to back, animated left by exactly one copy's width so the loop is
+  // seamless) — duration scales with length so a short announcement
+  // doesn't fly past and a long one doesn't crawl.
+  const marqueeDuration = announcementText ? Math.max(14, announcementText.length * 0.14) : 14;
   // Was hardcoded to "Good morning" regardless of the time of day — the
   // Dashboard's own welcome card already computed the correct greeting via
   // greetingForHour(), so this header text disagreed with it (e.g. showing
@@ -427,7 +454,21 @@ export function Shell({ children }: { children: ReactNode }) {
     <div className={cn(focusMode ? 'hidden' : (menuOpen || !isMobile) ? 'block' : 'hidden')}><SideNav user={user} onClose={() => setMenuOpen(false)} /></div>
     <main className="min-w-0 flex-1">
       {!focusMode && (showAnnouncement || globalTrialMode) && <div className="sticky top-0 z-20">
-        {showAnnouncement && <div className="flex items-center justify-center gap-2 bg-primary px-4 py-1.5 text-center text-[11px] font-bold text-primary-foreground" data-testid="banner-announcement"><Megaphone size={12} className="shrink-0" /><span className="truncate">{announcementText}</span><button onClick={() => setDismissedAnnouncement(announcementText)} className="ml-1 shrink-0 rounded p-0.5 hover:bg-white/15" aria-label="Dismiss announcement" data-testid="button-dismiss-announcement"><X size={12} /></button></div>}
+        {showAnnouncement && <div className="flex items-center gap-2 overflow-hidden bg-primary px-4 py-1.5 text-[11px] font-bold text-primary-foreground" data-testid="banner-announcement">
+          <Megaphone size={12} className="shrink-0" />
+          <div className="min-w-0 flex-1 overflow-hidden">
+            {/* Two identical copies back to back, each pushed apart by the
+                same right margin, animated left by exactly one copy's width
+                (marquee's `to` keyframe is translateX(-50%) of this whole
+                track, i.e. one copy) — the loop point is invisible since
+                copy two is already sitting where copy one started. */}
+            <div className="marquee-track flex w-max whitespace-nowrap" style={{ animation: `marquee ${marqueeDuration}s linear infinite` }}>
+              <span className="mr-16">{announcementText}</span>
+              <span className="mr-16" aria-hidden="true">{announcementText}</span>
+            </div>
+          </div>
+          <button onClick={() => setDismissedAnnouncement(announcementText)} className="ml-1 shrink-0 rounded p-0.5 hover:bg-white/15" aria-label="Dismiss announcement" data-testid="button-dismiss-announcement"><X size={12} /></button>
+        </div>}
         {globalTrialMode && <div className="flex items-center justify-center gap-2 bg-[#e5a952] px-4 py-1.5 text-center text-[11px] font-bold text-[#183844]" data-testid="banner-global-trial-mode"><Sparkles size={12} /> Trial mode is on — every feature is free to use right now.</div>}
       </div>}
       {focusMode
@@ -887,7 +928,7 @@ export function MyFeedbackThread({ item }: { item: MyFeedbackEntry }) {
   });
   const statusTone = item.status === 'open' ? 'bg-[#4e3c12] text-[#e6cda8]' : item.status === 'replied' ? 'bg-[#1c3745] text-[#afd0df]' : 'bg-[#1c4533] text-[#a8e6e6]';
   return <div className="rounded-2xl border border-border bg-card p-5" data-testid={`card-my-feedback-${item.id}`}>
-    <div className="flex items-start justify-between gap-4"><div className="flex-1"><div className="flex items-center gap-2"><span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold capitalize">{item.category}</span><span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold capitalize', statusTone)}>{item.status === 'replied' ? 'Team replied' : item.status}</span></div><p className="mt-2 text-sm leading-6">{item.message}</p><div className="mt-2 text-[10px] text-muted-foreground">{new Date(item.createdAt).toLocaleString()}</div></div>{item.replies.length > 0 && <button onClick={() => setOpen((v) => !v)} className="shrink-0 rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold" data-testid={`button-toggle-my-thread-${item.id}`}>{open ? 'Hide' : `${item.replies.length} repl${item.replies.length === 1 ? 'y' : 'ies'}`}</button>}</div>
+    <div className="flex items-start justify-between gap-4"><div className="flex-1"><div className="flex items-center gap-2"><span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold capitalize">{item.category}</span><span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold capitalize', statusTone)}>{item.status === 'replied' ? 'Team replied' : item.status}</span>{!!item.rating && <span className="flex items-center gap-0.5" data-testid={`text-my-feedback-rating-${item.id}`}>{[1, 2, 3, 4, 5].map((n) => <Star key={n} size={11} className={item.rating! >= n ? 'fill-[#e8c34a] text-[#e8c34a]' : 'text-muted-foreground'} />)}</span>}</div><p className="mt-2 text-sm leading-6">{item.message}</p><div className="mt-2 text-[10px] text-muted-foreground">{new Date(item.createdAt).toLocaleString()}</div></div>{item.replies.length > 0 && <button onClick={() => setOpen((v) => !v)} className="shrink-0 rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold" data-testid={`button-toggle-my-thread-${item.id}`}>{open ? 'Hide' : `${item.replies.length} repl${item.replies.length === 1 ? 'y' : 'ies'}`}</button>}</div>
     {open && <div className="mt-4 space-y-2 border-t border-border pt-4">{item.replies.map((r) => <div key={r.id} className={cn('max-w-[85%] rounded-xl p-3 text-xs', r.authorRole === 'admin' ? 'bg-[#1c452a]' : 'ml-auto bg-muted')}><div className="mb-1 text-[10px] font-bold text-muted-foreground">{r.authorRole === 'admin' ? 'Academic team' : 'You'} · {new Date(r.createdAt).toLocaleString()}</div>{r.message}</div>)}</div>}
     {item.status !== 'open' && <div className="mt-3 flex gap-2"><textarea value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Reply to the team…" className="min-h-12 flex-1 rounded-xl border border-border bg-background p-2 text-xs" data-testid={`input-my-feedback-reply-${item.id}`} /><button onClick={() => message.trim() && reply.mutate()} disabled={reply.isPending || !message.trim()} className="self-end rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid={`button-send-my-feedback-reply-${item.id}`}>{reply.isPending ? '…' : 'Reply'}</button></div>}
   </div>;

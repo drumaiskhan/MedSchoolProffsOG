@@ -1,3 +1,62 @@
+# Round 14 — admin control for the "Ask AI to explain differently" button
+
+The "Ask AI to explain differently" button (MCQs via `Practice.tsx` — which
+past papers also go through, `/practice?pastPaperId=…` — and flashcards via
+`Flashcards.tsx`) had no on/off switch; it always showed for every student.
+Added `AI_EXPLAIN_ENABLED`, same "false" = off / anything else = on
+convention as the existing `AI_VISUALIZER_ENABLED` toggle:
+
+- `api-server/src/routes/settings.ts` — added to `EDITABLE_KEYS`.
+- `api-server/src/routes/site-content.ts` — added to `SITE_CONTENT_KEYS` so
+  the student app can read it.
+- `api-server/src/routes/explanations.ts` — `POST /mcqs/:id/ask-ai` and
+  `POST /flashcards/:id/ask-ai` now check the setting and refuse (403) when
+  off, same defense-in-depth pattern as `POST /ai/visualizer`.
+- `frontend-admin/src/pages/AdminSettings.tsx` (Features tab) — new "Ask AI
+  to explain" card with a single checkbox, next to the existing AI
+  Visualizer/Registration/Trial Mode toggles.
+- `frontend-admin/src/lib/api.ts`, `frontend-student/src/lib/api.ts` — type
+  additions for the new key.
+- `frontend-student/src/pages/Practice.tsx`, `Flashcards.tsx` — read
+  `AI_EXPLAIN_ENABLED` off `/site-content` (same query key `SideNav` already
+  uses for `AI_VISUALIZER_ENABLED`, so no extra request) and hide the
+  button entirely when it's off.
+
+No DB migration — reuses the existing `platform_settings` key/value table.
+No live DB/browser test.
+
+---
+
+# Round 13 — what changed, by file
+
+**Announcement bar improvement.** Two asks: mobile was cutting off long
+announcement text, and admin could only ever set one announcement.
+
+1. **Scrolling instead of truncating.** `Shell`'s banner in
+   `frontend-student/src/lib/shared.tsx` used a `truncate` span, so on a
+   narrow phone most of a longer announcement never showed at all. Now
+   renders two identical copies of the text back-to-back in a `w-max`
+   track and animates it left by exactly one copy's width (`marquee`
+   keyframe in `index.css`, `-50%` translate) — a seamless, continuous
+   scroll instead of an ellipsis. Duration scales with text length (short
+   announcements don't fly past, long ones don't crawl) and pauses on
+   hover/focus so it's readable if someone stops to read it.
+2. **More than one announcement.** `ANNOUNCEMENT_BANNER` used to be a
+   single plain-text setting. It's now a JSON array of strings — same
+   pattern as `FEATURES_LIST` / `QUICK_LINKS` — and the admin Settings
+   page (General tab) has a real add/remove list for it instead of one
+   input. Multiple announcements are joined into the one scrolling line,
+   separated by a dot. A `parseAnnouncements` helper (student `shared.tsx`)
+   and the equivalent inline parsing in `AdminSettings.tsx` both fall back
+   to treating an already-saved plain-text value as a single-item list, so
+   an existing announcement keeps showing/editing instead of vanishing the
+   first time either page loads after this change. No backend/schema
+   change needed — the setting is still just an opaque string column.
+
+No live DB/browser test.
+
+---
+
 # Round 12 — what changed, by file
 
 Fixed the student "saved MCQs" (Flag icon during practice → persisted to

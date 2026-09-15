@@ -662,6 +662,7 @@ export const feedbackTable = pgTable("med_feedback", {
   category: text("category").notNull().default("general"),
   message: text("message").notNull(),
   status: text("status").notNull().default("open"), // open | replied | reviewed
+  rating: integer("rating"), // optional 1-5 star rating, null if not given
   ...timestamps,
 });
 

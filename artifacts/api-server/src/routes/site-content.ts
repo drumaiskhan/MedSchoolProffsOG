@@ -28,6 +28,12 @@ const SITE_CONTENT_KEYS = [
   // Visualizer" link — public/authenticated-student-visible by design,
   // same as everything else in this list.
   "AI_VISUALIZER_ENABLED",
+  // Public so Practice.tsx / Flashcards.tsx (and anything else reusing
+  // those screens, e.g. past-paper practice) can decide whether to render
+  // the "Ask AI to explain differently" button. Same reasoning and same
+  // "false" = off / anything else = on convention as AI_VISUALIZER_ENABLED
+  // above. See routes/settings.ts for the full comment.
+  "AI_EXPLAIN_ENABLED",
   // General Trial Mode — public/student-visible (same reasoning as
   // AI_VISUALIZER_ENABLED above) so the student app can show a banner
   // while it's on. The actual access grant is enforced server-side in

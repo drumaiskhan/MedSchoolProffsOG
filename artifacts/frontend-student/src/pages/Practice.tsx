@@ -92,6 +92,14 @@ function Practice() {
   // "Shuffle question order" toggle on the setup screen — off by default so
   // the set stays in its curated/syllabus order unless the student opts in.
   const [shuffleQuestions, setShuffleQuestions] = useState(false);
+  // Difficulty filter on the setup screen — 'all' keeps the full set;
+  // otherwise only questions matching that difficulty are offered.
+  const [selectedDifficulty, setSelectedDifficulty] = useState<'all' | 'easy' | 'moderate' | 'hard'>('all');
+  // Question-count cap on the setup screen. Stored as a mode rather than a
+  // raw number so it stays meaningful if the difficulty filter shrinks the
+  // available pool below 10/20 — 'all' always means "every question left
+  // after the difficulty filter", and '10'/'20' are clamped at use-time.
+  const [countMode, setCountMode] = useState<'10' | '20' | 'all'>('20');
   // The order actually being played this session, locked in once Start is
   // pressed (see the setup screen below) so the question navigator grid
   // stays stable across answers/prev/next even if shuffle is on. null before
@@ -130,6 +138,12 @@ function Practice() {
   // ever invoked from a click once `current` is guaranteed to exist below,
   // but the hook itself must still be declared unconditionally every render.
   const askAi = useMutation({ mutationFn: () => explanationsApi.askAi(current!.id) });
+  // Admin control (Settings > Features > "Ask AI to explain") — off hides
+  // the button below entirely. Same query key SideNav uses for
+  // AI_VISUALIZER_ENABLED, so this just reuses that cached fetch instead of
+  // triggering a second one.
+  const siteContentQ = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get });
+  const aiExplainEnabled = siteContentQ.data?.AI_EXPLAIN_ENABLED !== 'false';
   const answeredCount = Object.values(answers).filter((v) => v != null).length;
   const percentAnswered = activeMcqs.length ? Math.round((answeredCount / activeMcqs.length) * 100) : 0;
 
@@ -139,7 +153,7 @@ function Practice() {
     if (sessionAnswers.length) submitAnswer.mutate({ topicId, answers: sessionAnswers, durationSeconds, mode: mode ?? undefined });
     setFinished(true);
   };
-  const restartSession = () => { setIndex(0); setAnswers({}); setFlaggedIds(new Set()); setSavedIds(new Set()); setPanel(null); setPaused(false); setFinished(false); setMode(null); setRemainingSeconds(0); setPendingMode('timed'); setCustomMinutes(null); setOrderedMcqs(null); askAi.reset(); };
+  const restartSession = () => { setIndex(0); setAnswers({}); setFlaggedIds(new Set()); setSavedIds(new Set()); setPanel(null); setPaused(false); setFinished(false); setMode(null); setRemainingSeconds(0); setPendingMode('timed'); setCustomMinutes(null); setOrderedMcqs(null); setSelectedDifficulty('all'); setCountMode('20'); askAi.reset(); };
 
   useEffect(() => {
     if (mode !== 'timed' || finished || paused) return;
@@ -161,22 +175,32 @@ function Practice() {
   }
 
   if (!mode) {
-    // 1 minute per question — standard board-exam pacing (was 1.5min/q).
-    const autoMinutes = Math.max(1, mcqs.length);
-    const effectiveMinutes = customMinutes ?? autoMinutes;
-    const isAuto = customMinutes === null;
-    // Difficulty mix for this set, shown as quick chips on the hero so a
-    // student can gauge the set before committing — 'easy'/'moderate'/'hard'
-    // ordering when present, any other custom labels tacked on after.
+    // Difficulty mix for this set, shown as quick chips on the hero AND
+    // used to drive the "Select Difficulty Level" cards below — 'easy'/
+    // 'moderate'/'hard' ordering when present, any other custom labels
+    // tacked on after.
     const difficultyCounts = mcqs.reduce<Record<string, number>>((acc, m) => { const key = (m.difficulty || 'moderate').toLowerCase(); acc[key] = (acc[key] ?? 0) + 1; return acc; }, {});
     const difficultyOrder = ['easy', 'moderate', 'hard'];
     const difficultyEntries = Object.entries(difficultyCounts).sort(([a], [b]) => {
       const ia = difficultyOrder.indexOf(a), ib = difficultyOrder.indexOf(b);
       return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
     });
+    // Questions left after the difficulty filter — this is the pool the
+    // question-count cap and the Test Summary below both work off of.
+    const difficultyFilteredMcqs = selectedDifficulty === 'all' ? mcqs : mcqs.filter((m) => (m.difficulty || 'moderate').toLowerCase() === selectedDifficulty);
+    const availableCount = difficultyFilteredMcqs.length;
+    const effectiveCount = countMode === 'all' ? availableCount : Math.min(Number(countMode), availableCount);
+    // 1 minute per question — standard board-exam pacing — based on the
+    // actual planned test size, not the full unfiltered set.
+    const autoMinutes = Math.max(1, effectiveCount);
+    const effectiveMinutes = customMinutes ?? autoMinutes;
+    const isAuto = customMinutes === null;
+    const difficultyLabels: Record<typeof selectedDifficulty, string> = { all: 'All', easy: 'Easy', moderate: 'Medium', hard: 'Hard' };
+    const topicLabel = mcqs[0]?.topic || mcqs[0]?.subject || mcqs[0]?.module || (pastPaperId ? 'Past paper' : 'Practice set');
     const finishClock = pendingMode === 'timed' ? new Date(Date.now() + effectiveMinutes * 60000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null;
     const startSession = () => {
-      setOrderedMcqs(shuffleQuestions ? shuffleArray(mcqs) : mcqs);
+      const limited = countMode === 'all' ? difficultyFilteredMcqs : difficultyFilteredMcqs.slice(0, Number(countMode));
+      setOrderedMcqs(shuffleQuestions ? shuffleArray(limited) : limited);
       setMode(pendingMode);
       setRemainingSeconds(pendingMode === 'timed' ? effectiveMinutes * 60 : 0);
       sessionStartRef.current = Date.now();
@@ -198,6 +222,36 @@ function Practice() {
         </div>
 
         <div className="p-6 sm:p-9">
+          {difficultyEntries.length > 0 && <div className="mb-5">
+            <div className="mb-2 text-[11px] font-bold text-muted-foreground">Select Difficulty Level</div>
+            <div className="grid grid-cols-4 gap-2">
+              {([
+                { key: 'all' as const, dot: 'bg-primary', count: mcqs.length },
+                { key: 'easy' as const, dot: 'bg-[#287058]', count: difficultyCounts.easy ?? 0 },
+                { key: 'moderate' as const, dot: 'bg-[#e5a952]', count: difficultyCounts.moderate ?? 0 },
+                { key: 'hard' as const, dot: 'bg-destructive', count: difficultyCounts.hard ?? 0 },
+              ]).map((opt) => <button key={opt.key} type="button" onClick={() => setSelectedDifficulty(opt.key)} disabled={opt.key !== 'all' && opt.count === 0} className={cn('card-lift rounded-xl border-2 p-2.5 text-center transition-all disabled:opacity-30', selectedDifficulty === opt.key ? 'border-primary bg-[#eef7f1]' : 'border-border bg-card hover:border-primary/30')} data-testid={`button-difficulty-${opt.key}`}>
+                <span className={cn('mx-auto block size-2.5 rounded-full', opt.dot)} />
+                <div className="mt-1.5 text-[11px] font-extrabold">{difficultyLabels[opt.key]}</div>
+                <div className="text-[10px] text-muted-foreground">{opt.count} qs</div>
+              </button>)}
+            </div>
+          </div>}
+
+          <div className="mb-5">
+            <div className="mb-2 text-[11px] font-bold text-muted-foreground">Number of Questions</div>
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                ...(availableCount > 10 ? [{ mode: '10' as const, label: '10', sub: 'Questions' }] : []),
+                ...(availableCount > 20 ? [{ mode: '20' as const, label: '20', sub: 'Questions' }] : []),
+                { mode: 'all' as const, label: availableCount > 20 ? 'All' : String(availableCount), sub: `${availableCount} MCQ${availableCount === 1 ? '' : 's'}` },
+              ]).map((opt) => <button key={opt.mode} type="button" onClick={() => setCountMode(opt.mode)} className={cn('card-lift rounded-xl border-2 p-3 text-center transition-all', countMode === opt.mode ? 'border-primary bg-[#eef7f1]' : 'border-border bg-card hover:border-primary/30')} data-testid={`button-count-${opt.mode}`}>
+                <div className="text-sm font-extrabold">{opt.label}</div>
+                <div className="text-[10px] text-muted-foreground">{opt.sub}</div>
+              </button>)}
+            </div>
+          </div>
+
           <div className="grid gap-3 sm:grid-cols-2">
             <button onClick={() => setPendingMode('timed')} className={cn('card-lift relative rounded-2xl border-2 p-5 text-left transition-all', pendingMode === 'timed' ? 'border-primary bg-[#eef7f1] shadow-sm' : 'border-border bg-card hover:border-primary/30')} data-testid="button-mode-timed">
               {pendingMode === 'timed' && <span className="absolute right-3 top-3 grid size-5 place-items-center rounded-full bg-primary text-white"><Check size={11} /></span>}
@@ -237,7 +291,7 @@ function Practice() {
             <div className="mt-3 flex flex-wrap justify-center gap-1.5">
               {[autoMinutes, 15, 30, 45, 60].filter((v, idx, arr) => v > 0 && arr.indexOf(v) === idx).map((v) => <button key={v} type="button" onClick={() => setCustomMinutes(v)} className={cn('rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors', effectiveMinutes === v ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-muted-foreground hover:bg-muted')} data-testid={`button-timer-preset-${v}`}>{v === autoMinutes ? `${v} min (recommended)` : `${v} min`}</button>)}
             </div>
-            <p className="mt-2.5 text-center text-[10px] text-muted-foreground">{isAuto ? '~1 min per question' : 'Custom pace'}, based on a {mcqs.length}-question set.</p>
+            <p className="mt-2.5 text-center text-[10px] text-muted-foreground">{isAuto ? '~1 min per question' : 'Custom pace'}, based on a {effectiveCount}-question set.</p>
           </div>}
 
           <button type="button" onClick={() => setShuffleQuestions((s) => !s)} className="mt-4 flex w-full items-center justify-between rounded-2xl border border-border bg-muted/40 px-4 py-3 text-left transition-colors hover:bg-muted/60" data-testid="button-toggle-shuffle" aria-pressed={shuffleQuestions}>
@@ -245,11 +299,22 @@ function Practice() {
             <span className={cn('relative h-5 w-9 shrink-0 rounded-full transition-colors', shuffleQuestions ? 'bg-primary' : 'bg-border')}><span className={cn('absolute top-0.5 size-4 rounded-full bg-white shadow transition-transform', shuffleQuestions ? 'translate-x-4' : 'translate-x-0.5')} /></span>
           </button>
 
+          <div className="mt-4 rounded-2xl bg-muted/40 p-4 text-left" data-testid="panel-test-summary">
+            <div className="mb-2 text-[11px] font-bold text-muted-foreground">Test Summary</div>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px]">
+              <div className="flex items-center gap-1.5 text-muted-foreground"><Target size={11} className="shrink-0" /> Topic: <span className="truncate font-bold text-foreground">{topicLabel}</span></div>
+              <div className="flex items-center gap-1.5 text-muted-foreground"><Activity size={11} className="shrink-0" /> Difficulty: <span className="font-bold text-foreground">{difficultyLabels[selectedDifficulty]}</span></div>
+              <div className="flex items-center gap-1.5 text-muted-foreground"><Hash size={11} className="shrink-0" /> Questions: <span className="font-bold text-foreground">{effectiveCount}</span></div>
+              <div className="flex items-center gap-1.5 text-muted-foreground"><Clock3 size={11} className="shrink-0" /> Mode: <span className="font-bold text-foreground">{pendingMode === 'timed' ? 'Timer' : 'Timeless'}</span></div>
+            </div>
+          </div>
+
           <button
             onClick={startSession}
-            className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3.5 text-xs font-extrabold text-primary-foreground shadow-sm transition-transform active:scale-[0.99]"
+            disabled={effectiveCount === 0}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3.5 text-xs font-extrabold text-primary-foreground shadow-sm transition-transform active:scale-[0.99] disabled:opacity-40"
             data-testid="button-start-session"
-          ><Zap size={14} /> Start {pendingMode === 'timed' ? `(${effectiveMinutes} min)` : 'session'}</button>
+          ><Zap size={14} /> Start Test {pendingMode === 'timed' ? `(${effectiveMinutes} min)` : ''}</button>
           <button
             onClick={() => saveSession.mutate({ name: `Practice — ${new Date().toLocaleDateString()}`, config: { topicId, pastPaperId } })}
             disabled={saveSession.isPending}
@@ -263,7 +328,19 @@ function Practice() {
 
   if (!current) return <SkeletonPage />;
 
-  const selectOption = (option: string) => { if (paused) return; setAnswers((prev) => ({ ...prev, [current.id]: option })); };
+  // Bug fix: once a question has been answered, lock it — don't let further
+  // clicks overwrite `answers[current.id]`. Without this, going back (Prev /
+  // Question Navigator) to a question you got wrong and tapping the now
+  // green-outlined correct option silently replaced your original wrong
+  // answer with the correct one, so both the inline feedback and the
+  // results card (PracticeResultCard) would count it as correct even though
+  // you answered wrong the first time. Matches real exam behavior: your
+  // first pick for a question is final.
+  const selectOption = (option: string) => {
+    if (paused) return;
+    if (answers[current.id] != null) return;
+    setAnswers((prev) => ({ ...prev, [current.id]: option }));
+  };
   const goTo = (i: number) => { setIndex(i); setPanel(null); askAi.reset(); };
   // Flag icon does double duty: it drives the session-local "flag for
   // review" highlight in the number grid (like a real exam engine), AND —
@@ -352,7 +429,7 @@ function Practice() {
             : isSelected && !isCorrectOpt ? 'border-destructive bg-[#fff1ed]'
             : isCorrectOpt ? 'border-[#287058] bg-[#f3fbf7]'
             : 'border-border opacity-70';
-          return <button key={option} onClick={() => selectOption(option)} className={cn('flex w-full items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-left text-sm transition-colors', optionClass)} data-testid={`button-answer-${i}`}><span className="grid size-6 shrink-0 place-items-center rounded-lg bg-muted font-mono-app text-[11px]">{String.fromCharCode(65 + i)}</span><span className="flex-1">{option}</span>{selected != null && isSelected && !isCorrectOpt && <X size={15} className="shrink-0 text-destructive" />}{selected != null && isCorrectOpt && <CheckCircle2 size={15} className="shrink-0 text-[#287058]" />}</button>;
+          return <button key={option} onClick={() => selectOption(option)} disabled={selected != null} className={cn('flex w-full items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-left text-sm transition-colors', optionClass, selected != null && 'cursor-default')} data-testid={`button-answer-${i}`}><span className="grid size-6 shrink-0 place-items-center rounded-lg bg-muted font-mono-app text-[11px]">{String.fromCharCode(65 + i)}</span><span className="flex-1">{option}</span>{selected != null && isSelected && !isCorrectOpt && <X size={15} className="shrink-0 text-destructive" />}{selected != null && isCorrectOpt && <CheckCircle2 size={15} className="shrink-0 text-[#287058]" />}</button>;
         })}</div>
 
         <div className="mt-4 flex flex-wrap gap-2">
@@ -366,7 +443,7 @@ function Practice() {
         {panel === 'explain' && <div className="mt-3 rounded-xl bg-[#dceaf1] p-3.5 text-xs leading-6 text-[#32647b]" data-testid="panel-explain">
           <div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide"><CircleHelp size={10} /> Explanation</div>
           {current.optionExplanations?.some((e) => e?.trim()) ? <div className="space-y-2">{current.options.map((opt, oi) => { const optExplanation = current.optionExplanations?.[oi]; const isCorrectOpt = opt === current.correctAnswer; return <div key={opt} className={cn('rounded-lg p-2.5', isCorrectOpt ? 'bg-white/70' : 'bg-white/30')}><div className={cn('text-[11px] font-bold', isCorrectOpt ? 'text-[#287058]' : 'text-[#a34c3e]')}>{String.fromCharCode(65 + oi)}. {opt} {isCorrectOpt ? '(correct)' : ''}</div>{optExplanation && <div className="mt-1 text-[11px] leading-5">{optExplanation}</div>}</div>; })}</div> : (current.explanation || 'No written explanation is available for this question yet.')}
-          {!askAi.data && <button onClick={() => askAi.mutate()} disabled={askAi.isPending} className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-[#32647b]/30 bg-white/60 px-3 py-1.5 text-[11px] font-bold text-[#32647b] disabled:opacity-50" data-testid="button-ask-ai">{askAi.isPending ? 'Thinking…' : <><Sparkles size={11} /> Ask AI to explain differently</>}</button>}
+          {aiExplainEnabled && !askAi.data && <button onClick={() => askAi.mutate()} disabled={askAi.isPending} className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-[#32647b]/30 bg-white/60 px-3 py-1.5 text-[11px] font-bold text-[#32647b] disabled:opacity-50" data-testid="button-ask-ai">{askAi.isPending ? 'Thinking…' : <><Sparkles size={11} /> Ask AI to explain differently</>}</button>}
           {askAi.data && <div className="mt-3 rounded-lg bg-white/60 p-3 text-xs leading-5"><div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide"><Sparkles size={10} /> AI explanation</div>{askAi.data.explanation}</div>}
           {askAi.isError && <p className="mt-2 text-[11px] font-semibold text-destructive">{askAi.error instanceof ApiRequestError ? askAi.error.message : 'Could not reach AI right now.'}</p>}
         </div>}

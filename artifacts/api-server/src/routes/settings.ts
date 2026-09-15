@@ -28,6 +28,18 @@ const EDITABLE_KEYS = [
   // Visualizer" link from the student sidebar (frontend-student's SideNav)
   // and the route itself refuses direct access; on brings both back.
   "AI_VISUALIZER_ENABLED",
+  // Same on/off pattern as AI_VISUALIZER_ENABLED above, but for the "Ask AI
+  // to explain differently" button itself — the one that shows up on MCQs
+  // (Practice.tsx), flashcards (Flashcards.tsx), and anywhere else those
+  // components are reused (e.g. past-paper practice, since past papers are
+  // just MCQs practiced through the same Practice screen). Defaults to ON
+  // (missing/unset means enabled); "false" hides the button everywhere it
+  // appears and the backing routes (POST /mcqs/:id/ask-ai, POST
+  // /flashcards/:id/ask-ai) refuse directly too — see explanations.ts.
+  // Doesn't touch AI_AUTO_EXPLAIN_ON_IMPORT or any admin-side AI generation
+  // (bulk explanations, AI-generated MCQs/flashcards) — this only gates the
+  // student-facing on-demand button.
+  "AI_EXPLAIN_ENABLED",
   // General Trial Mode — unlike REGISTRATION_ENABLED/AI_VISUALIZER_ENABLED
   // above (which default to ON, "false" is the opt-out), this defaults to
   // OFF: only the exact string "true" enables it (see

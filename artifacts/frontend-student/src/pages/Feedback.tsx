@@ -58,17 +58,24 @@ import { queryClient } from '@/lib/query-client';
 function Feedback() {
   const [message, setMessage] = useState('');
   const [category, setCategory] = useState('general');
+  const [rating, setRating] = useState(0);
+  const [hoverRating, setHoverRating] = useState(0);
   const mine = useQuery({ queryKey: ['my-feedback'], queryFn: feedbackApi.mine });
-  const submit = useMutation({ mutationFn: feedbackApi.create, onSuccess: () => { setMessage(''); queryClient.invalidateQueries({ queryKey: ['my-feedback'] }); } });
+  const submit = useMutation({ mutationFn: feedbackApi.create, onSuccess: () => { setMessage(''); setRating(0); queryClient.invalidateQueries({ queryKey: ['my-feedback'] }); } });
   const site = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get, staleTime: 5 * 60 * 1000 });
   const whatsapp = site.data?.SUPPORT_WHATSAPP?.trim();
   return <div className="max-w-xl"><SectionHeader eyebrow="Community" title="Feedback" />
-    {whatsapp && <a href={`https://wa.me/${whatsapp.replace(/[^\d]/g, '')}`} target="_blank" rel="noreferrer" className="mb-5 flex items-center gap-3 rounded-2xl border border-[#1c4539]/50 bg-[#1c452a] p-4 transition hover:border-primary/50" data-testid="link-whatsapp-contact">
+    {whatsapp && <a href={`https://wa.me/${whatsapp.replace(/[^\d]/g, '')}`} target="_blank" rel="noreferrer" className="mb-5 flex items-center gap-3 rounded-2xl border border-[#25D366]/30 bg-[#25D366]/10 p-4 transition hover:border-[#25D366]/60" data-testid="link-whatsapp-contact">
       <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-[#25D366] text-white"><MessageSquare size={20} /></div>
-      <div className="flex-1"><div className="text-sm font-bold">Chat with us on WhatsApp</div><div className="mt-0.5 text-xs text-muted-foreground">Faster than a ticket for quick questions — opens a chat with the academic team.</div></div>
-      <ArrowRight size={16} className="text-primary" />
+      <div className="flex-1"><div className="text-sm font-bold text-[#146c43]">Chat with us on WhatsApp</div><div className="mt-0.5 text-xs text-muted-foreground">Faster than a ticket for quick questions — opens a chat with the academic team.</div></div>
+      <ArrowRight size={16} className="text-[#25D366]" />
     </a>}
-    <div className="rounded-2xl border border-border bg-card p-6"><form onSubmit={(e) => { e.preventDefault(); if (message.trim()) submit.mutate({ category, message: message.trim() }); }} className="space-y-3"><label className="block text-xs font-bold">Category<select value={category} onChange={(e) => setCategory(e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="select-feedback-category"><option value="general">General</option><option value="bug">Bug report</option><option value="content">Content issue</option><option value="feature">Feature request</option></select></label><label className="block text-xs font-bold">Message<textarea required value={message} onChange={(e) => setMessage(e.target.value)} className="mt-2 min-h-28 w-full rounded-xl border border-border bg-background p-3 text-sm" data-testid="input-feedback-message" /></label><button disabled={submit.isPending} className="rounded-xl bg-primary px-5 py-3 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-submit-feedback">{submit.isPending ? 'Sending…' : 'Send feedback'}</button></form></div>
+    <div className="rounded-2xl border border-border bg-card p-6"><form onSubmit={(e) => { e.preventDefault(); if (message.trim()) submit.mutate({ category, message: message.trim(), ...(rating > 0 ? { rating } : {}) }); }} className="space-y-3">
+      <label className="block text-xs font-bold">Rate your experience<div className="mt-2 flex items-center gap-1" data-testid="input-feedback-rating">{[1, 2, 3, 4, 5].map((n) => <button key={n} type="button" onClick={() => setRating(n === rating ? 0 : n)} onMouseEnter={() => setHoverRating(n)} onMouseLeave={() => setHoverRating(0)} className="p-0.5" aria-label={`${n} star${n === 1 ? '' : 's'}`} data-testid={`button-rating-star-${n}`}><Star size={22} className={(hoverRating || rating) >= n ? 'fill-[#e8c34a] text-[#e8c34a]' : 'text-muted-foreground'} /></button>)}{rating > 0 && <span className="ml-2 text-[11px] font-bold text-muted-foreground">{rating}/5</span>}</div></label>
+      <label className="block text-xs font-bold">Category<select value={category} onChange={(e) => setCategory(e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="select-feedback-category"><option value="general">General</option><option value="bug">Bug report</option><option value="content">Content issue</option><option value="feature">Feature request</option></select></label>
+      <label className="block text-xs font-bold">Message<textarea required value={message} onChange={(e) => setMessage(e.target.value)} className="mt-2 min-h-28 w-full rounded-xl border border-border bg-background p-3 text-sm" data-testid="input-feedback-message" /></label>
+      <button disabled={submit.isPending} className="rounded-xl bg-primary px-5 py-3 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-submit-feedback">{submit.isPending ? 'Sending…' : 'Send feedback'}</button>
+    </form></div>
     {!!mine.data?.length && <div className="mt-6"><h3 className="mb-3 text-xs font-bold uppercase tracking-wide text-muted-foreground">Your feedback history</h3><div className="space-y-3">{mine.data.map((item) => <MyFeedbackThread key={item.id} item={item} />)}</div></div>}
   </div>;
 }

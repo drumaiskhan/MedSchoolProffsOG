@@ -65,6 +65,23 @@ function AdminSettings() {
   });
   const set = (key: string, value: string) => setForm({ ...values, [key]: value });
   const [tab, setTab] = useState<'general' | 'features' | 'branding' | 'ai' | 'email' | 'storage' | 'security' | 'notifications'>('general');
+
+  // Bug fix: ANNOUNCEMENT_BANNER used to be a single plain-text setting —
+  // now it's a JSON array of strings (same pattern as FEATURES_LIST /
+  // QUICK_LINKS on the Site content page) so an admin can queue up more
+  // than one announcement, which the student app scrolls through in
+  // sequence. The try/catch fallback below means a site that still has the
+  // old plain-text value saved shows it as a single existing entry instead
+  // of silently losing it the first time this page loads.
+  let announcements: string[] = [];
+  try {
+    const parsed = JSON.parse(values.ANNOUNCEMENT_BANNER || '[]');
+    if (Array.isArray(parsed)) announcements = parsed.filter((x): x is string => typeof x === 'string');
+  } catch {
+    if (values.ANNOUNCEMENT_BANNER?.trim()) announcements = [values.ANNOUNCEMENT_BANNER.trim()];
+  }
+  const [newAnnouncement, setNewAnnouncement] = useState('');
+  const setAnnouncements = (list: string[]) => set('ANNOUNCEMENT_BANNER', JSON.stringify(list));
   const storageIssue = values.CLOUDINARY_CONFIGURED !== 'true';
   const emailIssue = values.EMAIL_CONFIGURED !== 'true';
 
@@ -89,8 +106,22 @@ function AdminSettings() {
           <label className="text-xs font-bold">Support email<input value={values.SUPPORT_EMAIL || ''} onChange={(e) => set('SUPPORT_EMAIL', e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-support-email" /></label>
           <label className="text-xs font-bold">WhatsApp support number<input value={values.SUPPORT_WHATSAPP || ''} onChange={(e) => set('SUPPORT_WHATSAPP', e.target.value.replace(/[^\d+]/g, ''))} placeholder="e.g. 923001234567" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-support-whatsapp" /><span className="mt-1 block text-[10px] font-normal text-muted-foreground">Country code + number, digits only. Students get a "Chat on WhatsApp" button that opens this number.</span></label>
           <label className="text-xs font-bold sm:col-span-2">Tagline<input value={values.PLATFORM_TAGLINE || ''} onChange={(e) => set('PLATFORM_TAGLINE', e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-platform-tagline" /></label>
-          <label className="text-xs font-bold sm:col-span-2">Announcement banner (blank to hide)<input value={values.ANNOUNCEMENT_BANNER || ''} onChange={(e) => set('ANNOUNCEMENT_BANNER', e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-announcement-banner" /></label>
         </div></div>
+
+        <div className="rounded-2xl border border-border bg-card p-6">
+          <h3 className="font-bold">Announcement banner</h3>
+          <p className="mt-1 text-xs text-muted-foreground">Scrolls across the top of the student app so it's never cut off on mobile. Add more than one and they'll scroll through together, separated by a dot. Remove them all to hide the banner.</p>
+          {announcements.length > 0 && <div className="mt-4 space-y-2">
+            {announcements.map((a, i) => <div key={i} className="flex items-center gap-2">
+              <input value={a} onChange={(e) => setAnnouncements(announcements.map((x, idx) => idx === i ? e.target.value : x))} className="h-9 flex-1 rounded-lg border border-border bg-background px-3 text-xs" data-testid={`input-announcement-${i}`} />
+              <button type="button" onClick={() => setAnnouncements(announcements.filter((_, idx) => idx !== i))} className="text-muted-foreground hover:text-destructive" aria-label="Remove announcement" data-testid={`button-remove-announcement-${i}`}><Trash2 size={14} /></button>
+            </div>)}
+          </div>}
+          <div className="mt-3 flex gap-2">
+            <input value={newAnnouncement} onChange={(e) => setNewAnnouncement(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && newAnnouncement.trim()) { e.preventDefault(); setAnnouncements([...announcements, newAnnouncement.trim()]); setNewAnnouncement(''); } }} placeholder="e.g. New batch enrollment opens Monday" className="h-9 flex-1 rounded-lg border border-border bg-background px-3 text-xs" data-testid="input-new-announcement" />
+            <button type="button" onClick={() => { if (newAnnouncement.trim()) { setAnnouncements([...announcements, newAnnouncement.trim()]); setNewAnnouncement(''); } }} className="rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground" data-testid="button-add-announcement">Add</button>
+          </div>
+        </div>
       </>}
 
       {/* Split out from General — this is every site-wide on/off switch in
@@ -105,6 +136,9 @@ function AdminSettings() {
         <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">AI Visualizer</h3><div className="mt-5 grid gap-4 sm:grid-cols-2">
           <label className="flex items-center justify-between text-xs font-bold">Show in student sidebar<input type="checkbox" checked={values.AI_VISUALIZER_ENABLED !== 'false'} onChange={(e) => set('AI_VISUALIZER_ENABLED', e.target.checked ? 'true' : 'false')} className="size-4 accent-[#287058]" data-testid="checkbox-ai-visualizer-enabled" /></label>
         </div><p className="mt-3 text-[11px] text-muted-foreground">Off removes the "AI Visualizer" link from every student's sidebar and blocks the page directly; on brings it right back — no need to save anything else.</p></div>
+        <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">Ask AI to explain</h3><div className="mt-5 grid gap-4 sm:grid-cols-2">
+          <label className="flex items-center justify-between text-xs font-bold">Show "Ask AI to explain differently" button<input type="checkbox" checked={values.AI_EXPLAIN_ENABLED !== 'false'} onChange={(e) => set('AI_EXPLAIN_ENABLED', e.target.checked ? 'true' : 'false')} className="size-4 accent-[#287058]" data-testid="checkbox-ai-explain-enabled" /></label>
+        </div><p className="mt-3 text-[11px] text-muted-foreground">Off removes the button everywhere students see it — MCQs, flashcards, and past papers (past papers are practiced through the same MCQ screen) — and blocks it directly if someone still has it open in a tab; on brings it right back. Doesn't touch admin-side AI generation (bulk explanations, AI-generated MCQs/flashcards) or auto-explain-on-import, configured below.</p></div>
         <div className={cn('rounded-2xl border p-6', values.GLOBAL_TRIAL_MODE === 'true' ? 'border-[#e5a952] bg-[#fff9ee]' : 'border-border bg-card')}><h3 className="font-bold">General trial mode</h3><div className="mt-5 grid gap-4 sm:grid-cols-2">
           <label className="flex items-center justify-between text-xs font-bold">Give every student full access<input type="checkbox" checked={values.GLOBAL_TRIAL_MODE === 'true'} onChange={(e) => set('GLOBAL_TRIAL_MODE', e.target.checked ? 'true' : 'false')} className="size-4 accent-[#e5a952]" data-testid="checkbox-global-trial-mode" /></label>
         </div><p className="mt-3 text-[11px] text-muted-foreground">Unlocks every membership-gated page — MCQs, flashcards, exams, books, everything — for <strong>every signed-in student</strong>, regardless of their own payment/membership status. Doesn't touch anyone's individual membership record, so turning this back off instantly restores normal per-student access with nothing to undo. This is separate from granting a trial to one student at a time on <Link href="/admin/students" className="font-bold text-primary">Students</Link>. {values.GLOBAL_TRIAL_MODE === 'true' && <span className="font-bold text-[#8a5a12]">Currently ON — the whole platform is free to use right now.</span>}</p></div>

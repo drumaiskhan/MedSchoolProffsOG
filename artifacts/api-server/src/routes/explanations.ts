@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db, mcqsTable, flashcardsTable, topicsTable, subjectsTable, modulesTable, auditLogsTable } from "@workspace/db";
 import { requireAdmin, requireAuth, requireActiveMembership } from "../middlewares/auth";
 import { generateExplanation, generateFlashcardExplanation, generateFlashcardSet, generateMcqSet, classifyDifficulty, AiNotConfiguredError } from "../lib/aiExplain";
+import { getAllSettings } from "../lib/settings";
 
 const router: IRouter = Router();
 
@@ -255,6 +256,13 @@ router.post("/admin/mcqs/classify-difficulty", requireAdmin, async (req, res): P
 // ---------------------------------------------------------------------------
 
 router.post("/mcqs/:id/ask-ai", requireAuth, requireActiveMembership, async (req, res): Promise<void> => {
+  // Defense in depth: Practice.tsx already hides the button when
+  // AI_EXPLAIN_ENABLED is off, but that's just UI — a direct API call (or
+  // a stale page still open in a tab) should be refused too, not just
+  // hidden from view. Same pattern as AI_VISUALIZER_ENABLED in
+  // ai-visualizer.ts.
+  const settings = await getAllSettings();
+  if (settings.AI_EXPLAIN_ENABLED === "false") { res.status(403).json({ error: "Ask AI to explain is turned off right now." }); return; }
   const id = Number(req.params.id);
   const [mcq] = await db.select().from(mcqsTable).where(and(eq(mcqsTable.id, id), eq(mcqsTable.status, "published")));
   if (!mcq) { res.status(404).json({ error: "Question not found" }); return; }
@@ -268,6 +276,9 @@ router.post("/mcqs/:id/ask-ai", requireAuth, requireActiveMembership, async (req
 });
 
 router.post("/flashcards/:id/ask-ai", requireAuth, requireActiveMembership, async (req, res): Promise<void> => {
+  // Same defense-in-depth check as POST /mcqs/:id/ask-ai above.
+  const settings = await getAllSettings();
+  if (settings.AI_EXPLAIN_ENABLED === "false") { res.status(403).json({ error: "Ask AI to explain is turned off right now." }); return; }
   const id = Number(req.params.id);
   const [card] = await db.select().from(flashcardsTable).where(and(eq(flashcardsTable.id, id), eq(flashcardsTable.active, true)));
   if (!card) { res.status(404).json({ error: "Flashcard not found" }); return; }

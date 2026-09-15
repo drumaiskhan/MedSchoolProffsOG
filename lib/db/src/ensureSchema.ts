@@ -543,9 +543,12 @@ CREATE TABLE IF NOT EXISTS med_feedback (
   category TEXT NOT NULL DEFAULT 'general',
   message TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'open',
+  rating INTEGER,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE med_feedback ADD COLUMN IF NOT EXISTS rating INTEGER;
 
 CREATE TABLE IF NOT EXISTS med_feedback_replies (
   id SERIAL PRIMARY KEY,
