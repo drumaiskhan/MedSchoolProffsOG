@@ -119,6 +119,10 @@ export const emailVerificationTokensTable = pgTable("med_email_verification_toke
   newEmail: text("new_email"),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   usedAt: timestamp("used_at", { withTimezone: true }),
+  // Failed check attempts against this specific code — a 6-digit OTP has
+  // only 1M combinations, so unlike the old click-a-link token this needs
+  // its own brute-force counter. See MAX_OTP_ATTEMPTS in routes/auth.ts.
+  attempts: integer("attempts").notNull().default(0),
   ...timestamps,
 });
 
@@ -427,6 +431,45 @@ export const studentProgressTable = pgTable("med_student_progress", {
   lastActivityAt: timestamp("last_activity_at", { withTimezone: true }).notNull().defaultNow(),
   ...timestamps,
 }, (table) => ({ userModuleIdx: uniqueIndex("med_progress_user_module_idx").on(table.userId, table.moduleId) }));
+
+// ---------------------------------------------------------------------------
+// Friend challenges — a student finds another student (search by name,
+// email, phone, or roll number — see GET /students/find) and challenges them
+// to the same fixed set of MCQs. Each side plays it once and gets scored
+// independently in med_challenge_attempts; once both have a completed
+// attempt the challenge is COMPLETED and both get a result notification.
+// ---------------------------------------------------------------------------
+
+export const challengesTable = pgTable("med_challenges", {
+  id: serial("id").primaryKey(),
+  challengerId: integer("challenger_id").notNull(),
+  opponentId: integer("opponent_id").notNull(),
+  moduleId: integer("module_id"),
+  subjectId: integer("subject_id"),
+  topicId: integer("topic_id"),
+  // Fixed at creation time so both players answer the exact same questions
+  // in the exact same order.
+  mcqIds: integer("mcq_ids").array().notNull(),
+  status: text("status").notNull().default("PENDING"), // PENDING | DECLINED | COMPLETED | EXPIRED
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  ...timestamps,
+});
+
+export const challengeAttemptsTable = pgTable(
+  "med_challenge_attempts",
+  {
+    id: serial("id").primaryKey(),
+    challengeId: integer("challenge_id").notNull(),
+    userId: integer("user_id").notNull(),
+    correctCount: integer("correct_count").notNull().default(0),
+    totalQuestions: integer("total_questions").notNull().default(0),
+    scorePercent: numeric("score_percent", { precision: 5, scale: 2 }).notNull().default("0"),
+    durationSeconds: integer("duration_seconds"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => ({ challengeUserIdx: uniqueIndex("med_challenge_attempts_challenge_user_idx").on(table.challengeId, table.userId) }),
+);
 
 // ---------------------------------------------------------------------------
 // Past papers

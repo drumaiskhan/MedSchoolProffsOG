@@ -46,7 +46,28 @@ if (!databaseUrl) {
 const sslDisabled = databaseUrl.includes("sslmode=disable");
 const ssl = sslDisabled ? undefined : { rejectUnauthorized: false };
 
-export const pool = new Pool({ connectionString: databaseUrl, ssl });
+// Without an explicit `max`, node-postgres defaults to 10 connections —
+// fine at low traffic, but under real concurrent load every request past
+// the 10th queues behind an in-flight query instead of failing fast, which
+// is what "the site is slow/hanging" under load usually turns out to be.
+// DB_POOL_MAX lets this be tuned per environment (match it to whatever your
+// Postgres plan's own connection cap is, minus headroom for other clients
+// like migrations/ensureSchema/seedAdmin running at boot). 10 stays the
+// default so nothing changes unless the env var is set.
+//
+// idleTimeoutMillis/connectionTimeoutMillis matter more as pool size grows:
+// without them, a connection that goes bad or a DB that's slow to accept
+// new connections can hold a pool slot indefinitely, which quietly shrinks
+// the effective pool size over time under sustained load.
+const poolMax = Number(process.env.DB_POOL_MAX) || 10;
+
+export const pool = new Pool({
+  connectionString: databaseUrl,
+  ssl,
+  max: poolMax,
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 5_000,
+});
 
 // Without this listener, an error on an idle pooled connection (e.g. the
 // remote end dropping it) is an unhandled 'error' event, which crashes the

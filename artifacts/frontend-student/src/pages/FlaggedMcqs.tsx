@@ -56,9 +56,41 @@ import { EmptyState, SectionHeader, cn } from '@/lib/shared';
 import { queryClient } from '@/lib/query-client';
 
 function FlaggedMcqs() {
+  const [, navigate] = useLocation();
   const flags = useQuery({ queryKey: ['flagged-mcqs'], queryFn: flaggedMcqsApi.list });
-  const remove = useMutation({ mutationFn: flaggedMcqsApi.remove, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['flagged-mcqs'] }), onError: (err: unknown) => toast({ title: 'Could not remove flag', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
-  return <div><SectionHeader eyebrow="Your tools" title="Flagged MCQs" action={<span className="text-[10px] text-muted-foreground">Questions you marked for review</span>} /><div className="space-y-3">{(flags.data || []).map((flag: FlaggedMcq) => <div key={flag.id} className="flex items-center justify-between rounded-2xl border border-border bg-card p-4" data-testid={`card-flag-${flag.id}`}><div><div className="text-sm font-bold">MCQ #{flag.mcqId}</div>{flag.reason && <div className="text-[11px] text-muted-foreground">{flag.reason}</div>}<span className={cn('mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-bold', flag.status === 'open' ? 'bg-[#fdeecb] text-[#8a5a12]' : 'bg-[#d7eee4] text-[#164b4b]')}>{flag.status}</span></div><button onClick={() => remove.mutate(flag.id)} className="rounded-lg border border-border px-3 py-1.5 text-xs font-bold text-destructive" data-testid={`button-unflag-${flag.id}`}>Remove</button></div>)}{!flags.data?.length && <EmptyState icon={Flag} title="Nothing flagged" body="Flag a question from a practice session to come back to it later." />}</div></div>;
+  // Bug fix: "Remove" used to call the mutation and just hope — no toast on
+  // success, and the old backend route silently returned {ok:true} even
+  // when nothing was actually deleted (see student-tools.ts), so a failed
+  // remove looked identical to a working one. The route now reports real
+  // failures (404) and this surfaces both outcomes instead of only errors.
+  const remove = useMutation({
+    mutationFn: flaggedMcqsApi.remove,
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['flagged-mcqs'] }); toast({ title: 'Removed' }); },
+    onError: (err: unknown) => toast({ title: 'Could not remove this', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
+  return <div>
+    <SectionHeader eyebrow="Your tools" title="Flagged MCQs" action={<span className="text-[10px] text-muted-foreground">Questions you bookmarked or flagged for review</span>} />
+    <div className="space-y-3">
+      {(flags.data || []).map((flag: FlaggedMcq) => <div key={flag.id} className="rounded-2xl border border-border bg-card p-4" data-testid={`card-flag-${flag.id}`}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            {/* Block > Module > Subject > Topic breadcrumb — null when the
+                MCQ (or its curriculum placement) is gone, e.g. an
+                exam-only/past-paper-only question with no module tagging. */}
+            {flag.path && <p className="mb-1 truncate text-[10px] font-extrabold uppercase tracking-wide text-primary" data-testid={`text-flag-path-${flag.id}`}>{flag.path}</p>}
+            <p className="line-clamp-2 text-sm font-bold" data-testid={`text-flag-question-${flag.id}`}>{flag.question ?? `This question is no longer available (MCQ #${flag.mcqId}).`}</p>
+            {flag.reason && <p className="mt-1 text-[11px] text-muted-foreground">{flag.reason}</p>}
+            <span className={cn('mt-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-bold', flag.status === 'open' ? 'bg-[#fdeecb] text-[#8a5a12]' : 'bg-[#d7eee4] text-[#164b4b]')}>{flag.status}</span>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <button onClick={() => navigate(`/practice?mcqId=${flag.mcqId}`)} disabled={flag.mcqDeleted} title={flag.mcqDeleted ? 'This question no longer exists' : undefined} className="rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40" data-testid={`button-open-flag-${flag.id}`}>Open</button>
+            <button onClick={() => remove.mutate(flag.id)} disabled={remove.isPending} className="rounded-lg border border-border px-3 py-1.5 text-xs font-bold text-destructive disabled:opacity-50" data-testid={`button-unflag-${flag.id}`}>Remove</button>
+          </div>
+        </div>
+      </div>)}
+      {!flags.data?.length && <EmptyState icon={Flag} title="Nothing flagged" body="Flag a question from a practice session to come back to it later." />}
+    </div>
+  </div>;
 }
 
 // Podium/Leaderboard (round 3): reverted from the previous dark/gold "game

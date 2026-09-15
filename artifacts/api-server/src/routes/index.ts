@@ -19,6 +19,7 @@ import explanationsRouter from "./explanations";
 import booksRouter from "./books";
 import aiVisualizerRouter from "./ai-visualizer";
 import adminSearchRouter from "./admin-search";
+import challengesRouter from "./challenges";
 
 const router: IRouter = Router();
 
@@ -41,6 +42,7 @@ router.use(explanationsRouter);
 router.use(booksRouter);
 router.use(aiVisualizerRouter);
 router.use(adminSearchRouter);
+router.use(challengesRouter);
 router.use(medschoolRouter);
 
 export default router;

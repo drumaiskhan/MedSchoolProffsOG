@@ -1,6 +1,7 @@
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import compression from "compression";
 import pinoHttp from "pino-http";
 import multer from "multer";
 import router from "./routes";
@@ -9,6 +10,12 @@ import { attachUser } from "./middlewares/auth";
 import { dbErrorMessage } from "./lib/dbErrors";
 
 const app: Express = express();
+
+// Compresses every JSON response over ~1KB (default threshold). Exam/MCQ/
+// flashcard list payloads are the biggest wins here — smaller responses
+// mean less time spent per request on a shared-CPU instance and less
+// bandwidth, which matters more as concurrent traffic grows, not less.
+app.use(compression());
 
 // Express auto-generates an ETag for every JSON response by default. For
 // dynamic, per-user endpoints like /api/auth/me and /api/site-content, that

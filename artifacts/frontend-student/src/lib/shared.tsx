@@ -13,7 +13,7 @@ import {
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
   GraduationCap, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
   RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Link2 as LinkIcon, Lightbulb,
-  LayoutGrid, Presentation, Wand2, Crown, Globe, Star, Megaphone
+  LayoutGrid, Presentation, Wand2, Crown, Globe, Star, Megaphone, Swords
 } from 'lucide-react';
 import { applyThemeVars } from '@/lib/theme';
 import { queryClient } from '@/lib/query-client';
@@ -204,7 +204,7 @@ export const navGroups: Array<{ label: string; items: NavItem[] }> = [
     ['/dashboard', 'Overview', LayoutDashboard], ['/blocks', 'Blocks', BookOpen], ['/exams', 'Pre-Proffs Exams', ClipboardCheck], ['/past-papers', 'Past papers', FileStack], ['/flashcards', 'Flashcards', Zap], ['/ai-visualizer', 'AI Visualizer', Wand2], ['/books', 'Books', Library], ['/resources', 'Resources', FolderOpen],
   ] },
   { label: 'Your tools', items: [
-    ['/notebook', 'My notebook', NotebookPen], ['/saved-sessions', 'Saved sessions', Bookmark], ['/flagged-mcqs', 'Flagged MCQs', Flag], ['/leaderboard', 'Leaderboard', Trophy],
+    ['/notebook', 'My notebook', NotebookPen], ['/saved-sessions', 'Saved sessions', Bookmark], ['/flagged-mcqs', 'Flagged MCQs', Flag], ['/leaderboard', 'Leaderboard', Trophy], ['/challenge', 'Challenge a friend', Swords],
   ] },
   { label: 'Your account', items: [
     ['/payments', 'Membership', CreditCard], ['/notifications', 'Notifications', Bell], ['/feedback', 'Send feedback', MessageSquare], ['/profile', 'Profile & access', ShieldCheck],

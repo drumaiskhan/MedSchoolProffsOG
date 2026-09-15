@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { db, notebookEntriesTable, savedSessionsTable, flaggedMcqsTable, feedbackTable, feedbackRepliesTable, notificationsTable, usersTable } from "@workspace/db";
+import { db, notebookEntriesTable, savedSessionsTable, flaggedMcqsTable, feedbackTable, feedbackRepliesTable, notificationsTable, usersTable, mcqsTable, topicsTable, subjectsTable, modulesTable, blocksTable } from "@workspace/db";
 import { requireAuth, requireAdmin, isAdminRole } from "../middlewares/auth";
 
 const router: IRouter = Router();
@@ -62,10 +62,39 @@ router.delete("/saved-sessions/:id", requireAuth, async (req, res): Promise<void
 // Flagged MCQs
 // ---------------------------------------------------------------------------
 
+// Bug fix: this used to `select()` the bare flaggedMcqsTable row only —
+// the frontend had nothing but a numeric mcqId to show, so a saved/
+// flagged question rendered as inert text ("MCQ #123") with no way to
+// actually open it and no curriculum context. Left-joined (not inner —
+// an mcq can be hard-deleted after being flagged, and this must still
+// list the flag row rather than silently dropping it) down to the
+// question text and its full Block > Module > Subject > Topic path, the
+// same breadcrumb shape /admin/mcqs/generate builds for its AI prompt
+// (see explanations.ts). `mcqDeleted` lets the frontend grey out "Open"
+// instead of navigating to a question that's gone.
 router.get("/flagged-mcqs", requireAuth, async (req, res): Promise<void> => {
   const isAdmin = isAdminRole(req.user!.role);
-  const rows = await db.select().from(flaggedMcqsTable).where(isAdmin ? undefined : eq(flaggedMcqsTable.userId, req.user!.id)).orderBy(desc(flaggedMcqsTable.createdAt));
-  res.json(rows);
+  const rows = await db.select({
+    flag: flaggedMcqsTable,
+    question: mcqsTable.question,
+    topicName: topicsTable.name,
+    subjectName: subjectsTable.name,
+    moduleName: modulesTable.name,
+    blockName: blocksTable.name,
+  }).from(flaggedMcqsTable)
+    .leftJoin(mcqsTable, eq(flaggedMcqsTable.mcqId, mcqsTable.id))
+    .leftJoin(topicsTable, eq(mcqsTable.topicId, topicsTable.id))
+    .leftJoin(subjectsTable, eq(mcqsTable.subjectId, subjectsTable.id))
+    .leftJoin(modulesTable, eq(mcqsTable.moduleId, modulesTable.id))
+    .leftJoin(blocksTable, eq(modulesTable.blockId, blocksTable.id))
+    .where(isAdmin ? undefined : eq(flaggedMcqsTable.userId, req.user!.id))
+    .orderBy(desc(flaggedMcqsTable.createdAt));
+  res.json(rows.map((r) => ({
+    ...r.flag,
+    question: r.question,
+    path: [r.blockName, r.moduleName, r.subjectName, r.topicName].filter(Boolean).join(" \u203a ") || null,
+    mcqDeleted: r.question === null,
+  })));
 });
 
 router.post("/flagged-mcqs", requireAuth, async (req, res): Promise<void> => {
@@ -87,8 +116,22 @@ router.patch("/flagged-mcqs/:id", requireAdmin, async (req, res): Promise<void> 
   res.json(row);
 });
 
+// Bug fix: this always responded {ok:true} regardless of whether a row
+// actually matched — an invalid/already-removed id, or (before the isAdmin
+// allowance below) an admin trying to clear a student's flag, all deleted
+// nothing but still told the caller it worked, which is exactly what "Remove
+// doesn't actually remove it" looks like from the UI. `.returning()` now
+// reports the real outcome as a 404 instead of a false positive. Admins can
+// also clear any student's flag/bookmark (matching GET's isAdmin scope
+// above); regular users are still restricted to their own.
 router.delete("/flagged-mcqs/:id", requireAuth, async (req, res): Promise<void> => {
-  await db.delete(flaggedMcqsTable).where(and(eq(flaggedMcqsTable.id, Number(req.params.id)), eq(flaggedMcqsTable.userId, req.user!.id)));
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  const isAdmin = isAdminRole(req.user!.role);
+  const [deleted] = await db.delete(flaggedMcqsTable)
+    .where(and(eq(flaggedMcqsTable.id, id), isAdmin ? undefined : eq(flaggedMcqsTable.userId, req.user!.id)))
+    .returning();
+  if (!deleted) { res.status(404).json({ error: "Not found, or you don't have permission to remove it" }); return; }
   res.json({ ok: true });
 });
 

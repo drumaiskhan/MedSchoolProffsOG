@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS med_email_verification_tokens (
   new_email TEXT,
   expires_at TIMESTAMPTZ NOT NULL,
   used_at TIMESTAMPTZ,
+  attempts INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -556,6 +557,37 @@ CREATE TABLE IF NOT EXISTS med_feedback_replies (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS med_challenges (
+  id SERIAL PRIMARY KEY,
+  challenger_id INTEGER NOT NULL,
+  opponent_id INTEGER NOT NULL,
+  module_id INTEGER,
+  subject_id INTEGER,
+  topic_id INTEGER,
+  mcq_ids INTEGER[] NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PENDING',
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS med_challenges_challenger_idx ON med_challenges (challenger_id);
+CREATE INDEX IF NOT EXISTS med_challenges_opponent_idx ON med_challenges (opponent_id);
+
+CREATE TABLE IF NOT EXISTS med_challenge_attempts (
+  id SERIAL PRIMARY KEY,
+  challenge_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  correct_count INTEGER NOT NULL DEFAULT 0,
+  total_questions INTEGER NOT NULL DEFAULT 0,
+  score_percent NUMERIC(5, 2) NOT NULL DEFAULT 0,
+  duration_seconds INTEGER,
+  completed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS med_challenge_attempts_challenge_user_idx
+  ON med_challenge_attempts (challenge_id, user_id);
+
 CREATE TABLE IF NOT EXISTS med_notifications (
   id SERIAL PRIMARY KEY,
   user_id INTEGER,
@@ -688,6 +720,11 @@ ALTER TABLE med_past_papers ADD COLUMN IF NOT EXISTS year_target_number INTEGER;
 -- real paid membership. See routes/medschool.ts's /students/:id/trial
 -- endpoints and AdminStudents.tsx's "Trial access" panel.
 ALTER TABLE med_memberships ADD COLUMN IF NOT EXISTS is_trial BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Registration switched from a click-a-link email verification token to a
+-- 6-digit OTP (see routes/auth.ts) — existing rows on an already-deployed
+-- database need this counter added.
+ALTER TABLE med_email_verification_tokens ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0;
 
 COMMIT;
 `;

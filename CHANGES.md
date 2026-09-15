@@ -1,3 +1,57 @@
+# Round 12 — what changed, by file
+
+Fixed the student "saved MCQs" (Flag icon during practice → persisted to
+`flaggedMcqsTable` → shown on the "Flagged MCQs" page, linked from the
+dashboard's "Bookmarks / Saved content" tile — see `Practice.tsx`'s
+`toggleFlag` comment). Two real bugs:
+
+1. **Didn't open.** `GET /flagged-mcqs` (`student-tools.ts`) only ever
+   returned the bare flag row — `{id, userId, mcqId, reason, status,
+   createdAt}` — so the page had nothing to show but "MCQ #123" and
+   nothing to link to. Now left-joins down to the question text and its
+   full Block > Module > Subject > Topic path (left join, not inner — an
+   mcq can be hard-deleted after being flagged, and the flag row should
+   still list rather than vanish); added `mcqDeleted` so the frontend can
+   grey out Open instead of linking to a gone question.
+2. **Didn't remove.** `DELETE /flagged-mcqs/:id` deleted-and-ignored the
+   result, always responding `{ok:true}` even when zero rows matched (bad
+   id, already removed) — a silent no-op that looked identical to success.
+   Now uses `.returning()` and 404s on a real miss; also lets admins clear
+   any student's flag (matching GET's existing isAdmin scope), not just
+   their own.
+
+`FlaggedMcqs.tsx` rewritten to render the path breadcrumb, an "Open"
+button (`navigate('/practice?mcqId=...')`, the same mechanism
+`Notebook.tsx`'s linked-question button already uses successfully), and a
+"Remove" button with a real success/error toast instead of a silent
+mutation. `FlaggedMcq` type updated in both frontend `lib/api.ts` files
+(`question`, `path`, `mcqDeleted`). Esbuild-clean on all four touched
+files; no live DB/browser test.
+
+---
+
+# Round 11 — what changed, by file
+
+Added a **Paper maker** to Admin → Pre-Proffs Exams (`shared.tsx`:
+`PaperMakerPanel` + helpers, wired into `ExamManagePanel` above the
+existing "Attach questions" section). Lets an admin auto-build an exam's
+paper straight from the existing MCQ bank instead of pasting IDs or
+uploading a file: pick MBBS/BDS + Year (defaults to the exam's own
+targeting, overridable), drill Block > Module > Subject > Topic, set how
+many MCQs to pull from each Subject (optionally narrowed to specific
+Topics), see a running "Total: N MCQs across M subjects" count, then
+"Generate paper" randomly samples that many PUBLISHED bank-owned
+questions per subject (never touching MCQs already tied to another exam
+or past paper) and hands the id list to the same `setQuestions` endpoint
+the manual flow already used — no backend route changes needed, all
+client-side using the existing `/blocks`, `/modules`, `/subjects`,
+`/topics`, `/admin/mcqs`, and `/admin/exams/:id/questions` endpoints. A
+"Replace this exam's current paper" checkbox mirrors the same toggle the
+file-upload flow already has. Syntax-checked with esbuild (clean); no
+live DB/browser test.
+
+---
+
 # Round 10 — what changed, by file
 
 See `AI_HANDOFF_NOTE.md` for the full writeup. Short version: (1) First

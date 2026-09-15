@@ -275,7 +275,7 @@ export const mcqImportApi = {
 export interface PastPaper { id: number; title: string; examBoard: string; year: string; level: string; active: boolean; displayOrder: number; mcqCount: number }
 export interface NotebookEntry { id: number; userId: number; mcqId: number | null; title: string; content: string; createdAt: string; updatedAt: string }
 export interface SavedSession { id: number; userId: number; name: string; config: Record<string, unknown>; createdAt: string }
-export interface FlaggedMcq { id: number; userId: number; mcqId: number; reason: string; status: 'open' | 'resolved'; createdAt: string }
+export interface FlaggedMcq { id: number; userId: number; mcqId: number; reason: string; status: 'open' | 'resolved'; createdAt: string; question: string | null; path: string | null; mcqDeleted: boolean }
 export interface FeedbackEntry { id: number; userId: number | null; category: string; message: string; status: 'open' | 'replied' | 'reviewed'; createdAt: string; user: { name: string; email: string } | null }
 export interface FeedbackReply { id: number; feedbackId: number; authorId: number; authorRole: 'admin' | 'student'; message: string; createdAt: string }
 export interface MyFeedbackEntry extends FeedbackEntry { replies: FeedbackReply[] }
@@ -296,7 +296,7 @@ export const authApi = {
     request<{ token: string; user: AuthUser }>('/auth/login', { method: 'POST', body: JSON.stringify(body) }),
   logout: () => request<void>('/auth/logout', { method: 'POST' }),
   me: () => request<AuthUser>('/auth/me'),
-  verifyEmail: (token: string) => request<{ message: string }>('/auth/verify-email', { method: 'POST', body: JSON.stringify({ token }) }),
+  verifyOtp: (email: string, otp: string) => request<{ message: string }>('/auth/verify-otp', { method: 'POST', body: JSON.stringify({ email, otp }) }),
   resendVerification: (email: string) => request<{ message: string }>('/auth/resend-verification', { method: 'POST', body: JSON.stringify({ email }) }),
   forgotPassword: (email: string) => request<{ message: string }>('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }),
   resetPassword: (token: string, password: string) => request<{ message: string }>('/auth/reset-password', { method: 'POST', body: JSON.stringify({ token, password }) }),
@@ -437,6 +437,36 @@ export type VisualizationSpec =
   | { type: 'comparison'; title: string; description: string; items: Array<{ name: string; attributes: Array<{ label: string; value: string }> }> }
   | { type: 'graph'; title: string; description: string; chartType: 'line' | 'bar'; xLabel: string; yLabel: string; series: Array<{ name: string; points: Array<{ x: string | number; y: number }> }> }
   | { type: 'anatomy'; title: string; description: string; elements: VizElement[] };
+
+// ---------------------------------------------------------------------------
+// Challenge a friend — search for another student and race them on the
+// same set of MCQs.
+// ---------------------------------------------------------------------------
+
+export interface ChallengeOpponent { id: number; name: string; email: string; phone: string | null; rollNumber: string | null; institution: string | null }
+export interface ChallengeSummary {
+  id: number; role: 'challenger' | 'opponent'; opponent: ChallengeOpponent | null;
+  totalQuestions: number; status: 'PENDING' | 'DECLINED' | 'COMPLETED' | 'EXPIRED'; expiresAt: string; createdAt: string;
+  myScorePercent: number | null; myCorrectCount: number | null; opponentScorePercent: number | null; opponentCorrectCount: number | null;
+  iHavePlayed: boolean; opponentHasPlayed: boolean;
+}
+export interface ChallengeMcq { id: number; question: string; options: string[]; correctAnswer: string | null; explanation: string | null }
+export interface ChallengeDetail {
+  id: number; status: ChallengeSummary['status']; opponent: ChallengeOpponent | null;
+  myAttempt: { correctCount: number; totalQuestions: number; scorePercent: number } | null;
+  mcqs: ChallengeMcq[];
+}
+
+export const challengesApi = {
+  findStudents: (q: string) => request<ChallengeOpponent[]>(`/students/find?q=${encodeURIComponent(q)}`),
+  create: (body: { opponentId: number; moduleId?: number; subjectId?: number; topicId?: number; totalQuestions?: number }) =>
+    request<{ id: number; opponent: ChallengeOpponent; totalQuestions: number; status: string }>('/challenges', { method: 'POST', body: JSON.stringify(body) }),
+  mine: () => request<{ sent: ChallengeSummary[]; received: ChallengeSummary[] }>('/challenges/mine'),
+  get: (id: number) => request<ChallengeDetail>(`/challenges/${id}`),
+  decline: (id: number) => request<{ id: number; status: string }>(`/challenges/${id}/decline`, { method: 'POST' }),
+  submit: (id: number, body: { answers: { mcqId: number; selectedAnswer: string | null }[]; durationSeconds?: number }) =>
+    request<{ correctCount: number; totalQuestions: number; scorePercent: number; opponentHasPlayed: boolean; opponentScorePercent: number | null }>(`/challenges/${id}/submit`, { method: 'POST', body: JSON.stringify(body) }),
+};
 
 export const aiVisualizerApi = {
   generate: (prompt: string) => request<{ visualization: VisualizationSpec }>('/ai/visualizer', { method: 'POST', body: JSON.stringify({ prompt }) }),

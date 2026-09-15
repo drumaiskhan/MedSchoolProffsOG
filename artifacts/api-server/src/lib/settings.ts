@@ -36,9 +36,23 @@ export async function setSetting(key: string, value: string): Promise<void> {
     .values({ key, value })
     .onConflictDoUpdate({ target: platformSettingsTable.key, set: { value, updatedAt: new Date() } });
   cache.delete(key);
+  allSettingsCache = null;
 }
 
+// getAllSettings() backs /api/site-content, which every page (logged-in or
+// not — footer, about page, login/register branding) fetches on load. Left
+// uncached, that's a full table scan on the busiest public endpoint in the
+// app, once per page view, per user. Cached the same way getSetting() above
+// caches individual keys, and invalidated on setSetting() so an admin
+// changing a setting is reflected within one TTL window (or immediately,
+// since setSetting also clears the single-key cache admins actually read
+// from right after saving).
+let allSettingsCache: { value: Record<string, string>; expiresAt: number } | null = null;
+
 export async function getAllSettings(): Promise<Record<string, string>> {
+  if (allSettingsCache && allSettingsCache.expiresAt > Date.now()) return allSettingsCache.value;
   const rows = await db.select().from(platformSettingsTable);
-  return Object.fromEntries(rows.map((row) => [row.key, row.value]));
+  const value = Object.fromEntries(rows.map((row) => [row.key, row.value]));
+  allSettingsCache = { value, expiresAt: Date.now() + CACHE_TTL_MS };
+  return value;
 }

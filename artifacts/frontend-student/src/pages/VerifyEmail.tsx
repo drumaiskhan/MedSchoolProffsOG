@@ -52,12 +52,42 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // invalidateQueries after a save) already set their own options, which
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
-import { AuthLayout } from '@/lib/shared';
+import { AuthLayout, IconField } from '@/lib/shared';
 
 function VerifyEmail() {
-  const token = new URLSearchParams(window.location.search).get('token') || '';
-  const verify = useQuery({ queryKey: ['verify-email', token], queryFn: () => authApi.verifyEmail(token), enabled: !!token, retry: false });
-  return <AuthLayout><div className="w-full text-center">{!token ? <p className="text-sm text-muted-foreground">Missing verification token.</p> : verify.isLoading ? <p className="text-sm text-muted-foreground">Verifying your email…</p> : verify.isError ? <p className="text-sm text-destructive">This link is invalid or has expired.</p> : <div><div className="mx-auto mb-5 grid size-14 place-items-center rounded-full bg-[#d7eee4] text-[#164b4b]"><CheckCircle2 size={26} /></div><h1 className="font-display text-3xl tracking-[-.04em]">Email verified</h1><p className="mt-3 text-sm text-muted-foreground">You can now sign in.</p></div>}<Link href="/login" className="mt-7 inline-block rounded-xl bg-primary px-6 py-3 text-xs font-extrabold text-primary-foreground" data-testid="link-verify-login">Go to sign in</Link></div></AuthLayout>;
+  const initialEmail = new URLSearchParams(window.location.search).get('email') || '';
+  const [email, setEmail] = useState(initialEmail);
+  const [otp, setOtp] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [resent, setResent] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const verify = useMutation({
+    mutationFn: () => authApi.verifyOtp(email.trim().toLowerCase(), otp.trim()),
+    onSuccess: () => setDone(true),
+    onError: (err: unknown) => setError(err instanceof ApiRequestError ? err.message : 'Something went wrong. Please try again.'),
+  });
+  const resend = useMutation({
+    mutationFn: () => authApi.resendVerification(email.trim().toLowerCase()),
+    onSuccess: () => { setResent(true); setError(null); },
+    onError: (err: unknown) => setError(err instanceof ApiRequestError ? err.message : 'Could not resend the code. Please try again.'),
+  });
+
+  if (done) return <AuthLayout><div className="w-full text-center"><div className="mx-auto mb-5 grid size-14 place-items-center rounded-full bg-[#d7eee4] text-[#164b4b]"><CheckCircle2 size={26} /></div><h1 className="font-display text-3xl tracking-[-.04em]">Email verified</h1><p className="mt-3 text-sm text-muted-foreground">You can now sign in.</p><Link href="/login" className="mt-7 inline-block rounded-xl bg-primary px-6 py-3 text-xs font-extrabold text-primary-foreground" data-testid="link-verify-login">Go to sign in</Link></div></AuthLayout>;
+
+  return <AuthLayout><div className="w-full">
+    <div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-primary">Confirm your email</div>
+    <h1 className="mt-3 font-display text-3xl tracking-[-.04em]">Enter your code</h1>
+    <p className="mt-3 text-sm leading-6 text-muted-foreground">We emailed a 6-digit verification code to your address. Enter it below to activate your account.</p>
+    <form onSubmit={(e) => { e.preventDefault(); setError(null); verify.mutate(); }} className="mt-7 space-y-3.5">
+      <label className="block text-xs font-bold">Email<div className="mt-2"><IconField icon={Mail} required type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@college.edu" data-testid="input-verify-email" /></div></label>
+      <label className="block text-xs font-bold">Verification code<input required maxLength={6} inputMode="numeric" value={otp} onChange={(e) => setOtp(e.target.value.replace(/[^0-9]/g, ''))} placeholder="000000" className="mt-2 h-12 w-full rounded-xl border border-border bg-card px-4 text-center text-xl font-extrabold tracking-[.5em] outline-none focus:ring-2 focus:ring-primary/20" data-testid="input-verify-otp" /></label>
+      {error && <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs font-semibold text-destructive" data-testid="text-verify-error">{error}</div>}
+      {resent && !error && <div className="rounded-xl border border-primary/30 bg-primary/10 p-3 text-xs font-semibold text-primary">A new code is on its way.</div>}
+      <button disabled={verify.isPending || !email || otp.length < 6} className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-xs font-extrabold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md disabled:opacity-50 disabled:hover:translate-y-0" data-testid="button-verify-submit">{verify.isPending ? 'Verifying…' : 'Verify email'}</button>
+    </form>
+    <p className="mt-6 text-center text-xs text-muted-foreground">Didn't get a code? <button type="button" onClick={() => resend.mutate()} disabled={resend.isPending || !email} className="font-bold text-primary hover:underline disabled:opacity-50" data-testid="button-resend-otp">{resend.isPending ? 'Sending…' : 'Resend code'}</button></p>
+  </div></AuthLayout>;
 }
 
 // Row icon color cycles through the same --chart-1..5 palette used

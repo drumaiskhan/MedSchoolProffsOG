@@ -66,6 +66,7 @@ function Register() {
   const [passwordValue, setPasswordValue] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [registeredEmail, setRegisteredEmail] = useState('');
 
   // College options are now scoped to the chosen program — an MBBS college
   // and a BDS college are different institutions, so showing every college
@@ -101,7 +102,7 @@ function Register() {
     }
   };
 
-  if (done) return <AuthLayout register><div className="w-full text-center"><div className="mx-auto mb-5 grid size-14 place-items-center rounded-full bg-[#d7eee4] text-[#164b4b]"><CheckCircle2 size={26} /></div><h1 className="font-display text-3xl tracking-[-.04em]">Almost there</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">Confirm your email using the link we sent you. Once our team verifies your payment, your account is activated automatically and you can sign in — no exams, just steady practice.</p><Link href="/login" className="mt-7 inline-block rounded-xl bg-primary px-6 py-3 text-xs font-extrabold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md" data-testid="link-login-after-register">Go to sign in</Link></div></AuthLayout>;
+  if (done) return <AuthLayout register><div className="w-full text-center"><div className="mx-auto mb-5 grid size-14 place-items-center rounded-full bg-[#d7eee4] text-[#164b4b]"><CheckCircle2 size={26} /></div><h1 className="font-display text-3xl tracking-[-.04em]">Almost there</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">We just emailed a 6-digit code to <span className="font-bold text-foreground">{registeredEmail}</span>. Enter it to confirm your email — once our team verifies your payment, your account is activated automatically.</p><Link href={`/verify-email?email=${encodeURIComponent(registeredEmail)}`} className="mt-7 inline-block rounded-xl bg-primary px-6 py-3 text-xs font-extrabold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md" data-testid="link-enter-code">Enter verification code</Link></div></AuthLayout>;
 
   const selectedPlan = (plans.data || []).find((p) => p.id === planId) || null;
   const bestValueId = (plans.data || []).length > 1 ? [...(plans.data || [])].sort((a, b) => (a.price / a.duration) - (b.price / b.duration))[0].id : null;
@@ -116,8 +117,10 @@ function Register() {
       if (!yearNumber) { setError('Please select your academic year.'); return; }
       if (!planId) { setError('Please choose a membership plan.'); return; }
       const f = new FormData(e.currentTarget);
+      const email = String(f.get('email'));
+      setRegisteredEmail(email);
       register.mutate({
-        name: String(f.get('name')), email: String(f.get('email')), password: String(f.get('password')),
+        name: String(f.get('name')), email, password: String(f.get('password')),
         phone: String(f.get('phone')), institutionId: Number(institutionId), programKind, yearNumber: Number(yearNumber), planId, proofPath: proof?.storagePath,
       });
     }} className="mt-7 space-y-3.5">

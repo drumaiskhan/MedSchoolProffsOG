@@ -49,6 +49,16 @@ export function hashToken(raw: string): string {
   return crypto.createHash("sha256").update(raw).digest("hex");
 }
 
+/** Generates a 6-digit numeric OTP (e.g. for email verification) and returns
+ *  both the plain code (to email) and its sha256 hash (to store in the DB).
+ *  Never store the plain code. crypto.randomInt is uniform over
+ *  [0, 1_000_000) — zero-padded so e.g. 42 becomes "000042", not "42". */
+export function generateOtp(): { code: string; hash: string } {
+  const code = crypto.randomInt(0, 1_000_000).toString().padStart(6, "0");
+  const hash = crypto.createHash("sha256").update(code).digest("hex");
+  return { code, hash };
+}
+
 export const SESSION_COOKIE_NAME = "medschool_session";
 
 // This deployment is always split-domain: the frontend(s) run on Netlify

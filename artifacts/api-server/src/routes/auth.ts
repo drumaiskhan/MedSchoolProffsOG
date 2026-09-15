@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, isNull } from "drizzle-orm";
 import { z } from "zod";
 import {
   db,
@@ -20,11 +20,12 @@ import {
   verifyPassword,
   signSession,
   generateOneTimeToken,
+  generateOtp,
   hashToken,
   SESSION_COOKIE_NAME,
   sessionCookieOptions,
 } from "../lib/auth";
-import { sendEmail, verificationEmailHtml, resetPasswordEmailHtml, welcomeEmailHtml } from "../lib/email";
+import { sendEmail, otpEmailHtml, resetPasswordEmailHtml, welcomeEmailHtml } from "../lib/email";
 import { checkRateLimit } from "../lib/rateLimit";
 import { requireAuth } from "../middlewares/auth";
 import { getSetting } from "../lib/settings";
@@ -41,6 +42,8 @@ const router: IRouter = Router();
 const APP_URL = getPublicAppUrl();
 const MAX_LOGIN_ATTEMPTS = 8;
 const LOCKOUT_MS = 15 * 60 * 1000;
+const OTP_EXPIRY_MS = 10 * 60 * 1000; // shorter than the old 24h link — a code is meant to be typed in right away
+const MAX_OTP_ATTEMPTS = 5;
 
 // Bug fix: this used to return the legacy free-text `institution`/`program`
 // columns, which registration (see /auth/register below) never actually
@@ -201,17 +204,17 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     status: "PAYMENT_PENDING_REVIEW",
   });
 
-  const { raw, hash } = generateOneTimeToken();
+  const { code, hash } = generateOtp();
   await db.insert(emailVerificationTokensTable).values({
     userId: created.id,
     tokenHash: hash,
-    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    expiresAt: new Date(Date.now() + OTP_EXPIRY_MS),
   });
-  await sendEmail(email, "Verify your MedschoolProffs account", verificationEmailHtml(created.name, `${APP_URL}/verify-email?token=${raw}`));
+  await sendEmail(email, "Verify your MedschoolProffs account", otpEmailHtml(created.name, code));
 
   await db.insert(auditLogsTable).values({ actorId: created.id, action: "USER_REGISTERED", entity: "user", entityId: created.id });
 
-  res.status(201).json({ user: await userPublicView(created), message: "Account created and payment submitted. Please verify your email — an admin will review your payment shortly and activate your access." });
+  res.status(201).json({ user: await userPublicView(created), message: "Account created and payment submitted. Enter the verification code we emailed you — an admin will review your payment shortly and activate your access." });
 });
 
 // ---------------------------------------------------------------------------
@@ -397,25 +400,59 @@ router.patch("/auth/me", requireAuth, async (req, res): Promise<void> => {
 // Email verification
 // ---------------------------------------------------------------------------
 
-router.post("/auth/verify-email", async (req, res): Promise<void> => {
-  const parsed = z.object({ token: z.string().min(1) }).safeParse(req.body);
+router.post("/auth/verify-otp", async (req, res): Promise<void> => {
+  const parsed = z.object({ email: z.string().email(), otp: z.string().min(4).max(8) }).safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "A verification token is required" });
+    res.status(400).json({ error: "A valid email and code are required" });
     return;
   }
-  const tokenHash = hashToken(parsed.data.token);
+  const email = parsed.data.email.toLowerCase().trim();
+  const ip = req.ip || "unknown";
+  const limit = checkRateLimit(`verify-otp:${ip}:${email}`, 10, 15 * 60 * 1000);
+  if (!limit.allowed) {
+    res.status(429).json({ error: "Too many attempts. Please try again later." });
+    return;
+  }
+
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email));
+  if (!user) {
+    res.status(400).json({ error: "This code is invalid or has expired." });
+    return;
+  }
+  if (user.emailVerified) {
+    res.json({ message: "Email already verified. You can now log in." });
+    return;
+  }
+
+  // Most recent still-usable code for this account — resending invalidates
+  // nothing explicitly, but only the latest one is ever checked, so an
+  // older code in a student's inbox from a previous resend simply stops
+  // working once a newer one has been requested.
   const [record] = await db
     .select()
     .from(emailVerificationTokensTable)
-    .where(and(eq(emailVerificationTokensTable.tokenHash, tokenHash), isNull(emailVerificationTokensTable.usedAt), gt(emailVerificationTokensTable.expiresAt, new Date())));
+    .where(and(eq(emailVerificationTokensTable.userId, user.id), isNull(emailVerificationTokensTable.usedAt), gt(emailVerificationTokensTable.expiresAt, new Date())))
+    .orderBy(desc(emailVerificationTokensTable.createdAt))
+    .limit(1);
 
   if (!record) {
-    res.status(400).json({ error: "This verification link is invalid or has expired." });
+    res.status(400).json({ error: "This code is invalid or has expired. Request a new one." });
+    return;
+  }
+  if (record.attempts >= MAX_OTP_ATTEMPTS) {
+    res.status(429).json({ error: "Too many incorrect attempts. Request a new code." });
+    return;
+  }
+
+  const otpHash = hashToken(parsed.data.otp.trim());
+  if (otpHash !== record.tokenHash) {
+    await db.update(emailVerificationTokensTable).set({ attempts: record.attempts + 1 }).where(eq(emailVerificationTokensTable.id, record.id));
+    res.status(400).json({ error: "Incorrect code. Please try again." });
     return;
   }
 
   await db.update(emailVerificationTokensTable).set({ usedAt: new Date() }).where(eq(emailVerificationTokensTable.id, record.id));
-  const [verifiedUser] = await db.update(usersTable).set({ emailVerified: true, status: "VERIFIED" }).where(eq(usersTable.id, record.userId)).returning();
+  const [verifiedUser] = await db.update(usersTable).set({ emailVerified: true, status: "VERIFIED" }).where(eq(usersTable.id, user.id)).returning();
 
   // Fire-and-forget, same as every other transactional email in this file —
   // a slow/down mail provider should never delay or fail the verification
@@ -434,14 +471,20 @@ router.post("/auth/resend-verification", async (req, res): Promise<void> => {
     return;
   }
   const email = parsed.data.email.toLowerCase().trim();
+  const ip = req.ip || "unknown";
+  const limit = checkRateLimit(`resend-otp:${ip}:${email}`, 5, 15 * 60 * 1000);
+  if (!limit.allowed) {
+    res.status(429).json({ error: "Too many requests. Please try again later." });
+    return;
+  }
   const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email));
   // Always respond success to avoid leaking whether an email is registered.
   if (user && !user.emailVerified) {
-    const { raw, hash } = generateOneTimeToken();
-    await db.insert(emailVerificationTokensTable).values({ userId: user.id, tokenHash: hash, expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) });
-    await sendEmail(email, "Verify your MedschoolProffs account", verificationEmailHtml(user.name, `${APP_URL}/verify-email?token=${raw}`));
+    const { code, hash } = generateOtp();
+    await db.insert(emailVerificationTokensTable).values({ userId: user.id, tokenHash: hash, expiresAt: new Date(Date.now() + OTP_EXPIRY_MS) });
+    await sendEmail(email, "Verify your MedschoolProffs account", otpEmailHtml(user.name, code));
   }
-  res.json({ message: "If that email is registered and unverified, a new verification link has been sent." });
+  res.json({ message: "If that email is registered and unverified, a new verification code has been sent." });
 });
 
 // ---------------------------------------------------------------------------

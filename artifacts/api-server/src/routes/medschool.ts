@@ -1070,19 +1070,43 @@ router.post("/admin/mcqs/shuffle-options", requireAdmin, async (req, res): Promi
 
   if (!rows.length) { res.json({ ok: true, shuffled: 0, skipped: 0 }); return; }
 
-  let shuffledCount = 0;
+  // Compute every row's new order in memory first (cheap — pure JS, no DB
+  // involved), then write them all back. The old version awaited one
+  // `db.update` per row in a loop, so a "shuffle all" over a large bank (a
+  // few hundred+ questions) meant a few hundred+ sequential DB round-trips
+  // — easily tens of seconds, which is what was showing up as "taking more
+  // time" / timing out. Batching into a single statement per chunk (via
+  // jsonb_to_recordset, matched back on id) cuts that to one DB round-trip
+  // per ~500 rows regardless of how many questions are selected.
+  const updates: { id: number; options: string[]; optionExplanations: (string | null)[] | null }[] = [];
   for (const row of rows) {
     const { options: newOptions, optionExplanations: newExplanations, changed } = shuffleMcqOptions(
       row.options as string[],
       row.optionExplanations as (string | null)[] | null,
     );
     if (!changed) continue;
-    await db.update(mcqsTable).set({ options: newOptions, optionExplanations: newExplanations }).where(eq(mcqsTable.id, row.id));
-    shuffledCount++;
+    updates.push({ id: row.id, options: newOptions, optionExplanations: newExplanations });
+  }
+
+  const shuffledCount = updates.length;
+  const BATCH_SIZE = 500;
+  if (shuffledCount) {
+    await db.transaction(async (tx) => {
+      for (let i = 0; i < updates.length; i += BATCH_SIZE) {
+        const batch = updates.slice(i, i + BATCH_SIZE);
+        await tx.execute(sql`
+          UPDATE med_mcqs AS m
+          SET options = v.options, option_explanations = v.option_explanations
+          FROM jsonb_to_recordset(${JSON.stringify(batch)}::jsonb)
+            AS v(id int, options text[], option_explanations text[])
+          WHERE m.id = v.id
+        `);
+      }
+    });
   }
 
   if (shuffledCount) {
-    await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MCQS_OPTIONS_SHUFFLED", entity: "mcq", entityId: 0, metadata: JSON.stringify({ ids: rows.map((r) => r.id), count: shuffledCount }) });
+    await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MCQS_OPTIONS_SHUFFLED", entity: "mcq", entityId: 0, metadata: JSON.stringify({ ids: updates.map((u) => u.id), count: shuffledCount }) });
   }
   res.json({ ok: true, shuffled: shuffledCount, skipped: rows.length - shuffledCount });
 });

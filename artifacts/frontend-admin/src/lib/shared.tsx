@@ -2025,6 +2025,174 @@ export function ExamEditForm({ exam, onSave, onCancel, saving }: { exam: AdminEx
   </form>;
 }
 
+// ---------------------------------------------------------------------------
+// Paper maker — auto-builds a Pre-Proffs exam's paper straight from the
+// existing curriculum MCQ bank instead of pasting IDs or uploading a file.
+// Admin picks MBBS/BDS + Year (defaults to whatever the exam itself is
+// targeted at), then drills Block > Module > Subject > Topic — same tree
+// shape as McqBankTree — and sets how many MCQs to pull from each Subject
+// (optionally narrowed to specific Topics within it). "Generate paper"
+// randomly samples that many PUBLISHED, bank-owned questions per subject
+// (never touching MCQs already tied to another exam or past paper) and
+// hands the resulting id list to the same setQuestions endpoint the manual
+// "Set paper" flow already uses — no new backend route needed.
+// ---------------------------------------------------------------------------
+
+export type PaperMakerSelection = { count: number; topicIds: number[] | null };
+
+function paperMakerModuleMatches(m: AdminModule, program: string, year: string): boolean {
+  const programOk = !program || !m.programTargetKind || m.programTargetKind === program;
+  const yearOk = !year || !m.yearTargetNumber || m.yearTargetNumber === Number(year);
+  return programOk && yearOk;
+}
+
+export function PaperMakerTopicPicker({ subjectId, selection, onChange }: { subjectId: number; selection: PaperMakerSelection | undefined; onChange: (topicIds: number[] | null) => void }) {
+  const topicsQ = useQuery({ queryKey: ['admin-topics', subjectId], queryFn: () => topicAdminApi.list(subjectId) });
+  const topics = topicsQ.data ?? [];
+  const activeIds = selection?.topicIds ?? null;
+  if (topicsQ.isLoading) return <InlineLoading label="Loading topics…" />;
+  if (!topics.length) return <p className="text-[11px] text-muted-foreground">No topics in this subject yet — the count above pulls from the whole subject.</p>;
+  return <div className="space-y-1.5">
+    <div className="flex flex-wrap gap-2">
+      <button type="button" onClick={() => onChange(null)} className={cn('rounded-full px-2.5 py-1 text-[10px] font-bold', activeIds === null ? 'bg-primary text-primary-foreground' : 'border border-border')} data-testid={`button-papermaker-topics-all-${subjectId}`}>All topics</button>
+    </div>
+    <div className="flex flex-wrap gap-1.5">{topics.map((t) => { const checked = activeIds === null || activeIds.includes(t.id); return <label key={t.id} className={cn('flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold', checked ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground')}><input type="checkbox" className="size-3" checked={checked} onChange={(e) => {
+      const base = activeIds === null ? topics.map((tt) => tt.id) : activeIds;
+      const next = e.target.checked ? [...new Set([...base, t.id])] : base.filter((id) => id !== t.id);
+      // Re-selecting every topic collapses back to "All topics" (null) so a
+      // freshly created topic is picked up automatically next time, instead
+      // of being silently excluded by a stale explicit id list.
+      onChange(next.length === topics.length ? null : next);
+    }} data-testid={`checkbox-papermaker-topic-${t.id}`} />{t.name} <span className="font-normal opacity-70">({t.questionCount})</span></label>; })}</div>
+  </div>;
+}
+
+export function PaperMakerSubjectRow({ subject, rows, selection, onSetCount, onSetTopicIds }: { subject: AdminSubject; rows: AdminMcqRow[]; selection: PaperMakerSelection | undefined; onSetCount: (count: number) => void; onSetTopicIds: (topicIds: number[] | null) => void }) {
+  const [topicsOpen, setTopicsOpen] = useState(false);
+  const topicIds = selection?.topicIds ?? null;
+  const available = topicIds ? rows.filter((r) => r.topicId !== null && topicIds.includes(r.topicId)).length : rows.length;
+  const count = selection?.count ?? 0;
+  return <div className="rounded-xl border border-border bg-background p-3" data-testid={`row-papermaker-subject-${subject.id}`}>
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="min-w-0 flex-1"><p className="truncate text-xs font-bold">{subject.name}</p><p className="text-[10px] text-muted-foreground">{available} published MCQ{available === 1 ? '' : 's'} available{topicIds ? ' (selected topics)' : ''}</p></div>
+      <button type="button" onClick={() => setTopicsOpen((v) => !v)} className="rounded-lg border border-border px-2 py-1 text-[10px] font-bold text-muted-foreground" data-testid={`button-papermaker-toggle-topics-${subject.id}`}>{topicsOpen ? 'Hide topics' : 'Topics'}</button>
+      <input type="number" min={0} max={available} value={count || ''} onChange={(e) => onSetCount(Math.max(0, Math.min(Number(e.target.value) || 0, available)))} placeholder="0" className="h-9 w-20 rounded-lg border border-border bg-card px-2 text-xs font-bold" data-testid={`input-papermaker-count-${subject.id}`} disabled={!available} />
+    </div>
+    {topicsOpen && <div className="mt-2 border-t border-border pt-2"><PaperMakerTopicPicker subjectId={subject.id} selection={selection} onChange={onSetTopicIds} /></div>}
+  </div>;
+}
+
+export function PaperMakerModuleGroup({ mod, rowsBySubject, selections, onSetCount, onSetTopicIds }: { mod: AdminModule; rowsBySubject: Map<number, AdminMcqRow[]>; selections: Record<number, PaperMakerSelection>; onSetCount: (subjectId: number, count: number) => void; onSetTopicIds: (subjectId: number, topicIds: number[] | null) => void }) {
+  const [open, setOpen] = useState(false);
+  const subjectsQ = useQuery({ queryKey: ['admin-subjects', mod.id], queryFn: () => subjectAdminApi.list(mod.id), enabled: open });
+  const subjects = (subjectsQ.data ?? []).filter((s) => (rowsBySubject.get(s.id)?.length ?? 0) > 0);
+  const moduleAvailable = subjects.reduce((sum, s) => sum + (rowsBySubject.get(s.id)?.length ?? 0), 0);
+  return <div className="rounded-2xl border border-border bg-card">
+    <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 px-4 py-3 text-left" data-testid={`button-papermaker-module-${mod.id}`}>
+      <ChevronRight size={14} className={cn('shrink-0 text-primary transition-transform', open && 'rotate-90')} />
+      <span className="flex-1 text-xs font-extrabold">{mod.name}</span>
+      <span className="text-[10px] text-muted-foreground">{moduleAvailable} question{moduleAvailable === 1 ? '' : 's'}</span>
+    </button>
+    {open && <div className="space-y-2 border-t border-border p-3">
+      {subjectsQ.isLoading && <InlineLoading label="Loading subjects…" />}
+      {!subjectsQ.isLoading && !subjects.length && <p className="text-[11px] text-muted-foreground">No published bank questions under this module yet.</p>}
+      {subjects.map((s) => <PaperMakerSubjectRow key={s.id} subject={s} rows={rowsBySubject.get(s.id) ?? []} selection={selections[s.id]} onSetCount={(count) => onSetCount(s.id, count)} onSetTopicIds={(topicIds) => onSetTopicIds(s.id, topicIds)} />)}
+    </div>}
+  </div>;
+}
+
+export function PaperMakerPanel({ exam }: { exam: AdminExam }) {
+  const [open, setOpen] = useState(false);
+  const [program, setProgram] = useState(exam.programTargetKind ?? '');
+  const [year, setYear] = useState(exam.yearTargetNumber ? String(exam.yearTargetNumber) : '');
+  const [selections, setSelections] = useState<Record<number, PaperMakerSelection>>({});
+  const [replaceExisting, setReplaceExisting] = useState(true);
+
+  const blocksQ = useQuery({ queryKey: ['admin-blocks'], queryFn: blockAdminApi.listAll, enabled: open });
+  const modulesQ = useQuery({ queryKey: ['admin-modules'], queryFn: moduleAdminApi.listAll, enabled: open });
+  const mcqsTreeQ = useQuery({ queryKey: ['admin-mcqs-tree'], queryFn: mcqAdminApi.list, enabled: open });
+  const existingQuestionsQ = useQuery({ queryKey: ['exam-questions', exam.id], queryFn: () => examsAdminApi.getQuestions(exam.id) });
+
+  const blocks = blocksQ.data ?? [];
+  const modules = (modulesQ.data ?? []).filter((m) => paperMakerModuleMatches(m, program, year));
+  const eligibleModuleIds = new Set(modules.map((m) => m.id));
+  const allRows = mcqsTreeQ.data ?? [];
+  // Only PUBLISHED, bank-owned questions (no examId/pastPaperId) are fair
+  // game — same "belongs to the general curriculum bank, not someone
+  // else's exam/past paper" rule McqBankTree uses, plus excluding drafts
+  // so a generated paper never hands students an unfinished question.
+  const eligibleRows = allRows.filter((r) => r.status === 'published' && r.examId === null && r.pastPaperId === null && r.moduleId !== null && r.subjectId !== null && eligibleModuleIds.has(r.moduleId));
+  const rowsBySubject = new Map<number, AdminMcqRow[]>();
+  for (const r of eligibleRows) { const list = rowsBySubject.get(r.subjectId!); if (list) list.push(r); else rowsBySubject.set(r.subjectId!, [r]); }
+
+  const modulesByBlock = new Map<number | 'other', AdminModule[]>();
+  for (const m of modules) { const key = m.blockId ?? 'other'; const list = modulesByBlock.get(key); if (list) list.push(m); else modulesByBlock.set(key, [m]); }
+  const blocksWithModules = blocks.filter((b) => modulesByBlock.has(b.id));
+  const standaloneModules = modulesByBlock.get('other') ?? [];
+
+  const totalRequested = Object.values(selections).reduce((sum, s) => sum + (s.count || 0), 0);
+  const subjectsPicked = Object.values(selections).filter((s) => s.count > 0).length;
+
+  const setQuestions = useMutation({
+    mutationFn: (mcqIds: number[]) => examsAdminApi.setQuestions(exam.id, mcqIds),
+    onSuccess: (_res, mcqIds) => {
+      queryClient.invalidateQueries({ queryKey: ['admin-exams'] });
+      queryClient.invalidateQueries({ queryKey: ['exam-questions', exam.id] });
+      toast({ title: `Generated a ${mcqIds.length}-question paper` });
+      setSelections({});
+    },
+    onError: (err: unknown) => toast({ title: 'Could not generate paper', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
+
+  const generate = () => {
+    const picked: number[] = [];
+    for (const [subjectIdStr, sel] of Object.entries(selections)) {
+      if (!sel.count) continue;
+      let pool = rowsBySubject.get(Number(subjectIdStr)) ?? [];
+      if (sel.topicIds) pool = pool.filter((r) => r.topicId !== null && sel.topicIds!.includes(r.topicId));
+      // Fisher-Yates-ish shuffle (sort-by-random is fine at this scale —
+      // subject pools are, at most, a few hundred questions) so each
+      // generated paper draws a fresh random subset per subject.
+      const shuffled = [...pool].sort(() => Math.random() - 0.5);
+      picked.push(...shuffled.slice(0, sel.count).map((r) => r.id));
+    }
+    if (!picked.length) { toast({ title: 'Set an MCQ count for at least one subject first', variant: 'destructive' }); return; }
+    const finalIds = replaceExisting ? picked : [...new Set([...(existingQuestionsQ.data ?? []).map((q) => q.id), ...picked])];
+    setQuestions.mutate(finalIds);
+  };
+
+  return <div className="rounded-2xl border border-primary/30 bg-[#eef7f1] p-4">
+    <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 text-left" data-testid={`button-toggle-papermaker-${exam.id}`}>
+      <Wand2 size={15} className="shrink-0 text-primary" />
+      <span className="flex-1 text-xs font-extrabold">Paper maker — build this paper from the MCQ bank</span>
+      <ChevronRight size={16} className={cn('shrink-0 text-primary transition-transform', open && 'rotate-90')} />
+    </button>
+    {!open && <p className="mt-1 text-[11px] text-muted-foreground">Pick a year + MBBS/BDS, choose how many MCQs to pull per subject, and generate the paper automatically from the existing bank.</p>}
+    {open && <div className="mt-3 space-y-3">
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className="text-[11px] font-bold">Program<select value={program} onChange={(e) => setProgram(e.target.value)} className="mt-1 h-9 w-full rounded-lg border border-border bg-card px-2 text-xs" data-testid={`select-papermaker-program-${exam.id}`}><option value="">All Programs</option><option value="MBBS">MBBS</option><option value="BDS">BDS</option></select></label>
+        <label className="text-[11px] font-bold">Year<select value={year} onChange={(e) => setYear(e.target.value)} className="mt-1 h-9 w-full rounded-lg border border-border bg-card px-2 text-xs" data-testid={`select-papermaker-year-${exam.id}`}><option value="">All Years</option>{[1, 2, 3, 4, 5].map((y) => <option key={y} value={y}>Year {y}</option>)}</select></label>
+      </div>
+      <p className="text-[11px] text-muted-foreground">Defaults to this exam's own targeting — change it to pull from a different year/program's bank if needed.</p>
+
+      {(mcqsTreeQ.isLoading || modulesQ.isLoading) ? <InlineLoading label="Loading the MCQ bank…" /> : <div className="space-y-2">
+        {!blocksWithModules.length && !standaloneModules.length && <p className="text-[11px] text-muted-foreground">No modules match that Program/Year yet.</p>}
+        {blocksWithModules.map((b) => <div key={b.id} className="space-y-2">
+          <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground">{b.name}</p>
+          {(modulesByBlock.get(b.id) ?? []).map((m) => <PaperMakerModuleGroup key={m.id} mod={m} rowsBySubject={rowsBySubject} selections={selections} onSetCount={(subjectId, count) => setSelections((prev) => ({ ...prev, [subjectId]: { topicIds: prev[subjectId]?.topicIds ?? null, count } }))} onSetTopicIds={(subjectId, topicIds) => setSelections((prev) => ({ ...prev, [subjectId]: { count: prev[subjectId]?.count ?? 0, topicIds } }))} />)}
+        </div>)}
+        {standaloneModules.map((m) => <PaperMakerModuleGroup key={m.id} mod={m} rowsBySubject={rowsBySubject} selections={selections} onSetCount={(subjectId, count) => setSelections((prev) => ({ ...prev, [subjectId]: { topicIds: prev[subjectId]?.topicIds ?? null, count } }))} onSetTopicIds={(subjectId, topicIds) => setSelections((prev) => ({ ...prev, [subjectId]: { count: prev[subjectId]?.count ?? 0, topicIds } }))} />)}
+      </div>}
+
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/30 bg-card px-3 py-2.5">
+        <div className="text-xs font-bold" data-testid={`text-papermaker-total-${exam.id}`}>Total: {totalRequested} MCQ{totalRequested === 1 ? '' : 's'} across {subjectsPicked} subject{subjectsPicked === 1 ? '' : 's'}</div>
+        <label className="flex items-center gap-1.5 text-[11px] font-bold"><input type="checkbox" checked={replaceExisting} onChange={(e) => setReplaceExisting(e.target.checked)} data-testid={`checkbox-papermaker-replace-${exam.id}`} /> Replace this exam's current paper</label>
+      </div>
+      <button disabled={!totalRequested || setQuestions.isPending} onClick={generate} className="w-full rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid={`button-papermaker-generate-${exam.id}`}>{setQuestions.isPending ? 'Generating…' : `Generate paper (${totalRequested} MCQs)`}</button>
+    </div>}
+  </div>;
+}
+
 export function ExamManagePanel({ exam, autoOpenUpload }: { exam: AdminExam; autoOpenUpload?: boolean }) {
   const [mcqIdsInput, setMcqIdsInput] = useState('');
   const setQuestions = useMutation({ mutationFn: (mcqIds: number[]) => examsAdminApi.setQuestions(exam.id, mcqIds), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-exams'] }) });
@@ -2082,6 +2250,7 @@ export function ExamManagePanel({ exam, autoOpenUpload }: { exam: AdminExam; aut
   });
 
   return <div className="mt-4 space-y-4 border-t border-border pt-4">
+    <PaperMakerPanel exam={exam} />
     <div>
       <div className="flex items-center justify-between"><div className="text-xs font-bold">Attach questions</div><button onClick={() => setUploadOpen((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[11px] font-bold" data-testid={`button-toggle-exam-upload-${exam.id}`}><UploadCloud size={12} /> {uploadOpen ? 'Hide' : 'Upload a file'}</button></div>
       <p className="mt-1 text-[11px] text-muted-foreground">Paste MCQ IDs from the MCQ bank (comma-separated) to build this exam's paper, or upload a question file below.</p>

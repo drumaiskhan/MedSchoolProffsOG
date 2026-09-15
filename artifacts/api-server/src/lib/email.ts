@@ -176,8 +176,16 @@ function testEmailHtml(): string {
   return `<p>This is a test email from MedschoolProffs admin settings.</p><p>If you're reading this, your email provider is configured correctly.</p>`;
 }
 
-export function verificationEmailHtml(name: string, verifyUrl: string): string {
-  return `<p>Hi ${name},</p><p>Welcome to MedschoolProffs. Please verify your email address to activate your account:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p><p>This link expires in 24 hours.</p>`;
+/**
+ * Registration now confirms the student's email with a 6-digit OTP typed
+ * into the app instead of a click-a-link URL (see POST /auth/verify-otp) —
+ * quicker on mobile and doesn't depend on the email client rendering links
+ * usably. The code is shown large/spaced-out so it's easy to read and
+ * retype without miscounting digits.
+ */
+export function otpEmailHtml(name: string, code: string): string {
+  const spaced = code.split("").join(" ");
+  return `<p>Hi ${name},</p><p>Welcome to MedschoolProffs. Use this code to verify your email address:</p><p style="font-size:32px;font-weight:800;letter-spacing:4px;margin:16px 0;">${spaced}</p><p>This code expires in 10 minutes. If you didn't create this account, you can ignore this email.</p>`;
 }
 
 /**
@@ -218,4 +226,15 @@ export function paymentSubmittedEmailHtml(name: string, planName: string | null)
 /** Sent when an admin rejects a submitted payment, with the reason they gave. */
 export function paymentRejectedEmailHtml(name: string, reason: string): string {
   return `<p>Hi ${name},</p><p>We weren't able to verify your recent payment submission.</p><p><strong>Reason:</strong> ${reason}</p><p>You're welcome to submit it again with corrected details, or reach out to support if you think this is a mistake.</p>`;
+}
+
+/** Sent to the opponent the moment a challenge is created — see POST /challenges. */
+export function challengeInviteEmailHtml(opponentName: string, challengerName: string, questionCount: number, appUrl: string): string {
+  return `<p>Hi ${opponentName},</p><p><strong>${challengerName}</strong> just challenged you to a ${questionCount}-question quiz match on MedschoolProffs.</p><p><a href="${appUrl}/challenge">Accept the challenge and play</a></p><p>Whoever scores higher wins bragging rights — good luck!</p>`;
+}
+
+/** Sent to both players once each has a completed attempt on the same challenge — see POST /challenges/:id/submit. */
+export function challengeResultEmailHtml(name: string, opponentName: string, outcome: "won" | "lost" | "tied", myScore: number, opponentScore: number, appUrl: string): string {
+  const line = outcome === "won" ? `You beat ${opponentName}! 🎉` : outcome === "lost" ? `${opponentName} narrowly got the better of you this time.` : `It's a tie with ${opponentName}!`;
+  return `<p>Hi ${name},</p><p>Your quiz challenge against <strong>${opponentName}</strong> is complete.</p><p><strong>${line}</strong></p><p>Your score: ${myScore}% · ${opponentName}'s score: ${opponentScore}%</p><p><a href="${appUrl}/challenge">See the full result and challenge them again</a></p>`;
 }
