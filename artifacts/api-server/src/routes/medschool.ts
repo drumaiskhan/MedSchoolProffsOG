@@ -75,6 +75,7 @@ import { requireAuth, requireAdmin, requireActiveMembership, isAdminRole } from 
 import { getStudentTargeting, getVisibleModuleIds, getVisibleBlockIds, describeModuleTargeting } from "../lib/contentVisibility";
 import { resolveFileUrl, THUMBNAIL_TRANSFORM } from "../lib/storage";
 import { dbErrorMessage } from "../lib/dbErrors";
+import { shuffleMcqOptions } from "../lib/mcqShuffle";
 import { sendEmail, membershipActivatedEmailHtml, trialActivatedEmailHtml, paymentSubmittedEmailHtml, paymentRejectedEmailHtml } from "../lib/email";
 
 const router: IRouter = Router();
@@ -1022,6 +1023,68 @@ router.post("/admin/mcqs/bulk", requireAdmin, async (req, res): Promise<void> =>
     // Postgres error.
     res.status(422).json({ error: `Could not save these questions: ${dbErrorMessage(err, "unknown database error")}` });
   }
+});
+
+// Fixes question banks (typically bulk-imported from an external AI
+// generator) where the correct option is suspiciously clustered on the
+// same letter across many questions — a dead giveaway to students that
+// isn't actually testing their knowledge. Randomly reorders each
+// question's `options` array (and `optionExplanations`, in lockstep, if
+// present) WITHOUT touching `correctAnswer`. That's safe specifically
+// because `correctAnswer` is stored as the correct option's full text, not
+// a letter/index (see mcqsTable's comment and shuffleMcqOptions' own file
+// comment) — every correctness check compares option text, and the A/B/C
+// letter students see is computed from array position, so reshuffling
+// `options` automatically carries "correct" along with the option that
+// earned it. Same {ids} | {all, filters} shape as the bulk-delete endpoint
+// above, so it can target one selection or an entire module/subject/topic
+// at once.
+const ShuffleOptionsBody = z.object({ ids: z.array(z.number().int().positive()).min(1) }).or(
+  z.object({
+    all: z.literal(true),
+    filters: z.object({
+      search: z.string().optional(),
+      moduleId: z.number().int().positive().optional(),
+      subjectId: z.number().int().positive().optional(),
+      topicId: z.number().int().positive().optional(),
+      difficulty: z.string().optional(),
+    }).optional(),
+  }),
+);
+
+router.post("/admin/mcqs/shuffle-options", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = ShuffleOptionsBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+
+  const rows = "ids" in parsed.data
+    ? await db.select({ id: mcqsTable.id, options: mcqsTable.options, optionExplanations: mcqsTable.optionExplanations })
+        .from(mcqsTable).where(inArray(mcqsTable.id, parsed.data.ids))
+    : await db.select({ id: mcqsTable.id, options: mcqsTable.options, optionExplanations: mcqsTable.optionExplanations })
+        .from(mcqsTable).where(and(
+          parsed.data.filters?.search ? ilike(mcqsTable.question, `%${parsed.data.filters.search}%`) : undefined,
+          parsed.data.filters?.moduleId ? eq(mcqsTable.moduleId, parsed.data.filters.moduleId) : undefined,
+          parsed.data.filters?.subjectId ? eq(mcqsTable.subjectId, parsed.data.filters.subjectId) : undefined,
+          parsed.data.filters?.topicId ? eq(mcqsTable.topicId, parsed.data.filters.topicId) : undefined,
+          parsed.data.filters?.difficulty ? eq(mcqsTable.difficulty, parsed.data.filters.difficulty) : undefined,
+        ));
+
+  if (!rows.length) { res.json({ ok: true, shuffled: 0, skipped: 0 }); return; }
+
+  let shuffledCount = 0;
+  for (const row of rows) {
+    const { options: newOptions, optionExplanations: newExplanations, changed } = shuffleMcqOptions(
+      row.options as string[],
+      row.optionExplanations as (string | null)[] | null,
+    );
+    if (!changed) continue;
+    await db.update(mcqsTable).set({ options: newOptions, optionExplanations: newExplanations }).where(eq(mcqsTable.id, row.id));
+    shuffledCount++;
+  }
+
+  if (shuffledCount) {
+    await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MCQS_OPTIONS_SHUFFLED", entity: "mcq", entityId: 0, metadata: JSON.stringify({ ids: rows.map((r) => r.id), count: shuffledCount }) });
+  }
+  res.json({ ok: true, shuffled: shuffledCount, skipped: rows.length - shuffledCount });
 });
 
 router.get("/flashcards", requireAuth, requireActiveMembership, async (req, res): Promise<void> => {

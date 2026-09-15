@@ -13,7 +13,7 @@ import {
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
   GraduationCap, CalendarDays, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
   RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Wand2, Layers, BarChart3, ToggleLeft,
-  Download, Database, Loader2, GripVertical
+  Download, Database, Loader2, GripVertical, Shuffle
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { applyThemeVars, DEFAULT_THEME, readableForegroundHsl } from '@/lib/theme';
@@ -796,6 +796,21 @@ export function AnalysisPanel({ rows, label, filters }: { rows: AdminMcqRow[]; l
     },
     onError: (err: unknown) => toast({ title: 'Could not classify difficulty', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
+  // Randomly reorders each question's options in this scope (in one shot —
+  // it's a local reorder, not an AI call, so unlike classify-difficulty
+  // above it isn't batch-capped). Fixes banks where the correct option is
+  // suspiciously clustered on one letter (e.g. every answer is "A" after a
+  // bulk AI import) — see the endpoint's own comment for why this is safe
+  // to do without touching which option is marked correct.
+  const shuffle = useMutation({
+    mutationFn: () => mcqAdminApi.shuffleOptions({ all: true, filters }),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['admin-mcqs-tree'] });
+      queryClient.invalidateQueries({ queryKey: getListMcqsQueryKey() });
+      toast({ title: `Shuffled options on ${res.shuffled} question${res.shuffled === 1 ? '' : 's'}`, description: res.skipped ? `${res.skipped} question${res.skipped === 1 ? '' : 's'} skipped (fewer than 2 options).` : undefined });
+    },
+    onError: (err: unknown) => toast({ title: 'Could not shuffle options', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
   if (!a.total) return <p className="text-[11px] text-muted-foreground">No questions here yet to analyze.</p>;
   return <div>
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -804,7 +819,10 @@ export function AnalysisPanel({ rows, label, filters }: { rows: AdminMcqRow[]; l
       <div className="rounded-lg bg-[#fff1ed] p-2 text-center"><div className="text-sm font-extrabold text-[#a34c3e]">{a.hard}</div><div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Hard</div></div>
       <div className="rounded-lg bg-muted p-2 text-center"><div className="text-sm font-extrabold">{a.explained}/{a.total}</div><div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Explained</div></div>
     </div>
-    <button type="button" disabled={classify.isPending} onClick={(e) => { e.stopPropagation(); classify.mutate(); }} className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-[#eef7f1] px-2.5 py-1.5 text-[11px] font-bold text-primary disabled:opacity-50" data-testid="button-classify-difficulty" title="Re-runs AI difficulty classification on up to 30 questions in this scope per click">{classify.isPending ? 'Classifying…' : <><Wand2 size={12} /> AI: classify difficulty (up to 30)</>}</button>
+    <div className="mt-2 flex flex-wrap gap-2">
+      <button type="button" disabled={classify.isPending} onClick={(e) => { e.stopPropagation(); classify.mutate(); }} className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-[#eef7f1] px-2.5 py-1.5 text-[11px] font-bold text-primary disabled:opacity-50" data-testid="button-classify-difficulty" title="Re-runs AI difficulty classification on up to 30 questions in this scope per click">{classify.isPending ? 'Classifying…' : <><Wand2 size={12} /> AI: classify difficulty (up to 30)</>}</button>
+      <button type="button" disabled={shuffle.isPending} onClick={(e) => { e.stopPropagation(); shuffle.mutate(); }} className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-[#eef7f1] px-2.5 py-1.5 text-[11px] font-bold text-primary disabled:opacity-50" data-testid="button-shuffle-options" title="Randomly reorders every question's options in this scope, so the correct answer isn't always the same letter — the correct option moves with its text, it stays correct wherever it lands">{shuffle.isPending ? 'Shuffling…' : <><Shuffle size={12} /> Shuffle option order (all {a.total})</>}</button>
+    </div>
   </div>;
 }
 

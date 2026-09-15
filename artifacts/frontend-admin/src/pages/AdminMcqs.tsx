@@ -11,7 +11,7 @@ import {
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
   GraduationCap, CalendarDays, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
   RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Wand2, Activity, Layers, BarChart3, GraduationCap, ToggleLeft,
-  Download, Database, Loader2
+  Download, Database, Loader2, Shuffle
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { applyThemeVars, DEFAULT_THEME, readableForegroundHsl } from '@/lib/theme';
@@ -111,6 +111,16 @@ function AdminMcqs() {
     mutationFn: (ids: number[]) => mcqAdminApi.bulkRemove({ ids }),
     onSuccess: (res) => { invalidateMcqs(); setSelectedIds(new Set()); setBulkDeleteMode(null); toast({ title: `Deleted ${res.deleted} question${res.deleted === 1 ? '' : 's'}` }); },
     onError: (err: unknown) => toast({ title: 'Bulk delete failed', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
+  // Shuffles option order on just the checked questions — the same fix as
+  // AnalysisPanel's scope-wide "Shuffle option order" button, but for an
+  // explicit hand-picked selection instead of a whole module/subject/topic.
+  // correctAnswer is never touched (see /admin/mcqs/shuffle-options), so
+  // the correct option just moves to wherever it lands after the reorder.
+  const bulkShuffle = useMutation({
+    mutationFn: (ids: number[]) => mcqAdminApi.shuffleOptions({ ids }),
+    onSuccess: (res) => { invalidateMcqs(); setSelectedIds(new Set()); toast({ title: `Shuffled options on ${res.shuffled} question${res.shuffled === 1 ? '' : 's'}`, description: res.skipped ? `${res.skipped} skipped (fewer than 2 options).` : undefined }); },
+    onError: (err: unknown) => toast({ title: 'Shuffle failed', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
   const bulkAddRowsInit = () => [{ question: '', a: '', b: '', c: '', d: '', e: '', correct: 'a', explanation: '', ea: '', eb: '', ec: '', ed: '', ee: '', difficulty: 'moderate', showOptionExplanations: false }];
   const [bulkRows, setBulkRows] = useState(bulkAddRowsInit);
@@ -347,6 +357,7 @@ function AdminMcqs() {
           discoverable too. */}
       <div className="sticky top-2 z-10 mt-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card px-4 py-2.5 shadow-sm">
         <label className="flex items-center gap-2 text-xs font-bold"><input type="checkbox" checked={mcqs.length > 0 && selectedIds.size === mcqs.length} onChange={toggleSelectAll} data-testid="checkbox-select-all-mcqs" />{selectedIds.size > 0 ? `${selectedIds.size} selected` : `Select all ${mcqs.length}`}</label>
+        {selectedIds.size > 0 && <button onClick={() => bulkShuffle.mutate(Array.from(selectedIds))} disabled={bulkShuffle.isPending} className="inline-flex items-center gap-1 rounded-lg border border-primary/30 px-2.5 py-1.5 text-[11px] font-bold text-primary disabled:opacity-50" data-testid="button-bulk-shuffle-selected" title="Randomly reorders each selected question's options — correct answer moves with it, never changes">{bulkShuffle.isPending ? 'Shuffling…' : <><Shuffle size={12} /> Shuffle selected</>}</button>}
         {selectedIds.size > 0 && <button onClick={() => setBulkDeleteMode('selected')} className="inline-flex items-center gap-1 rounded-lg border border-destructive/30 px-2.5 py-1.5 text-[11px] font-bold text-destructive" data-testid="button-bulk-delete-selected"><Trash2 size={12} /> Delete selected</button>}
       </div>
 

@@ -360,6 +360,13 @@ export const mcqAdminApi = {
   // mcq-import.ts's CommitBody.status comment. Omit moduleId to publish
   // every draft in the whole bank.
   publishDrafts: (moduleId?: number) => request<{ ok: true; published: number }>('/admin/mcqs/publish-drafts', { method: 'PATCH', body: JSON.stringify({ moduleId }) }),
+  // See POST /admin/mcqs/shuffle-options — randomly reorders each
+  // question's options (and any per-option explanations, in lockstep)
+  // without touching which option is marked correct. Fixes banks (e.g.
+  // bulk-imported from an AI generator) where the correct answer is
+  // always the same letter.
+  shuffleOptions: (body: { ids: number[] } | { all: true; filters?: { search?: string; moduleId?: number; subjectId?: number; topicId?: number; difficulty?: string } }) =>
+    request<{ ok: true; shuffled: number; skipped: number }>('/admin/mcqs/shuffle-options', { method: 'POST', body: JSON.stringify(body) }),
 };
 
 export const mcqImportApi = {
