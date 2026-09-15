@@ -52,7 +52,7 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // invalidateQueries after a save) already set their own options, which
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
-import { EmptyState, Podium, cn, initials } from '@/lib/shared';
+import { EmptyState, Podium, SectionHeader, SkeletonPage, cn, initials } from '@/lib/shared';
 
 function Leaderboard() {
   const [range, setRange] = useState('30d');
@@ -63,28 +63,45 @@ function Leaderboard() {
   const you = rows.find((r) => r.isYou);
   const beatPercent = you && rows.length > 1 ? Math.round(((rows.length - you.rank) / (rows.length - 1)) * 100) : null;
   const rangeLabels: Record<string, string> = { '7d': 'Weekly', '30d': 'Monthly', '3m': 'Quarterly', '1y': 'Yearly' };
+
+  // Bug fix: this page used to go straight from "board.data || []" to
+  // rendering — a slow first load and an actual fetch failure both looked
+  // identical to "nobody has practiced yet" (the EmptyState below), with no
+  // way to tell the difference or retry. Every other data page in the app
+  // (Dashboard, Books, etc.) shows a skeleton while loading and surfaces
+  // errors explicitly; this brings Leaderboard in line with that, using the
+  // same SectionHeader page-header convention every other page uses too
+  // (this page previously built its own one-off header inside the card).
+  if (board.isLoading) return <div><SectionHeader eyebrow="Community" title="Leaderboard" /><SkeletonPage /></div>;
+
   return <div>
-    <div className="overflow-hidden rounded-3xl border border-border bg-card p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5"><span className="grid size-9 place-items-center rounded-xl bg-[#fdeecb] text-[#8a5a12]"><Trophy size={18} /></span><div><h2 className="text-lg font-extrabold">Leaderboard</h2><p className="text-[11px] font-semibold text-muted-foreground">See how you stack up against the community</p></div></div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1.5 text-[10px] font-bold text-muted-foreground"><span className="relative flex size-1.5"><span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-75" /><span className="relative inline-flex size-1.5 rounded-full bg-primary" /></span>Live</span>
+    <SectionHeader eyebrow="Community" title="Leaderboard" action={<span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1.5 text-[10px] font-bold text-muted-foreground"><span className="relative flex size-1.5"><span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-75" /><span className="relative inline-flex size-1.5 rounded-full bg-primary" /></span>Live</span>} />
+
+    {board.isError ? <EmptyState
+      icon={AlertTriangle}
+      title="Couldn't load the leaderboard"
+      body={board.error instanceof ApiRequestError ? board.error.message : "Something went wrong reaching the server. Check your connection and try again."}
+      action={<button onClick={() => board.refetch()} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-retry-leaderboard"><RotateCcw size={13} /> Try again</button>}
+    /> : <>
+      <div className="overflow-hidden rounded-3xl border border-border bg-card p-6">
+        <p className="text-[11px] font-semibold text-muted-foreground">See how you stack up against the community</p>
+        <div className="mt-4 flex gap-1.5 rounded-2xl bg-muted p-1.5">{['7d', '30d', '3m', '1y'].map((r) => <button key={r} onClick={() => setRange(r)} className={cn('flex-1 rounded-xl px-2 py-2 text-[11px] font-bold transition-colors', range === r ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')} data-testid={`button-range-${r}`}>{rangeLabels[r]}</button>)}</div>
+        {you && beatPercent !== null && <div className="mt-4 flex items-center gap-3 rounded-2xl bg-[#fdeecb] px-4 py-3.5" data-testid="banner-your-rank">
+          <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-white text-base font-extrabold text-[#8a5a12]">#{you.rank}</span>
+          <p className="text-xs font-extrabold leading-5 text-[#5c3d0c]">You are doing better than {beatPercent}% of other players!</p>
+        </div>}
+        <div className="mt-4 grid grid-cols-3 gap-3">
+          <div className="rounded-2xl bg-muted p-3.5 text-center"><Star size={16} className="mx-auto text-[#e8c34a]" fill="currentColor" /><div className="mt-1.5 text-lg font-extrabold">{you?.points ?? 0}</div><div className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">Points</div></div>
+          <div className="rounded-2xl bg-muted p-3.5 text-center"><Globe size={16} className="mx-auto text-[#5a7fbd]" /><div className="mt-1.5 text-lg font-extrabold">{you ? `#${you.rank}` : '—'}</div><div className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">Your rank</div></div>
+          <div className="rounded-2xl bg-muted p-3.5 text-center"><Zap size={16} className="mx-auto text-primary" /><div className="mt-1.5 text-lg font-extrabold">{you?.accuracy ?? 0}%</div><div className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">Accuracy</div></div>
+        </div>
       </div>
-      <div className="mt-4 flex gap-1.5 rounded-2xl bg-muted p-1.5">{['7d', '30d', '3m', '1y'].map((r) => <button key={r} onClick={() => setRange(r)} className={cn('flex-1 rounded-xl px-2 py-2 text-[11px] font-bold transition-colors', range === r ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')} data-testid={`button-range-${r}`}>{rangeLabels[r]}</button>)}</div>
-      {you && beatPercent !== null && <div className="mt-4 flex items-center gap-3 rounded-2xl bg-[#fdeecb] px-4 py-3.5" data-testid="banner-your-rank">
-        <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-white text-base font-extrabold text-[#8a5a12]">#{you.rank}</span>
-        <p className="text-xs font-extrabold leading-5 text-[#5c3d0c]">You are doing better than {beatPercent}% of other players!</p>
-      </div>}
-      <div className="mt-4 grid grid-cols-3 gap-3">
-        <div className="rounded-2xl bg-muted p-3.5 text-center"><Star size={16} className="mx-auto text-[#e8c34a]" fill="currentColor" /><div className="mt-1.5 text-lg font-extrabold">{you?.points ?? 0}</div><div className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">Points</div></div>
-        <div className="rounded-2xl bg-muted p-3.5 text-center"><Globe size={16} className="mx-auto text-[#5a7fbd]" /><div className="mt-1.5 text-lg font-extrabold">{you ? `#${you.rank}` : '—'}</div><div className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">Your rank</div></div>
-        <div className="rounded-2xl bg-muted p-3.5 text-center"><Zap size={16} className="mx-auto text-primary" /><div className="mt-1.5 text-lg font-extrabold">{you?.accuracy ?? 0}%</div><div className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">Accuracy</div></div>
-      </div>
-    </div>
-    <div className="mt-5">{top3.length >= 1 && <Podium rows={top3} />}</div>
-    <div className="overflow-hidden rounded-2xl border border-border bg-card">{rest.map((row) => <div key={row.userId} className={cn('flex items-center justify-between border-b border-border px-4 py-3.5 last:border-0', row.isYou && 'bg-primary/5 ring-1 ring-inset ring-primary/30')} data-testid={`row-leaderboard-${row.userId}`}>
-      <div className="flex items-center gap-3"><span className="w-6 text-center text-sm font-extrabold text-muted-foreground">{row.rank}</span><div className="grid size-9 place-items-center rounded-full bg-[#d7eee4] text-[11px] font-extrabold text-[#287058]">{initials(row.name)}</div><div className="text-sm font-bold">{row.name}{row.isYou && <span className="ml-1.5 text-[10px] font-bold text-primary">(you)</span>}</div></div>
-      <div className="text-right"><div className="text-sm font-extrabold text-[#8a5a12]">{row.points} pts</div><div className="text-[10px] text-muted-foreground">{row.accuracy}% acc · {row.questionsAnswered} questions · {row.sessions} sessions</div></div>
-    </div>)}{!rows.length && <EmptyState icon={Trophy} title="No activity yet" body="Complete a practice session to appear on the leaderboard." />}</div>
+      <div className="mt-5">{top3.length >= 1 && <Podium rows={top3} />}</div>
+      <div className="overflow-hidden rounded-2xl border border-border bg-card">{rest.map((row) => <div key={row.userId} className={cn('flex items-center justify-between border-b border-border px-4 py-3.5 last:border-0', row.isYou && 'bg-primary/5 ring-1 ring-inset ring-primary/30')} data-testid={`row-leaderboard-${row.userId}`}>
+        <div className="flex items-center gap-3"><span className="w-6 text-center text-sm font-extrabold text-muted-foreground">{row.rank}</span><div className="grid size-9 place-items-center rounded-full bg-[#d7eee4] text-[11px] font-extrabold text-[#287058]">{initials(row.name)}</div><div className="text-sm font-bold">{row.name}{row.isYou && <span className="ml-1.5 text-[10px] font-bold text-primary">(you)</span>}</div></div>
+        <div className="text-right"><div className="text-sm font-extrabold text-[#8a5a12]">{row.points} pts</div><div className="text-[10px] text-muted-foreground">{row.accuracy}% acc · {row.questionsAnswered} questions · {row.sessions} sessions</div></div>
+      </div>)}{!rows.length && <EmptyState icon={Trophy} title="No activity yet" body="Complete a practice session to appear on the leaderboard." />}</div>
+    </>}
   </div>;
 }
 

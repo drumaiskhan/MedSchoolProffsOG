@@ -243,6 +243,12 @@ export interface Student {
   email: string;
   institution: string;
   program: string;
+  // See ListStudentsResponseItem (api-zod) — normalized program/year for
+  // grouping the admin students list the same way the MCQ bank groups by
+  // programTargetKind/yearTargetNumber. Null on legacy rows.
+  programKind?: string | null;
+  yearNumber?: number | null;
+  academicYearLabel?: string | null;
   status: string;
   joinedAt: string;
   progress?: number;

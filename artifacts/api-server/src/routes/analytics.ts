@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, practiceAttemptsTable, practiceAnswersTable, mcqsTable, usersTable } from "@workspace/db";
 import { requireAuth, requireActiveMembership } from "../middlewares/auth";
@@ -195,22 +195,36 @@ router.get("/leaderboard", requireAuth, async (req, res): Promise<void> => {
   // rewards genuine mastery over guessing/volume-farming, since spamming
   // wrong answers actively costs points instead of just not helping.
   // These weights are a reasonable default, not a spec — easy to retune.
-  const ranked = rows.map((row) => {
+  const scored = rows.map((row) => {
     const correct = Number(row.totalCorrect ?? 0);
     const total = Number(row.totalQuestions ?? 0);
     const wrong = Math.max(0, total - correct);
     const points = Math.max(0, correct * 10 - wrong * 3);
     return { ...row, points, correct, total };
-  }).sort((a, b) => b.points - a.points);
+  });
 
-  const userIds = ranked.map((r) => r.userId);
-  const users = userIds.length ? await db.select().from(usersTable) : [];
-  const userMap = new Map(users.filter((u) => userIds.includes(u.id)).map((u) => [u.id, u]));
+  // Bug fix: this used to pull every row from usersTable unfiltered (no
+  // WHERE at all) on every poll — including admin accounts and
+  // soft-deleted students — then just looked names up by id. An admin
+  // account that had ever submitted a practice session (e.g. while
+  // browsing the student portal to check something) would rank on the
+  // student leaderboard, and a student who deleted their account would
+  // keep showing up forever since nothing excluded status "DELETED".
+  // Filtering to real, current students here (and dropping their
+  // attempts from `scored`/ranking entirely, not just hiding the name)
+  // is what the "community" framing on the leaderboard actually promises.
+  const userIds = scored.map((r) => r.userId);
+  const students = userIds.length
+    ? await db.select().from(usersTable).where(and(inArray(usersTable.id, userIds), eq(usersTable.role, "student"), ne(usersTable.status, "DELETED")))
+    : [];
+  const studentMap = new Map(students.map((u) => [u.id, u]));
+
+  const ranked = scored.filter((row) => studentMap.has(row.userId)).sort((a, b) => b.points - a.points);
 
   res.json(ranked.map((row, index) => ({
     rank: index + 1,
     userId: row.userId,
-    name: userMap.get(row.userId)?.name ?? "Student",
+    name: studentMap.get(row.userId)?.name ?? "Student",
     sessions: Number(row.sessions),
     questionsAnswered: row.total,
     correct: row.correct,

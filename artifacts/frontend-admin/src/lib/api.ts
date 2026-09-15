@@ -314,6 +314,15 @@ export const studentsAdminApi = {
   removePermanent: (id: number) => request<{ ok: true }>(`/students/${id}/permanent`, { method: 'DELETE' }),
 };
 
+export interface AdminSearchResult { id: number; title: string; subtitle?: string; status?: string }
+export interface AdminSearchResponse {
+  students: AdminSearchResult[]; mcqs: AdminSearchResult[]; modules: AdminSearchResult[];
+  subjects: AdminSearchResult[]; topics: AdminSearchResult[]; exams: AdminSearchResult[]; pastPapers: AdminSearchResult[];
+}
+export const adminSearchApi = {
+  search: (q: string) => request<AdminSearchResponse>(`/admin/search?q=${encodeURIComponent(q)}`),
+};
+
 export const paymentsAdminApi = {
   remove: (id: number) => request<{ ok: true }>(`/payments/${id}`, { method: 'DELETE' }),
   removePermanent: (id: number) => request<{ ok: true }>(`/payments/${id}/permanent`, { method: 'DELETE' }),

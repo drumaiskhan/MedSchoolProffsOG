@@ -36,7 +36,7 @@ import { toast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
-import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, analyticsApi, mcqImportApi, flashcardImportApi, mcqBackupApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, subjectAdminApi, topicAdminApi, flashcardsAdminApi, flashcardsAiApi, booksAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blockAdminApi, examsAdminApi, examsApi, explanationsApi, auditApi, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type FlashcardCandidate, type StudentDetail, type SiteContent, type TeamMember, TEAM_CATEGORIES, TEAM_CATEGORY_LABELS, type TeamCategory, type AdminModule, type AdminBlock, type AdminSubject, type AdminTopic, type AdminFlashcard, type GeneratedFlashcard, type AdminMcqRow, type AdminBook, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type BankAccount, type PaymentMethodConfig, aiVisualizerAdminApi, type AiVisualizerLogEntry, type AuditLogEntry } from '@/lib/api';
+import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, analyticsApi, mcqImportApi, flashcardImportApi, mcqBackupApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, subjectAdminApi, topicAdminApi, flashcardsAdminApi, flashcardsAiApi, booksAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blockAdminApi, examsAdminApi, examsApi, explanationsApi, auditApi, adminSearchApi, type AdminSearchResponse, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type FlashcardCandidate, type StudentDetail, type SiteContent, type TeamMember, TEAM_CATEGORIES, TEAM_CATEGORY_LABELS, type TeamCategory, type AdminModule, type AdminBlock, type AdminSubject, type AdminTopic, type AdminFlashcard, type GeneratedFlashcard, type AdminMcqRow, type AdminBook, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type BankAccount, type PaymentMethodConfig, aiVisualizerAdminApi, type AiVisualizerLogEntry, type AuditLogEntry } from '@/lib/api';
 
 // Round 3, item 10 (performance) — same over-fetching fix as the student
 // app (see its App.tsx for the full rationale): `new QueryClient()` with no
@@ -155,8 +155,63 @@ export function SideNav({ user, onClose }: { user: User; onClose: () => void }) 
 // rendering real content — a signed-out or under-privileged user should never
 // see so much as a flash of the dashboard/admin UI underneath.
 
+// Universal admin search — a Cmd/Ctrl+K palette hitting GET /admin/search
+// (admin-search.ts), so "find a student" (or an MCQ, module, subject,
+// topic, exam, or past paper) doesn't require already knowing which of the
+// ~10 separate admin pages it lives on. Debounced 300ms so typing doesn't
+// fire a query per keystroke; each category caps at a handful of results
+// and links straight to the page that owns it. Students deep-link to
+// AdminStudents with ?focus=<id>, which opens that student's drawer
+// directly (see AdminStudents.tsx) — the other categories currently open
+// their list page (no per-row deep link exists yet on those pages), which
+// is still a large step up from "guess which page, then use its own local
+// search box."
+export function AdminGlobalSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [value, setValue] = useState('');
+  const [debounced, setDebounced] = useState('');
+  useEffect(() => { const t = setTimeout(() => setDebounced(value.trim()), 300); return () => clearTimeout(t); }, [value]);
+  useEffect(() => { if (!open) setValue(''); }, [open]);
+  const q = useQuery({ queryKey: ['admin-search', debounced], queryFn: () => adminSearchApi.search(debounced), enabled: open && debounced.length >= 2 });
+  if (!open) return null;
+  const data = q.data;
+  const sections: Array<{ key: keyof AdminSearchResponse; label: string; icon: typeof Users; href: (id: number) => string }> = [
+    { key: 'students', label: 'Students', icon: Users, href: (id) => `/admin/students?focus=${id}` },
+    { key: 'mcqs', label: 'MCQ bank', icon: CircleHelp, href: () => '/admin/mcqs' },
+    { key: 'modules', label: 'Modules', icon: BookOpen, href: () => '/admin/content' },
+    { key: 'subjects', label: 'Subjects', icon: Library, href: () => '/admin/subjects' },
+    { key: 'topics', label: 'Topics', icon: FolderOpen, href: () => '/admin/topics' },
+    { key: 'exams', label: 'Pre-Proffs Exams', icon: ClipboardCheck, href: () => '/admin/exams' },
+    { key: 'pastPapers', label: 'Past papers', icon: FileStack, href: () => '/admin/past-papers' },
+  ];
+  const totalResults = data ? sections.reduce((sum, s) => sum + data[s.key].length, 0) : 0;
+  return <div className="fixed inset-0 z-40 flex items-start justify-center bg-[#102c37]/40 px-4 pt-[12vh]" onClick={onClose} data-testid="overlay-admin-search">
+    <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-border bg-card shadow-2xl" onClick={(e) => e.stopPropagation()} data-testid="panel-admin-search">
+      <div className="flex items-center gap-2.5 border-b border-border px-4 py-3.5"><Search size={16} className="shrink-0 text-muted-foreground" /><input autoFocus value={value} onChange={(e) => setValue(e.target.value)} placeholder="Search students, MCQs, modules, exams..." className="h-6 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground" data-testid="input-admin-search" /><button onClick={onClose} className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted" data-testid="button-close-admin-search"><X size={15} /></button></div>
+      <div className="max-h-[60vh] overflow-y-auto p-2">
+        {debounced.length < 2 ? <div className="px-3 py-8 text-center text-xs text-muted-foreground">Type at least 2 characters to search across the whole platform.</div>
+          : q.isLoading ? <div className="px-3 py-8 text-center text-xs text-muted-foreground"><InlineLoading label="Searching…" /></div>
+          : !totalResults ? <div className="px-3 py-8 text-center text-xs text-muted-foreground">No results for "{debounced}".</div>
+          : sections.filter((s) => data![s.key].length).map((s) => <div key={s.key} className="mb-1.5 last:mb-0">
+            <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-[.1em] text-muted-foreground">{s.label}</div>
+            {data![s.key].map((r) => <Link key={r.id} href={s.href(r.id)} onClick={onClose} className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-xs font-semibold text-foreground hover:bg-muted" data-testid={`link-admin-search-${s.key}-${r.id}`}>
+              <span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted text-primary"><s.icon size={14} /></span>
+              <span className="min-w-0 flex-1"><span className="block truncate">{r.title}</span>{r.subtitle && <span className="block truncate text-[10px] font-normal text-muted-foreground">{r.subtitle}</span>}</span>
+              <ChevronRight size={13} className="shrink-0 text-muted-foreground" />
+            </Link>)}
+          </div>)}
+      </div>
+    </div>
+  </div>;
+}
+
 export function Shell({ children }: { children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  useEffect(() => {
+    function handleKeydown(e: KeyboardEvent) { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setSearchOpen(true); } }
+    window.addEventListener('keydown', handleKeydown);
+    return () => window.removeEventListener('keydown', handleKeydown);
+  }, []);
   // retry: false — a failed/unusable current-user response should send the
   // user to /login promptly, not spend several silent retries first.
   const userQuery = useGetCurrentUser({ query: { retry: false, queryKey: getGetCurrentUserQueryKey() } });
@@ -191,7 +246,7 @@ export function Shell({ children }: { children: ReactNode }) {
   if (!user || user.role !== 'admin') return <BrandedLoadingScreen />;
 
   const title = location.slice(1).split('/').map((part) => part.replaceAll('-', ' ')).join(' / ') || 'Overview';
-  return <div className="admin-shell flex min-h-[100dvh] bg-background"><div className={cn(menuOpen ? 'block' : 'hidden', 'fixed inset-0 z-30 bg-[#102c37]/40 md:hidden')} onClick={() => setMenuOpen(false)} />{(menuOpen || !isMobile) && <SideNav user={user} onClose={() => setMenuOpen(false)} />}<main className="admin-main min-w-0 flex-1"><header className="admin-header sticky top-0 z-20 flex h-[72px] items-center justify-between border-b border-border/70 bg-background/90 px-5 backdrop-blur-md md:px-10"><div className="flex items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} data-testid="button-open-menu"><Menu size={20} /></button><div><div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-muted-foreground">MedschoolProffs / Admin</div><h1 className="mt-1 text-[17px] font-bold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="flex items-center gap-2"><span className="hidden items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-[10px] font-semibold text-muted-foreground sm:inline-flex"><span className="size-1.5 rounded-full bg-primary" />Workspace live</span><Link href="/notifications" className="relative grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted" data-testid="link-notifications"><Bell size={17} /></Link><Link href="/profile" className="ml-1 grid size-9 place-items-center rounded-full bg-[#d7eee4] text-xs font-extrabold text-[#164b4b]" data-testid="link-header-profile">{initials(user.name)}</Link></div></header><div className="admin-content page-enter px-5 py-7 md:px-10 md:py-9">{children}</div></main></div>;
+  return <div className="admin-shell flex min-h-[100dvh] bg-background"><div className={cn(menuOpen ? 'block' : 'hidden', 'fixed inset-0 z-30 bg-[#102c37]/40 md:hidden')} onClick={() => setMenuOpen(false)} />{(menuOpen || !isMobile) && <SideNav user={user} onClose={() => setMenuOpen(false)} />}<main className="admin-main min-w-0 flex-1"><header className="admin-header sticky top-0 z-20 flex h-[72px] items-center justify-between border-b border-border/70 bg-background/90 px-5 backdrop-blur-md md:px-10"><div className="flex items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} data-testid="button-open-menu"><Menu size={20} /></button><div><div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-muted-foreground">MedschoolProffs / Admin</div><h1 className="mt-1 text-[17px] font-bold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="flex items-center gap-2"><button onClick={() => setSearchOpen(true)} className="hidden h-9 w-[220px] items-center gap-2 rounded-lg border border-border bg-card px-3 text-left text-[11px] text-muted-foreground shadow-sm hover:border-primary/50 sm:flex md:w-[320px]" data-testid="button-open-admin-search"><Search size={14} /><span className="truncate">Search students, MCQs, everything...</span><span className="ml-auto rounded border border-border px-1 text-[9px]">⌘K</span></button><button onClick={() => setSearchOpen(true)} className="grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted sm:hidden" data-testid="button-open-admin-search-mobile"><Search size={16} /></button><span className="hidden items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-[10px] font-semibold text-muted-foreground sm:inline-flex"><span className="size-1.5 rounded-full bg-primary" />Workspace live</span><Link href="/notifications" className="relative grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted" data-testid="link-notifications"><Bell size={17} /></Link><Link href="/profile" className="ml-1 grid size-9 place-items-center rounded-full bg-[#d7eee4] text-xs font-extrabold text-[#164b4b]" data-testid="link-header-profile">{initials(user.name)}</Link></div></header><div className="admin-content page-enter px-5 py-7 md:px-10 md:py-9">{children}</div></main><AdminGlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} /></div>;
 }
 
 export function BrandedLoadingScreen() {

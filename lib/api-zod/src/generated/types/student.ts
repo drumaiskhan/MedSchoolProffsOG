@@ -12,6 +12,12 @@ export interface Student {
   email: string;
   institution: string;
   program: string;
+  /** @nullable */
+  programKind?: string | null;
+  /** @nullable */
+  yearNumber?: number | null;
+  /** @nullable */
+  academicYearLabel?: string | null;
   status: string;
   joinedAt: string;
   progress?: number;

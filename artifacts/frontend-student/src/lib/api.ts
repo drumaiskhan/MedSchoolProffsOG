@@ -137,6 +137,12 @@ export interface SiteContent {
   // banner — the student app never needs to enforce this itself, the API
   // already grants/denies access based on the same flag server-side.
   GLOBAL_TRIAL_MODE: string;
+  // Bug fix: admin's "Announcement banner (blank to hide)" field existed
+  // in Settings but was never exposed on this public bundle nor rendered
+  // anywhere in the student app. Now surfaced here and rendered as a
+  // dismissible banner in Shell (shared.tsx), same place GLOBAL_TRIAL_MODE
+  // renders its banner. Empty string means "no announcement" — hidden.
+  ANNOUNCEMENT_BANNER: string;
   features: string[]; quickLinks: Array<{ label: string; url: string }>; team: TeamMember[];
   faviconUrl: string | null;
   dashboardHeroImageUrl: string | null;

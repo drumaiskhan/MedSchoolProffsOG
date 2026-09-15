@@ -34,6 +34,14 @@ const SITE_CONTENT_KEYS = [
   // requireActiveMembership (middlewares/auth.ts), not by this flag being
   // readable — a student can't unlock anything just by knowing this value.
   "GLOBAL_TRIAL_MODE",
+  // Bug fix: admin's Settings > General page has always had an
+  // "Announcement banner (blank to hide)" field, but this key was never
+  // added to the public bundle the student app actually fetches — so
+  // whatever an admin typed there had nowhere to go and the banner never
+  // showed up anywhere. Public/student-visible by design, same as
+  // GLOBAL_TRIAL_MODE above (it's just announcement text, not a
+  // permission — nothing is gated by this being readable).
+  "ANNOUNCEMENT_BANNER",
   // Optional decorative photo for the student Dashboard's greeting card —
   // public (not admin-gated) since students need to see it, resolved to
   // dashboardHeroImageUrl below the same way SITE_FAVICON_PATH resolves to

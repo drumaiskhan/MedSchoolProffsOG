@@ -13,7 +13,7 @@ import {
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
   GraduationCap, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
   RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Link2 as LinkIcon, Lightbulb,
-  LayoutGrid, Presentation, Wand2, Crown, Globe, Star
+  LayoutGrid, Presentation, Wand2, Crown, Globe, Star, Megaphone
 } from 'lucide-react';
 import { applyThemeVars } from '@/lib/theme';
 import { queryClient } from '@/lib/query-client';
@@ -311,6 +311,14 @@ export function Shell({ children }: { children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [quickJumpOpen, setQuickJumpOpen] = useState(false);
   const [quickJumpValue, setQuickJumpValue] = useState('');
+  // Dismiss state for the announcement banner below — cleared on full page
+  // reload (e.g. next login) rather than persisted, so a still-current
+  // announcement resurfaces for a returning session instead of staying
+  // hidden forever from one click weeks ago. Keyed to the announcement's
+  // own text (see dismissedAnnouncement below) so publishing a *new*
+  // announcement always shows, even if the student dismissed an older one
+  // earlier in this same session.
+  const [dismissedAnnouncement, setDismissedAnnouncement] = useState<string | null>(null);
   // retry: false — a failed/unusable current-user response should send the
   // user to /login promptly, not spend several silent retries first.
   const userQuery = useGetCurrentUser({ query: { retry: false, queryKey: getGetCurrentUserQueryKey() } });
@@ -379,6 +387,15 @@ export function Shell({ children }: { children: ReactNode }) {
   // right now. Hidden in focus mode so it doesn't crowd the
   // distraction-free exam/practice header.
   const globalTrialMode = siteContentQ.data?.GLOBAL_TRIAL_MODE === 'true';
+  // Bug fix: admin's "Announcement banner" setting had a live text field
+  // and a "blank to hide" contract, but nothing on the student side ever
+  // read ANNOUNCEMENT_BANNER or rendered it — so it silently did nothing
+  // no matter what an admin typed in. Wired up the same way
+  // globalTrialMode's banner already works: read from the same
+  // site-content query (no extra request), trimmed so pure whitespace
+  // counts as "blank", hidden in focus mode, and dismissible per-session.
+  const announcementText = siteContentQ.data?.ANNOUNCEMENT_BANNER?.trim() || null;
+  const showAnnouncement = Boolean(announcementText) && announcementText !== dismissedAnnouncement;
   // Was hardcoded to "Good morning" regardless of the time of day — the
   // Dashboard's own welcome card already computed the correct greeting via
   // greetingForHour(), so this header text disagreed with it (e.g. showing
@@ -409,7 +426,10 @@ export function Shell({ children }: { children: ReactNode }) {
     <div className={cn(!focusMode && menuOpen ? 'block' : 'hidden', 'fixed inset-0 z-30 bg-[#071e2b]/45 md:hidden')} onClick={() => setMenuOpen(false)} />
     <div className={cn(focusMode ? 'hidden' : (menuOpen || !isMobile) ? 'block' : 'hidden')}><SideNav user={user} onClose={() => setMenuOpen(false)} /></div>
     <main className="min-w-0 flex-1">
-      {!focusMode && globalTrialMode && <div className="sticky top-0 z-20 flex items-center justify-center gap-2 bg-[#e5a952] px-4 py-1.5 text-center text-[11px] font-bold text-[#183844]" data-testid="banner-global-trial-mode"><Sparkles size={12} /> Trial mode is on — every feature is free to use right now.</div>}
+      {!focusMode && (showAnnouncement || globalTrialMode) && <div className="sticky top-0 z-20">
+        {showAnnouncement && <div className="flex items-center justify-center gap-2 bg-primary px-4 py-1.5 text-center text-[11px] font-bold text-primary-foreground" data-testid="banner-announcement"><Megaphone size={12} className="shrink-0" /><span className="truncate">{announcementText}</span><button onClick={() => setDismissedAnnouncement(announcementText)} className="ml-1 shrink-0 rounded p-0.5 hover:bg-white/15" aria-label="Dismiss announcement" data-testid="button-dismiss-announcement"><X size={12} /></button></div>}
+        {globalTrialMode && <div className="flex items-center justify-center gap-2 bg-[#e5a952] px-4 py-1.5 text-center text-[11px] font-bold text-[#183844]" data-testid="banner-global-trial-mode"><Sparkles size={12} /> Trial mode is on — every feature is free to use right now.</div>}
+      </div>}
       {focusMode
         ? <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border/70 bg-background/90 px-4 backdrop-blur-md md:px-8">{strictFocusMode ? <span className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold text-muted-foreground" data-testid="text-exam-locked"><LockKeyhole size={13} /> Exam in progress</span> : <button onClick={() => setLocation('/dashboard')} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold text-muted-foreground hover:bg-muted" data-testid="button-exit-focus-mode"><ArrowLeft size={15} /> Exit</button>}<span className="text-xs font-bold capitalize text-foreground">{title}</span></header>
         : <header className="sticky top-0 z-20 flex h-[66px] items-center justify-between border-b border-border/70 bg-background/92 px-4 backdrop-blur-md md:px-8"><div className="flex min-w-0 items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} data-testid="button-open-menu"><Menu size={20} /></button><div className="min-w-0"><div className="font-mono-app text-[9px] uppercase tracking-[.16em] text-muted-foreground">{today}</div><h1 className="mt-1 truncate text-[16px] font-bold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="relative flex items-center gap-2"><button onClick={() => { setQuickJumpOpen((current) => !current); setQuickJumpValue(''); }} className="hidden h-9 w-[220px] items-center gap-2 rounded-lg border border-border bg-card px-3 text-left text-[11px] text-muted-foreground shadow-sm hover:border-primary/50 sm:flex md:w-[340px]" data-testid="button-open-quick-jump"><Search size={14} /><span className="truncate">Search modules, topics, MCQs...</span><span className="ml-auto rounded border border-border px-1 text-[9px]">⌘K</span></button><Link href="/notifications" className="relative grid size-9 place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:bg-muted" data-testid="link-notifications"><Bell size={16} /></Link><Link href="/profile" className="ml-1 grid size-8 place-items-center rounded-full bg-[#cdebf0] text-[10px] font-extrabold text-[#0d5267]" data-testid="link-header-profile">{initials(user.name)}</Link><QuickJump open={quickJumpOpen} value={quickJumpValue} onChange={setQuickJumpValue} onClose={() => setQuickJumpOpen(false)} /></div></header>}

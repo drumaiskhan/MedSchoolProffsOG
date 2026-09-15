@@ -1152,7 +1152,41 @@ router.get("/students", requireAdmin, async (req, res): Promise<void> => {
     params.data.search ? or(ilike(usersTable.name, `%${params.data.search}%`), ilike(usersTable.email, `%${params.data.search}%`), ilike(usersTable.rollNumber, `%${params.data.search}%`)) : undefined,
     statusFilter ? eq(usersTable.status, statusFilter) : ne(usersTable.status, "DELETED"),
   )).orderBy(desc(usersTable.createdAt));
-  res.json(ListStudentsResponse.parse(rows.map((row) => ({ id: row.id, name: row.name, email: row.email, institution: row.institution ?? "—", program: row.program ?? "—", status: row.status, joinedAt: row.createdAt.toISOString(), progress: 0 }))));
+
+  // Bug fix: this only ever read the legacy free-text `program` column,
+  // never the real programId/academicYearId a student actually registered
+  // with (see auth.ts's /register — every current student has these set).
+  // That column also has no normalized program "kind" (MBBS/BDS) or year
+  // number on it at all, so there was no reliable way to group students by
+  // year the way the MCQ bank already groups modules by
+  // programTargetKind/yearTargetNumber (see contentVisibility.ts /
+  // shared.tsx's groupByProgramYear). Joining the same Program/AcademicYear
+  // tables the dashboard-targeting fix reads from gives the admin UI that
+  // same normalized (kind, yearNumber) pair to group by, while still
+  // falling back to the legacy text fields for old rows that predate
+  // programId/academicYearId existing, so nothing disappears from the list.
+  const programIds = [...new Set(rows.map((r) => r.programId).filter((id): id is number => id != null))];
+  const yearIds = [...new Set(rows.map((r) => r.academicYearId).filter((id): id is number => id != null))];
+  const [programRows, yearRows] = await Promise.all([
+    programIds.length ? db.select().from(programsTable).where(inArray(programsTable.id, programIds)) : Promise.resolve([]),
+    yearIds.length ? db.select().from(academicYearsTable).where(inArray(academicYearsTable.id, yearIds)) : Promise.resolve([]),
+  ]);
+  const programById = new Map(programRows.map((p) => [p.id, p]));
+  const yearById = new Map(yearRows.map((y) => [y.id, y]));
+
+  res.json(ListStudentsResponse.parse(rows.map((row) => {
+    const program = row.programId ? programById.get(row.programId) : undefined;
+    const academicYear = row.academicYearId ? yearById.get(row.academicYearId) : undefined;
+    return {
+      id: row.id, name: row.name, email: row.email,
+      institution: row.institution ?? "—",
+      program: (program?.kind || row.program) ?? "—",
+      programKind: program?.kind || null,
+      yearNumber: academicYear?.yearNumber ?? null,
+      academicYearLabel: academicYear?.label ?? null,
+      status: row.status, joinedAt: row.createdAt.toISOString(), progress: 0,
+    };
+  })));
 });
 
 router.get("/students/:id", requireAdmin, async (req, res): Promise<void> => {

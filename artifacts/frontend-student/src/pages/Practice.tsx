@@ -104,7 +104,17 @@ function Practice() {
   // not yet finished) — off during setup and on the results screen.
   useFocusMode(mode !== null && !finished);
   const sessionStartRef = useRef<number>(Date.now());
-  const submitAnswer = useMutation({ mutationFn: analyticsApi.submitSession });
+  // Bug fix: this had no onError at all — if the submit failed (expired
+  // membership, network blip, server error), the student saw the results
+  // screen render normally with zero indication their session was never
+  // recorded, and then wondered why it never showed up on the dashboard or
+  // leaderboard. Every other mutation in this file already surfaces
+  // failures via toast (see reportFlag/saveSession below) — this matches
+  // that convention.
+  const submitAnswer = useMutation({
+    mutationFn: analyticsApi.submitSession,
+    onError: (err: unknown) => toast({ title: 'Session not saved', description: err instanceof ApiRequestError ? err.message : "Couldn't record this session — your answers below are still visible, but it won't count toward your stats or the leaderboard.", variant: 'destructive' }),
+  });
   const saveNote = useMutation({ mutationFn: notebookApi.create });
   const reportFlag = useMutation({
     mutationFn: flaggedMcqsApi.create,
