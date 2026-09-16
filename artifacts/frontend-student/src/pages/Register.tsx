@@ -52,7 +52,7 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // invalidateQueries after a save) already set their own options, which
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
-import { AuthLayout, IconField, PasswordStrength, cn, money, BrandSpinner, PaymentDestinationCard } from '@/lib/shared';
+import { AuthLayout, IconField, PasswordStrength, cn, money, BrandSpinner, PaymentDestinationCard, trialScopeLabel } from '@/lib/shared';
 
 function Register() {
   const [institutionId, setInstitutionId] = useState('');
@@ -81,6 +81,13 @@ function Register() {
   useEffect(() => { setInstitutionId(''); }, [programKind]);
   const plans = useListMembershipPlans();
   const paymentDetails = useQuery({ queryKey: ['payment-details'], queryFn: publicApi.paymentDetails });
+  // Same site-content query Shell (shared.tsx) reads for its post-login
+  // trial banner — surfaced here too so a signed-out visitor sees trial
+  // availability *before* they commit to picking a plan and uploading
+  // payment proof, not just after logging in.
+  const siteQ = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get });
+  const trialOn = siteQ.data?.GLOBAL_TRIAL_MODE === 'true';
+  const trialScope = trialScopeLabel(siteQ.data?.GLOBAL_TRIAL_PROGRAM, siteQ.data?.GLOBAL_TRIAL_YEAR);
 
   const register = useMutation({
     mutationFn: authApi.register,
@@ -109,6 +116,8 @@ function Register() {
   const pd = paymentDetails.data;
 
   return <AuthLayout register><div className="w-full"><div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-primary">Create your account</div><h1 className="mt-3 font-display text-4xl tracking-[-.04em]">Join MedschoolProffs.</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">The complete MCQ bank for MBBS &amp; BDS students — built for daily practice and learning, not exam pressure.</p>
+
+    {trialOn && <div className="mt-4 flex items-start gap-2 rounded-xl border border-[#e5a952] bg-[#fff9ee] p-3 text-xs font-semibold text-[#8a5a12]" data-testid="banner-register-trial-mode"><Sparkles size={14} className="mt-0.5 shrink-0" /><span>Trial mode is on{trialScope ? <> for <strong>{trialScope}</strong> students</> : ''} — you'll get full access to every feature free, right after you verify your email, no need to wait on payment review while it's active.</span></div>}
 
     <form onSubmit={(e) => {
       e.preventDefault(); setError(null);

@@ -1,10 +1,11 @@
 import { Router, type IRouter } from "express";
 import { and, desc, eq, ilike, inArray, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { db, usersTable, mcqsTable, challengesTable, challengeAttemptsTable, notificationsTable } from "@workspace/db";
+import { db, usersTable, mcqsTable, modulesTable, programsTable, academicYearsTable, challengesTable, challengeAttemptsTable, notificationsTable } from "@workspace/db";
 import { requireAuth, requireActiveMembership } from "../middlewares/auth";
 import { sendEmail, challengeInviteEmailHtml, challengeResultEmailHtml } from "../lib/email";
 import { getPublicAppUrl } from "../lib/publicAppUrl";
+import { getStudentTargeting, type StudentTargeting } from "../lib/contentVisibility";
 
 const router: IRouter = Router();
 
@@ -15,8 +16,21 @@ function publicOpponent(user: typeof usersTable.$inferSelect) {
   return { id: user.id, name: user.name, email: user.email, phone: user.phone, rollNumber: user.rollNumber, institution: user.institution };
 }
 
+// Two students are eligible classmates for a challenge only when both have
+// a known program kind (e.g. "MBBS"/"BDS") and academic year, and those
+// match exactly — cross-institution by design (a Year-2 MBBS student at one
+// college can challenge a Year-2 MBBS student at another), same normalized
+// kind/yearNumber convention as content targeting in contentVisibility.ts.
+// A student whose profile hasn't been assigned a program/year yet has no
+// eligible classmates until that's set, rather than being matched against
+// everyone.
+function sameClassYear(a: StudentTargeting, b: StudentTargeting): boolean {
+  return a.programKind !== null && a.yearNumber !== null && a.programKind === b.programKind && a.yearNumber === b.yearNumber;
+}
+
 // ---------------------------------------------------------------------------
-// Find a friend to challenge — search by name, email, phone, or roll number.
+// Find a friend to challenge — search by name, email, phone, or roll number,
+// restricted to students in the same program (MBBS/BDS) and academic year.
 // ---------------------------------------------------------------------------
 
 router.get("/students/find", requireAuth, requireActiveMembership, async (req, res): Promise<void> => {
@@ -25,17 +39,32 @@ router.get("/students/find", requireAuth, requireActiveMembership, async (req, r
     res.json([]);
     return;
   }
+
+  const myTargeting = await getStudentTargeting(req.user!.id);
+  if (myTargeting.programKind === null || myTargeting.yearNumber === null) {
+    // No program/year on file yet — nothing to safely match against.
+    res.json([]);
+    return;
+  }
+
   const like = `%${q}%`;
   const rows = await db
-    .select()
+    .select({ user: usersTable, programKind: programsTable.kind, yearNumber: academicYearsTable.yearNumber })
     .from(usersTable)
+    .leftJoin(programsTable, eq(usersTable.programId, programsTable.id))
+    .leftJoin(academicYearsTable, eq(usersTable.academicYearId, academicYearsTable.id))
     .where(and(
       eq(usersTable.role, "student"),
       ne(usersTable.id, req.user!.id),
       or(ilike(usersTable.name, like), ilike(usersTable.email, like), ilike(usersTable.phone, like), ilike(usersTable.rollNumber, like)),
     ))
-    .limit(10);
-  res.json(rows.map(publicOpponent));
+    .limit(30);
+
+  const matches = rows
+    .filter((r) => sameClassYear(myTargeting, { programKind: r.programKind ? r.programKind.trim().toUpperCase() : null, yearNumber: r.yearNumber ?? null }))
+    .slice(0, 10);
+
+  res.json(matches.map((r) => publicOpponent(r.user)));
 });
 
 // ---------------------------------------------------------------------------
@@ -46,6 +75,7 @@ router.get("/students/find", requireAuth, requireActiveMembership, async (req, r
 
 const CreateChallengeBody = z.object({
   opponentId: z.number().int().positive(),
+  blockId: z.number().int().positive().optional(),
   moduleId: z.number().int().positive().optional(),
   subjectId: z.number().int().positive().optional(),
   topicId: z.number().int().positive().optional(),
@@ -61,11 +91,23 @@ router.post("/challenges", requireAuth, requireActiveMembership, async (req, res
   const [opponent] = await db.select().from(usersTable).where(and(eq(usersTable.id, data.opponentId), eq(usersTable.role, "student")));
   if (!opponent) { res.status(404).json({ error: "That student couldn't be found" }); return; }
 
+  // Server-side re-check of the same-program/same-year rule enforced in
+  // GET /students/find — a client can't route around it by posting an
+  // opponentId it never got back from that search.
+  const myTargeting = await getStudentTargeting(req.user!.id);
+  const opponentTargeting = await getStudentTargeting(opponent.id);
+  if (!sameClassYear(myTargeting, opponentTargeting)) {
+    res.status(403).json({ error: "You can only challenge students in your own program (MBBS/BDS) and academic year." });
+    return;
+  }
+
   const mcqs = await db
     .select({ id: mcqsTable.id })
     .from(mcqsTable)
+    .leftJoin(modulesTable, eq(mcqsTable.moduleId, modulesTable.id))
     .where(and(
       eq(mcqsTable.status, "published"),
+      data.blockId ? eq(modulesTable.blockId, data.blockId) : undefined,
       data.moduleId ? eq(mcqsTable.moduleId, data.moduleId) : undefined,
       data.subjectId ? eq(mcqsTable.subjectId, data.subjectId) : undefined,
       data.topicId ? eq(mcqsTable.topicId, data.topicId) : undefined,
@@ -80,6 +122,7 @@ router.post("/challenges", requireAuth, requireActiveMembership, async (req, res
     .values({
       challengerId: req.user!.id,
       opponentId: opponent.id,
+      blockId: data.blockId,
       moduleId: data.moduleId,
       subjectId: data.subjectId,
       topicId: data.topicId,

@@ -61,6 +61,17 @@ export const cn = (...parts: Array<string | false | undefined>) => parts.filter(
 export const initials = (name = 'MedschoolProffs') => name.split(' ').map((n) => n[0]).slice(0, 2).join('').toUpperCase();
 
 export const money = (amount: number, currency = 'PKR') => new Intl.NumberFormat('en-PK', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount);
+
+// Shared with Shell's banner (below) and Register.tsx's pre-signup banner
+// so both read GLOBAL_TRIAL_MODE/PROGRAM/YEAR the same way. Empty
+// program/year strings mean "no restriction on that axis" (see
+// routes/settings.ts's comment on those two keys) — this only affects the
+// wording, the actual access grant is enforced server-side either way.
+function ordinalYear(year: string) { return `${year}${year === '1' ? 'st' : year === '2' ? 'nd' : year === '3' ? 'rd' : 'th'} Year`; }
+export function trialScopeLabel(program?: string, year?: string): string | null {
+  const parts = [program || '', year ? ordinalYear(year) : ''].filter(Boolean);
+  return parts.length ? parts.join(' · ') : null;
+}
 // Turns a just-finished session's score plus the student's recent-vs-prior
 // trend into one short, human verdict for the result card and the
 // dashboard progress profile. Session score takes priority when it's a
@@ -400,6 +411,7 @@ export function Shell({ children }: { children: ReactNode }) {
   // right now. Hidden in focus mode so it doesn't crowd the
   // distraction-free exam/practice header.
   const globalTrialMode = siteContentQ.data?.GLOBAL_TRIAL_MODE === 'true';
+  const globalTrialScope = trialScopeLabel(siteContentQ.data?.GLOBAL_TRIAL_PROGRAM, siteContentQ.data?.GLOBAL_TRIAL_YEAR);
   // Bug fix: admin's "Announcement banner" setting had a live text field
   // and a "blank to hide" contract, but nothing on the student side ever
   // read ANNOUNCEMENT_BANNER or rendered it — so it silently did nothing
@@ -469,7 +481,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </div>
           <button onClick={() => setDismissedAnnouncement(announcementText)} className="ml-1 shrink-0 rounded p-0.5 hover:bg-white/15" aria-label="Dismiss announcement" data-testid="button-dismiss-announcement"><X size={12} /></button>
         </div>}
-        {globalTrialMode && <div className="flex items-center justify-center gap-2 bg-[#e5a952] px-4 py-1.5 text-center text-[11px] font-bold text-[#183844]" data-testid="banner-global-trial-mode"><Sparkles size={12} /> Trial mode is on — every feature is free to use right now.</div>}
+        {globalTrialMode && <div className="flex items-center justify-center gap-2 bg-[#e5a952] px-4 py-1.5 text-center text-[11px] font-bold text-[#183844]" data-testid="banner-global-trial-mode"><Sparkles size={12} /> Trial mode is on — every feature is free to use right now{globalTrialScope ? ` for ${globalTrialScope} students` : ''}.</div>}
       </div>}
       {focusMode
         ? <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border/70 bg-background/90 px-4 backdrop-blur-md md:px-8">{strictFocusMode ? <span className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold text-muted-foreground" data-testid="text-exam-locked"><LockKeyhole size={13} /> Exam in progress</span> : <button onClick={() => setLocation('/dashboard')} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold text-muted-foreground hover:bg-muted" data-testid="button-exit-focus-mode"><ArrowLeft size={15} /> Exit</button>}<span className="text-xs font-bold capitalize text-foreground">{title}</span></header>

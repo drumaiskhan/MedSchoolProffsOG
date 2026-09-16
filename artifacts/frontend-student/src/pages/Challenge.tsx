@@ -1,10 +1,14 @@
 // Auto-extracted route page — code-split via React.lazy() in App.tsx.
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Swords, Search, CheckCircle2, XCircle, Clock3, Trophy, ArrowLeft, X } from 'lucide-react';
-import { challengesApi, ApiRequestError, type ChallengeOpponent, type ChallengeSummary } from '@/lib/api';
+import { Link } from 'wouter';
+import { Swords, Search, CheckCircle2, XCircle, Clock3, Trophy, ArrowLeft, X, GraduationCap, SlidersHorizontal } from 'lucide-react';
+import { authApi, blocksApi, type Block, challengesApi, ApiRequestError, type ChallengeOpponent, type ChallengeSummary } from '@/lib/api';
+import { getGetCurrentUserQueryKey, useListModules, useListSubjects, useListTopics } from '@workspace/api-client-react';
 import { EmptyState, SectionHeader, SkeletonPage, Badge, cn, initials, BrandSpinner } from '@/lib/shared';
 import { toast } from '@/hooks/use-toast';
+
+const QUESTION_COUNT_PRESETS = [5, 10, 15, 20];
 
 // ---------------------------------------------------------------------------
 // Find & challenge a friend
@@ -14,6 +18,22 @@ function FindFriend({ onChallenged }: { onChallenged: () => void }) {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<ChallengeOpponent | null>(null);
   const [totalQuestions, setTotalQuestions] = useState(10);
+  const [blockId, setBlockId] = useState<number | undefined>();
+  const [moduleId, setModuleId] = useState<number | undefined>();
+  const [subjectId, setSubjectId] = useState<number | undefined>();
+  const [topicId, setTopicId] = useState<number | undefined>();
+
+  // Only same-year, same-program (MBBS/BDS) classmates can be challenged —
+  // enforced server-side too, but we check here first so the search box
+  // never even opens for a student whose profile isn't set up for it.
+  const me = useQuery({ queryKey: getGetCurrentUserQueryKey(), queryFn: authApi.me });
+
+  const blocksQ = useQuery({ queryKey: ['blocks'], queryFn: blocksApi.list });
+  const modulesQ = useListModules();
+  const subjectsQ = useListSubjects(moduleId ? { moduleId } : undefined, { query: { enabled: !!moduleId } });
+  const topicsQ = useListTopics(subjectId ? { subjectId } : undefined, { query: { enabled: !!subjectId } });
+
+  const modulesInBlock = (modulesQ.data || []).filter((m) => !blockId || m.blockId === blockId);
 
   const search = useQuery({
     queryKey: ['challenge-search', query],
@@ -22,7 +42,7 @@ function FindFriend({ onChallenged }: { onChallenged: () => void }) {
   });
 
   const create = useMutation({
-    mutationFn: () => challengesApi.create({ opponentId: selected!.id, totalQuestions }),
+    mutationFn: () => challengesApi.create({ opponentId: selected!.id, blockId, moduleId, subjectId, topicId, totalQuestions }),
     onSuccess: (res) => {
       toast({ title: 'Challenge sent!', description: `${res.opponent.name} has been notified.` });
       setSelected(null); setQuery('');
@@ -31,9 +51,20 @@ function FindFriend({ onChallenged }: { onChallenged: () => void }) {
     onError: (err: unknown) => toast({ title: 'Could not send challenge', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
 
+  const missingProfile = !me.isLoading && (!me.data?.programKind || me.data?.yearNumber == null);
+
+  if (me.isLoading) return <div className="rounded-3xl border border-border bg-card p-6"><BrandSpinner size={16} /></div>;
+
+  if (missingProfile) {
+    return <div className="rounded-3xl border border-border bg-card p-6">
+      <p className="text-sm font-extrabold">Find a friend</p>
+      <EmptyState icon={GraduationCap} title="Complete your profile first" body="Your program (MBBS/BDS) and academic year need to be set before you can find and challenge classmates." action={<Link href="/profile" className="text-xs font-bold text-primary underline" data-testid="link-complete-profile">Go to profile</Link>} />
+    </div>;
+  }
+
   return <div className="rounded-3xl border border-border bg-card p-6">
     <p className="text-sm font-extrabold">Find a friend</p>
-    <p className="mt-1 text-[11px] text-muted-foreground">Search by name, email, phone, or roll number.</p>
+    <p className="mt-1 text-[11px] text-muted-foreground">Search by name, email, phone, or roll number — only {me.data?.programKind}{me.data?.academicYear ? ` · ${me.data.academicYear}` : ''} classmates show up.</p>
     <div className="relative mt-4">
       <Search size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
       <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="e.g. Ayesha, roll number, or email" className="h-11 w-full rounded-xl border border-border bg-background pl-10 pr-3 text-sm outline-none focus:ring-2 focus:ring-primary/20" data-testid="input-friend-search" />
@@ -41,7 +72,7 @@ function FindFriend({ onChallenged }: { onChallenged: () => void }) {
 
     {query.trim().length >= 2 && <div className="mt-3 max-h-64 space-y-1.5 overflow-y-auto">
       {search.isLoading && <p className="py-3 text-center text-xs text-muted-foreground">Searching…</p>}
-      {!search.isLoading && (search.data || []).length === 0 && <p className="py-3 text-center text-xs text-muted-foreground">No students found.</p>}
+      {!search.isLoading && (search.data || []).length === 0 && <p className="py-3 text-center text-xs text-muted-foreground">No classmates found in your program &amp; year.</p>}
       {(search.data || []).map((s) => <button key={s.id} onClick={() => setSelected(s)} className={cn('flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors', selected?.id === s.id ? 'border-primary bg-[#eef7f1]' : 'border-border hover:bg-muted')} data-testid={`button-select-friend-${s.id}`}>
         <div className="grid size-9 shrink-0 place-items-center rounded-full bg-[#d7eee4] text-[11px] font-extrabold text-[#287058]">{initials(s.name)}</div>
         <div className="min-w-0 flex-1"><div className="truncate text-xs font-bold">{s.name}</div><div className="truncate text-[10px] text-muted-foreground">{s.email}{s.institution ? ` · ${s.institution}` : ''}</div></div>
@@ -51,8 +82,34 @@ function FindFriend({ onChallenged }: { onChallenged: () => void }) {
 
     {selected && <div className="mt-4 space-y-3 rounded-2xl bg-muted p-4">
       <div className="flex items-center justify-between text-xs font-bold">Challenging <span className="text-primary">{selected.name}</span><button onClick={() => setSelected(null)} className="text-muted-foreground hover:text-foreground" data-testid="button-clear-friend"><X size={14} /></button></div>
+
+      <div>
+        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground"><SlidersHorizontal size={12} /> Scope (optional — leave blank for the whole bank)</div>
+        <div className="grid grid-cols-2 gap-2">
+          <select value={blockId ?? ''} onChange={(e) => { const v = e.target.value ? Number(e.target.value) : undefined; setBlockId(v); setModuleId(undefined); setSubjectId(undefined); setTopicId(undefined); }} className="h-9 rounded-lg border border-border bg-card px-2 text-xs font-semibold outline-none focus:ring-2 focus:ring-primary/20" data-testid="select-challenge-block">
+            <option value="">Any block</option>
+            {(blocksQ.data || []).map((b: Block) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+          <select value={moduleId ?? ''} onChange={(e) => { const v = e.target.value ? Number(e.target.value) : undefined; setModuleId(v); setSubjectId(undefined); setTopicId(undefined); }} className="h-9 rounded-lg border border-border bg-card px-2 text-xs font-semibold outline-none focus:ring-2 focus:ring-primary/20" data-testid="select-challenge-module">
+            <option value="">Any module</option>
+            {modulesInBlock.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+          <select value={subjectId ?? ''} onChange={(e) => { const v = e.target.value ? Number(e.target.value) : undefined; setSubjectId(v); setTopicId(undefined); }} disabled={!moduleId} className="h-9 rounded-lg border border-border bg-card px-2 text-xs font-semibold outline-none disabled:opacity-50 focus:ring-2 focus:ring-primary/20" data-testid="select-challenge-subject">
+            <option value="">Any subject</option>
+            {(subjectsQ.data || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <select value={topicId ?? ''} onChange={(e) => setTopicId(e.target.value ? Number(e.target.value) : undefined)} disabled={!subjectId} className="h-9 rounded-lg border border-border bg-card px-2 text-xs font-semibold outline-none disabled:opacity-50 focus:ring-2 focus:ring-primary/20" data-testid="select-challenge-topic">
+            <option value="">Any topic</option>
+            {(topicsQ.data || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+      </div>
+
       <label className="block text-[11px] font-bold text-muted-foreground">Number of questions
-        <div className="mt-1.5 grid grid-cols-4 gap-2">{[5, 10, 15, 20].map((n) => <button key={n} type="button" onClick={() => setTotalQuestions(n)} className={cn('h-9 rounded-lg border text-xs font-bold transition-colors', totalQuestions === n ? 'border-primary bg-[#eef7f1] text-primary' : 'border-border bg-card hover:bg-muted')} data-testid={`button-question-count-${n}`}>{n}</button>)}</div>
+        <div className="mt-1.5 grid grid-cols-4 gap-2">{QUESTION_COUNT_PRESETS.map((n) => <button key={n} type="button" onClick={() => setTotalQuestions(n)} className={cn('h-9 rounded-lg border text-xs font-bold transition-colors', totalQuestions === n ? 'border-primary bg-[#eef7f1] text-primary' : 'border-border bg-card hover:bg-muted')} data-testid={`button-question-count-${n}`}>{n}</button>)}</div>
+        <div className="mt-1.5 flex items-center gap-2">
+          <input type="number" min={5} max={30} value={QUESTION_COUNT_PRESETS.includes(totalQuestions) ? '' : totalQuestions} placeholder="Custom (5–30)" onChange={(e) => { const n = Number(e.target.value); if (e.target.value === '') return; setTotalQuestions(Math.min(30, Math.max(5, Number.isFinite(n) ? n : 10))); }} className="h-9 w-full rounded-lg border border-border bg-card px-3 text-xs font-semibold outline-none focus:ring-2 focus:ring-primary/20" data-testid="input-question-count-custom" />
+        </div>
       </label>
       <button onClick={() => create.mutate()} disabled={create.isPending} className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 text-xs font-extrabold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 disabled:opacity-50" data-testid="button-send-challenge">{create.isPending && <BrandSpinner size={13} />}{create.isPending ? 'Sending…' : <><Swords size={14} /> Send challenge</>}</button>
     </div>}

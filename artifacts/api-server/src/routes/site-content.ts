@@ -40,6 +40,13 @@ const SITE_CONTENT_KEYS = [
   // requireActiveMembership (middlewares/auth.ts), not by this flag being
   // readable — a student can't unlock anything just by knowing this value.
   "GLOBAL_TRIAL_MODE",
+  // Scoping for GLOBAL_TRIAL_MODE — see routes/settings.ts's comment on
+  // these same two keys. Public for the same reason GLOBAL_TRIAL_MODE
+  // itself is: only used here to word the trial banner correctly (e.g.
+  // "for MBBS · 3rd Year" vs "for every student"), the actual grant is
+  // still enforced server-side in requireActiveMembership.
+  "GLOBAL_TRIAL_PROGRAM",
+  "GLOBAL_TRIAL_YEAR",
   // Bug fix: admin's Settings > General page has always had an
   // "Announcement banner (blank to hide)" field, but this key was never
   // added to the public bundle the student app actually fetches — so

@@ -564,6 +564,7 @@ CREATE TABLE IF NOT EXISTS med_challenges (
   id SERIAL PRIMARY KEY,
   challenger_id INTEGER NOT NULL,
   opponent_id INTEGER NOT NULL,
+  block_id INTEGER,
   module_id INTEGER,
   subject_id INTEGER,
   topic_id INTEGER,
@@ -728,6 +729,10 @@ ALTER TABLE med_memberships ADD COLUMN IF NOT EXISTS is_trial BOOLEAN NOT NULL D
 -- 6-digit OTP (see routes/auth.ts) — existing rows on an already-deployed
 -- database need this counter added.
 ALTER TABLE med_email_verification_tokens ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0;
+
+-- Challenge a friend: scope challenges to a Block, not just Module/Subject/
+-- Topic (see routes/challenges.ts).
+ALTER TABLE med_challenges ADD COLUMN IF NOT EXISTS block_id INTEGER;
 
 COMMIT;
 `;

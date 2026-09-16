@@ -142,6 +142,13 @@ export interface SiteContent {
   // banner — the student app never needs to enforce this itself, the API
   // already grants/denies access based on the same flag server-side.
   GLOBAL_TRIAL_MODE: string;
+  // Optional scoping for GLOBAL_TRIAL_MODE — "" means no restriction on
+  // that axis (matches everyone). See routes/settings.ts's comment on
+  // these two keys. Used here only to word the trial banner correctly
+  // ("for MBBS · 3rd Year" vs "for every student") — the actual grant is
+  // still enforced server-side.
+  GLOBAL_TRIAL_PROGRAM: string;
+  GLOBAL_TRIAL_YEAR: string;
   // Bug fix: admin's "Announcement banner (blank to hide)" field existed
   // in Settings but was never exposed on this public bundle nor rendered
   // anywhere in the student app. Now surfaced here and rendered as a
@@ -464,7 +471,7 @@ export interface ChallengeDetail {
 
 export const challengesApi = {
   findStudents: (q: string) => request<ChallengeOpponent[]>(`/students/find?q=${encodeURIComponent(q)}`),
-  create: (body: { opponentId: number; moduleId?: number; subjectId?: number; topicId?: number; totalQuestions?: number }) =>
+  create: (body: { opponentId: number; blockId?: number; moduleId?: number; subjectId?: number; topicId?: number; totalQuestions?: number }) =>
     request<{ id: number; opponent: ChallengeOpponent; totalQuestions: number; status: string }>('/challenges', { method: 'POST', body: JSON.stringify(body) }),
   mine: () => request<{ sent: ChallengeSummary[]; received: ChallengeSummary[] }>('/challenges/mine'),
   get: (id: number) => request<ChallengeDetail>(`/challenges/${id}`),

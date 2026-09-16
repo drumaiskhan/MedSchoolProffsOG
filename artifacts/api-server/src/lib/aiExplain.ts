@@ -16,6 +16,7 @@
  */
 
 import { getSetting } from "./settings";
+import { getPublicAppUrl } from "./publicAppUrl";
 
 // A raw `fetch` to an AI provider has no timeout of its own — left alone,
 // a slow/hung request just keeps waiting until the *hosting platform's*
@@ -358,6 +359,37 @@ function parseMcqJson(raw: string): GeneratedMcq[] {
 // names the exact URL that was hit and shows a short snippet of what came
 // back — enough to immediately spot "oh, that URL is wrong" instead of
 // staring at a wall of raw HTML.
+// Every provider reports "you're out of quota" differently in the body of a
+// 429 (Gemini: status "RESOURCE_EXHAUSTED" / a "quota" mention; OpenAI: error
+// code "insufficient_quota"; Anthropic and custom OpenAI-compatible
+// endpoints: usually just "rate_limit_error" or similar with no separate
+// billing-vs-throttle distinction). Previously every one of these just threw
+// the raw JSON body as the error message — technically accurate, but the
+// admin UI showed a wall of `{"error":{"code":429,"status":"RESOURCE_EXHAUSTED"...`
+// with no indication of what to actually DO about it, which is what actually
+// prompted the "shows quota reached" bug report: the fix isn't a code path,
+// it's making the dead-end message tell the admin where to go next instead
+// of just repeating the provider's own error shape at them.
+//
+// This does NOT change failover behavior at all — resolveProviders()/runPrompt()
+// already retry the next configured provider on ANY failure, quota-related or
+// not. This only improves the message shown once every candidate has failed.
+function describeProviderFailure(providerLabel: string, status: number, body: string): string {
+  if (status !== 429) return `${providerLabel} API error (${status}): ${body.slice(0, 300)}`;
+  const lower = body.toLowerCase();
+  const isQuotaOrBilling = lower.includes("quota") || lower.includes("resource_exhausted") || lower.includes("insufficient_quota") || lower.includes("billing");
+  if (isQuotaOrBilling) {
+    return (
+      `${providerLabel} has hit its usage/billing quota (HTTP 429) — this is a limit on the ${providerLabel} account itself, not a bug in this app. ` +
+      `Check that account's usage/billing dashboard (for Gemini: Google AI Studio > API keys > quota, or the linked Google Cloud project's billing; for OpenAI: platform.openai.com > Settings > Billing; for Anthropic: console.anthropic.com > Settings > Billing) ` +
+      `to confirm whether it's a free-tier rate limit (resets on its own — often per-minute or per-day) or an exhausted paid quota (needs more credit/a higher tier). ` +
+      `To stop this from taking "Ask AI" down while you sort that out, configure a different provider as the Backup AI provider in Admin > Platform settings > AI — it'll be used automatically whenever the primary is rate-limited or out of quota. ` +
+      `Raw response: ${body.slice(0, 300)}`
+    );
+  }
+  return `${providerLabel} is rate-limiting requests (HTTP 429) — this usually clears on its own after a short wait. If it persists, configure a Backup AI provider in Admin > Platform settings > AI so requests fail over automatically. Raw response: ${body.slice(0, 300)}`;
+}
+
 async function parseJsonOrThrow(res: Response, url: string, providerLabel: string): Promise<unknown> {
   const contentType = res.headers.get("content-type") || "";
   const raw = await res.text();
@@ -414,7 +446,7 @@ async function generateWithAnthropic(apiKey: string, model: string, prompt: stri
   }, "Anthropic");
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`Anthropic API error (${res.status}): ${body.slice(0, 300)}`);
+    throw new Error(describeProviderFailure("Anthropic", res.status, body));
   }
   const data = await parseJsonOrThrow(res, url, "Anthropic") as { content?: Array<{ type: string; text?: string }>; stop_reason?: string };
   const text = data.content?.find((block) => block.type === "text")?.text;
@@ -442,7 +474,7 @@ async function generateWithOpenAi(apiKey: string, model: string, prompt: string,
   }, "OpenAI");
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`OpenAI API error (${res.status}): ${body.slice(0, 300)}`);
+    throw new Error(describeProviderFailure("OpenAI", res.status, body));
   }
   const data = await parseJsonOrThrow(res, url, "OpenAI") as { choices?: Array<{ message?: { content?: string }; finish_reason?: string }> };
   const choice = data.choices?.[0];
@@ -468,7 +500,7 @@ async function generateWithGemini(apiKey: string, model: string, prompt: string,
   }, "Gemini");
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`Gemini API error (${res.status}): ${body.slice(0, 300)}`);
+    throw new Error(describeProviderFailure("Gemini", res.status, body));
   }
   const data = await parseJsonOrThrow(res, url, "Gemini") as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }> };
   const candidate = data.candidates?.[0];
@@ -505,14 +537,19 @@ async function generateWithCustomEndpoint(baseUrl: string, apiKey: string, model
     headers: {
       "Content-Type": "application/json",
       ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-      "HTTP-Referer": "https://medschoolproffss.netlify.app",
+      // Was hardcoded to a stale netlify.app domain (with a typo — "proffss").
+      // OpenRouter only uses this for app-attribution on its leaderboard, but
+      // there's no reason for it to be the one place in the codebase that
+      // doesn't follow the current domain — same PUBLIC_APP_URL/APP_URL
+      // resolution as the email links below.
+      "HTTP-Referer": getPublicAppUrl(),
       "X-Title": "MedSchoolProffs",
     },
     body: JSON.stringify({ model, max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] }),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`AI endpoint error (${res.status}): ${body.slice(0, 300)}`);
+    throw new Error(describeProviderFailure("Custom AI endpoint", res.status, body));
   }
   // Reasoning-tuned models served through custom/OpenAI-compatible endpoints
   // (DeepSeek R1, Qwen QwQ, and most "thinking" models on OpenRouter) often

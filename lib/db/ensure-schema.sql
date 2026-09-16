@@ -653,6 +653,7 @@ CREATE TABLE IF NOT EXISTS med_challenges (
   id SERIAL PRIMARY KEY,
   challenger_id INTEGER NOT NULL,
   opponent_id INTEGER NOT NULL,
+  block_id INTEGER,
   module_id INTEGER,
   subject_id INTEGER,
   topic_id INTEGER,
@@ -679,5 +680,10 @@ CREATE TABLE IF NOT EXISTS med_challenge_attempts (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS med_challenge_attempts_challenge_user_idx
   ON med_challenge_attempts (challenge_id, user_id);
+
+-- Challenge a friend: scope challenges to a Block, not just Module/Subject/
+-- Topic (see routes/challenges.ts). Additive migration for databases where
+-- med_challenges already existed before block_id was added above.
+ALTER TABLE med_challenges ADD COLUMN IF NOT EXISTS block_id INTEGER;
 
 COMMIT;

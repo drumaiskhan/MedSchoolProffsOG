@@ -52,6 +52,18 @@ const EDITABLE_KEYS = [
   // which is unaffected either way. Also readable by students (mirrored
   // into site-content.ts) so the app can show a "trial mode is on" banner.
   "GLOBAL_TRIAL_MODE",
+  // Scopes GLOBAL_TRIAL_MODE to a specific program (MBBS/BDS) and/or
+  // academic year instead of opening the whole platform. Empty string
+  // (the default) on either key means "no restriction on that axis" —
+  // matching the same null-means-everyone convention modules/blocks/exams
+  // already use for programTargetKind/yearTargetNumber (see
+  // lib/contentVisibility.ts). A student with no program/year set on
+  // their profile only matches when both are left unrestricted. Read
+  // together with GLOBAL_TRIAL_MODE by requireActiveMembership
+  // (middlewares/auth.ts) — leaving both blank preserves the previous
+  // "every student" behavior exactly.
+  "GLOBAL_TRIAL_PROGRAM", // "" | "MBBS" | "BDS"
+  "GLOBAL_TRIAL_YEAR", // "" | "1".."5"
   // Optional decorative photo for the student Dashboard's greeting card
   // (see frontend-student's Dashboard component) — falls back to a plain
   // decorative pattern when unset.

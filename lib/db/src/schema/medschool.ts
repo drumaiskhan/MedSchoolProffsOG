@@ -444,6 +444,11 @@ export const challengesTable = pgTable("med_challenges", {
   id: serial("id").primaryKey(),
   challengerId: integer("challenger_id").notNull(),
   opponentId: integer("opponent_id").notNull(),
+  // Optional scope narrowing, same null-means-"whole bank" convention as
+  // moduleId/subjectId/topicId below. Recorded even though the MCQ set is
+  // already fixed at creation time, so the challenge list/history can show
+  // what scope a challenge was drawn from.
+  blockId: integer("block_id"),
   moduleId: integer("module_id"),
   subjectId: integer("subject_id"),
   topicId: integer("topic_id"),

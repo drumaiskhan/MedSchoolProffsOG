@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, usersTable } from "@workspace/db";
 import { SESSION_COOKIE_NAME, verifySession } from "../lib/auth";
 import { getSetting } from "../lib/settings";
+import { getStudentTargeting, isTargetVisible } from "../lib/contentVisibility";
 
 export interface AuthedUser {
   id: number;
@@ -123,13 +124,38 @@ export async function requireActiveMembership(req: Request, res: Response, next:
   // off — the setting must be the exact string "true" — so a missing/unset
   // key (fresh install, or the settings lookup itself failing below) never
   // accidentally opens the whole site.
+  //
+  // GLOBAL_TRIAL_PROGRAM / GLOBAL_TRIAL_YEAR optionally narrow that switch
+  // to one program (MBBS/BDS) and/or one academic year instead of every
+  // student — e.g. a trial week for MBBS Year 1 only. Empty string on
+  // either key (the default) means "no restriction on that axis", so
+  // leaving both blank reproduces the original every-student behavior
+  // exactly. Uses the same programTargetKind/yearTargetNumber matching
+  // rule as modules/blocks/exams (lib/contentVisibility.ts's
+  // isTargetVisible) for consistency with how targeting already works
+  // everywhere else in the app.
   let globalTrialEnabled = false;
+  let trialProgram = "";
+  let trialYear = "";
   try {
     globalTrialEnabled = (await getSetting("GLOBAL_TRIAL_MODE", "false")) === "true";
+    if (globalTrialEnabled) {
+      trialProgram = (await getSetting("GLOBAL_TRIAL_PROGRAM", "")) ?? "";
+      trialYear = (await getSetting("GLOBAL_TRIAL_YEAR", "")) ?? "";
+    }
   } catch {
     globalTrialEnabled = false;
   }
-  if (globalTrialEnabled) { next(); return; }
+  if (globalTrialEnabled) {
+    if (!trialProgram && !trialYear) { next(); return; }
+    try {
+      const targeting = await getStudentTargeting(req.user.id);
+      const yearNum = trialYear ? Number(trialYear) : null;
+      if (isTargetVisible(trialProgram || null, yearNum, targeting)) { next(); return; }
+    } catch {
+      // fails closed — a lookup error here should not silently grant access
+    }
+  }
 
   res.status(403).json({ error: "An active membership is required to access this content." });
 }

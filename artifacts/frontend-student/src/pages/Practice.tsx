@@ -11,7 +11,8 @@ import {
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
   GraduationCap, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
   RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Link2 as LinkIcon, Lightbulb,
-  LayoutGrid, Presentation, Wand2, Crown, Globe, Star, Activity, Shuffle
+  LayoutGrid, Presentation, Wand2, Crown, Globe, Star, Activity, Shuffle, Play,
+  Infinity as InfinityIcon
 } from 'lucide-react';
 import { applyThemeVars } from '@/lib/theme';
 import {
@@ -205,34 +206,43 @@ function Practice() {
       setRemainingSeconds(pendingMode === 'timed' ? effectiveMinutes * 60 : 0);
       sessionStartRef.current = Date.now();
     };
-    return <div className="mx-auto max-w-xl"><SectionHeader eyebrow="Daily practice" title="Before you start" />
+    return <div className="mx-auto max-w-xl">
       <div className="overflow-hidden rounded-3xl border border-border bg-card">
-        {/* Hero strip — mirrors the dashboard's primary-color hero treatment
-            so this setup screen feels like part of the same app instead of a
-            plain form dropped in the middle of it. */}
-        <div className="relative overflow-hidden bg-primary px-6 py-8 text-center text-primary-foreground sm:px-9">
-          <div className="pointer-events-none absolute -right-10 -top-12 size-40 rounded-full bg-white/10" />
-          <div className="pointer-events-none absolute -bottom-16 -left-12 size-40 rounded-full bg-white/10" />
-          <div className="relative mx-auto grid size-14 place-items-center rounded-2xl bg-white/15 backdrop-blur"><Clock3 size={26} /></div>
-          <h2 className="relative mt-4 font-display text-2xl">How do you want to practice?</h2>
-          <p className="relative mt-2 text-xs text-primary-foreground/80">{mcqs.length} question{mcqs.length === 1 ? '' : 's'} in this set{pastPaperId ? ' · Past paper' : ''}.</p>
-          {difficultyEntries.length > 0 && <div className="relative mt-4 flex flex-wrap items-center justify-center gap-1.5">
-            {difficultyEntries.map(([diff, count]) => <span key={diff} className="inline-flex items-center gap-1 rounded-full bg-white/15 px-2.5 py-1 text-[10px] font-bold capitalize backdrop-blur" data-testid={`chip-difficulty-${diff}`}>{count} {diff}</span>)}
-          </div>}
+        {/* Header card — light indigo-tinted band with topic identity + at-a-glance
+            counts, replacing the old solid primary-color hero. */}
+        <div className="bg-indigo-50 px-5 pb-5 pt-5 sm:px-7 sm:pt-7">
+          <div className="flex items-start gap-3">
+            <Link href={pastPaperId ? '/past-papers' : '/blocks'} className="mt-2.5 shrink-0 text-indigo-400 transition-colors hover:text-indigo-600" data-testid="link-practice-back-modules"><ArrowLeft size={18} /></Link>
+            <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 text-white shadow-sm"><Target size={20} /></div>
+            <div className="min-w-0 pt-0.5">
+              <h2 className="truncate text-base font-extrabold text-foreground sm:text-lg" data-testid="text-practice-topic-name">{topicLabel}</h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">Select difficulty and question count</p>
+            </div>
+          </div>
+          <div className="mt-5 grid grid-cols-4 text-center">
+            <div><div className="text-xl font-extrabold text-blue-600">{mcqs.length}</div><div className="text-[10px] text-muted-foreground">Total</div></div>
+            <div><div className="text-xl font-extrabold text-green-600">{difficultyCounts.easy ?? 0}</div><div className="text-[10px] text-muted-foreground">Easy</div></div>
+            <div><div className="text-xl font-extrabold text-amber-500">{difficultyCounts.moderate ?? 0}</div><div className="text-[10px] text-muted-foreground">Medium</div></div>
+            <div><div className="text-xl font-extrabold text-red-500">{difficultyCounts.hard ?? 0}</div><div className="text-[10px] text-muted-foreground">Hard</div></div>
+          </div>
         </div>
 
-        <div className="p-6 sm:p-9">
+        <div className="p-5 sm:p-7">
+          <h3 className="mb-5 text-sm font-extrabold text-foreground">Configure Your Practice Test</h3>
+
           {difficultyEntries.length > 0 && <div className="mb-5">
             <div className="mb-2 text-[11px] font-bold text-muted-foreground">Select Difficulty Level</div>
             <div className="grid grid-cols-4 gap-2">
               {([
-                { key: 'all' as const, dot: 'bg-primary', count: mcqs.length },
-                { key: 'easy' as const, dot: 'bg-[#287058]', count: difficultyCounts.easy ?? 0 },
-                { key: 'moderate' as const, dot: 'bg-[#e5a952]', count: difficultyCounts.moderate ?? 0 },
-                { key: 'hard' as const, dot: 'bg-destructive', count: difficultyCounts.hard ?? 0 },
-              ]).map((opt) => <button key={opt.key} type="button" onClick={() => setSelectedDifficulty(opt.key)} disabled={opt.key !== 'all' && opt.count === 0} className={cn('card-lift rounded-xl border-2 p-2.5 text-center transition-all disabled:opacity-30', selectedDifficulty === opt.key ? 'border-primary bg-[#eef7f1]' : 'border-border bg-card hover:border-primary/30')} data-testid={`button-difficulty-${opt.key}`}>
-                <span className={cn('mx-auto block size-2.5 rounded-full', opt.dot)} />
-                <div className="mt-1.5 text-[11px] font-extrabold">{difficultyLabels[opt.key]}</div>
+                { key: 'all' as const, count: mcqs.length },
+                { key: 'easy' as const, count: difficultyCounts.easy ?? 0 },
+                { key: 'moderate' as const, count: difficultyCounts.moderate ?? 0 },
+                { key: 'hard' as const, count: difficultyCounts.hard ?? 0 },
+              ]).map((opt) => <button key={opt.key} type="button" onClick={() => setSelectedDifficulty(opt.key)} disabled={opt.key !== 'all' && opt.count === 0} className={cn('card-lift rounded-xl border p-2.5 text-center transition-all disabled:opacity-30', selectedDifficulty === opt.key ? 'border-2 border-blue-500 bg-blue-50' : 'border-border bg-card hover:border-blue-300')} data-testid={`button-difficulty-${opt.key}`}>
+                {opt.key === 'all'
+                  ? <Target size={14} className="mx-auto text-red-500" />
+                  : <span className={cn('mx-auto block size-2.5 rounded-full', opt.key === 'easy' ? 'bg-green-500' : opt.key === 'moderate' ? 'bg-amber-500' : 'bg-red-500')} />}
+                <div className={cn('mt-1.5 text-[11px] font-extrabold', selectedDifficulty === opt.key && 'text-blue-600')}>{difficultyLabels[opt.key]}</div>
                 <div className="text-[10px] text-muted-foreground">{opt.count} qs</div>
               </button>)}
             </div>
@@ -245,76 +255,83 @@ function Practice() {
                 ...(availableCount > 10 ? [{ mode: '10' as const, label: '10', sub: 'Questions' }] : []),
                 ...(availableCount > 20 ? [{ mode: '20' as const, label: '20', sub: 'Questions' }] : []),
                 { mode: 'all' as const, label: availableCount > 20 ? 'All' : String(availableCount), sub: `${availableCount} MCQ${availableCount === 1 ? '' : 's'}` },
-              ]).map((opt) => <button key={opt.mode} type="button" onClick={() => setCountMode(opt.mode)} className={cn('card-lift rounded-xl border-2 p-3 text-center transition-all', countMode === opt.mode ? 'border-primary bg-[#eef7f1]' : 'border-border bg-card hover:border-primary/30')} data-testid={`button-count-${opt.mode}`}>
-                <div className="text-sm font-extrabold">{opt.label}</div>
+              ]).map((opt) => <button key={opt.mode} type="button" onClick={() => setCountMode(opt.mode)} className={cn('card-lift rounded-xl border p-3 text-center transition-all', countMode === opt.mode ? 'border-2 border-blue-500 bg-blue-50' : 'border-border bg-card hover:border-blue-300')} data-testid={`button-count-${opt.mode}`}>
+                <div className={cn('text-sm font-extrabold', countMode === opt.mode && 'text-blue-600')}>{opt.label}</div>
                 <div className="text-[10px] text-muted-foreground">{opt.sub}</div>
               </button>)}
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <button onClick={() => setPendingMode('timed')} className={cn('card-lift relative rounded-2xl border-2 p-5 text-left transition-all', pendingMode === 'timed' ? 'border-primary bg-[#eef7f1] shadow-sm' : 'border-border bg-card hover:border-primary/30')} data-testid="button-mode-timed">
-              {pendingMode === 'timed' && <span className="absolute right-3 top-3 grid size-5 place-items-center rounded-full bg-primary text-white"><Check size={11} /></span>}
-              <span className={cn('grid size-9 place-items-center rounded-xl', pendingMode === 'timed' ? 'bg-primary text-white' : 'bg-muted text-muted-foreground')}><Clock3 size={17} /></span>
-              <div className={cn('mt-3 text-sm font-extrabold', pendingMode === 'timed' && 'text-[#164b4b]')}>Timer</div>
-              <p className="mt-1 text-[11px] leading-5 text-muted-foreground">Practice with a countdown, auto-submits when time runs out.</p>
-            </button>
-            <button onClick={() => setPendingMode('untimed')} className={cn('card-lift relative rounded-2xl border-2 p-5 text-left transition-all', pendingMode === 'untimed' ? 'border-primary bg-[#eef7f1] shadow-sm' : 'border-border bg-card hover:border-primary/30')} data-testid="button-mode-untimed">
-              {pendingMode === 'untimed' && <span className="absolute right-3 top-3 grid size-5 place-items-center rounded-full bg-primary text-white"><Check size={11} /></span>}
-              <span className={cn('grid size-9 place-items-center rounded-xl', pendingMode === 'untimed' ? 'bg-primary text-white' : 'bg-muted text-muted-foreground')}><Target size={17} /></span>
-              <div className={cn('mt-3 text-sm font-extrabold', pendingMode === 'untimed' && 'text-[#164b4b]')}>Timeless</div>
-              <p className="mt-1 text-[11px] leading-5 text-muted-foreground">No time limit — study at your own pace.</p>
-            </button>
+          <div className="mb-5">
+            <div className="mb-2 text-[11px] font-bold text-muted-foreground">Timer Mode</div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <button onClick={() => setPendingMode('timed')} className={cn('card-lift relative rounded-2xl border p-4 text-left transition-all', pendingMode === 'timed' ? 'border-2 border-blue-500 bg-blue-50' : 'border-border bg-card hover:border-blue-300')} data-testid="button-mode-timed">
+                <div className="flex items-center gap-2.5">
+                  <span className={cn('grid size-8 shrink-0 place-items-center rounded-lg', pendingMode === 'timed' ? 'bg-blue-500 text-white' : 'bg-muted text-muted-foreground')}><Clock3 size={15} /></span>
+                  <span className={cn('text-sm font-extrabold', pendingMode === 'timed' && 'text-blue-600')}>Timer</span>
+                </div>
+                <p className="mt-2 text-[11px] leading-5 text-muted-foreground">Practice with a countdown and auto-submit when time ends.</p>
+              </button>
+              <button onClick={() => setPendingMode('untimed')} className={cn('card-lift relative rounded-2xl border p-4 text-left transition-all', pendingMode === 'untimed' ? 'border-2 border-blue-500 bg-blue-50' : 'border-border bg-card hover:border-blue-300')} data-testid="button-mode-untimed">
+                <div className="flex items-center gap-2.5">
+                  <span className={cn('grid size-8 shrink-0 place-items-center rounded-lg', pendingMode === 'untimed' ? 'bg-blue-500 text-white' : 'bg-muted text-muted-foreground')}><InfinityIcon size={15} /></span>
+                  <span className={cn('text-sm font-extrabold', pendingMode === 'untimed' && 'text-blue-600')}>Timeless</span>
+                </div>
+                <p className="mt-2 text-[11px] leading-5 text-muted-foreground">No time limit. Study at your own pace.</p>
+              </button>
+            </div>
+
+            {pendingMode === 'timed' && <div className="mt-3 rounded-2xl border border-border bg-muted/40 p-4 text-left">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-[11px] font-bold text-muted-foreground">Set your own time</div>
+                {finishClock && <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-semibold text-muted-foreground" data-testid="text-estimated-finish"><Clock3 size={11} /> Ends ~{finishClock}</span>}
+              </div>
+              <div className="mt-3 flex items-center justify-center gap-3">
+                <button type="button" onClick={() => setCustomMinutes(Math.max(1, effectiveMinutes - 5))} className="grid size-10 shrink-0 place-items-center rounded-xl border border-border text-base font-bold transition-transform hover:bg-muted active:scale-95" data-testid="button-timer-minus" aria-label="Subtract 5 minutes">−</button>
+                <div className="flex flex-col items-center">
+                  <input
+                    type="number"
+                    min={1}
+                    max={480}
+                    value={effectiveMinutes}
+                    onChange={(e) => setCustomMinutes(Math.max(1, Math.min(480, Number(e.target.value) || 1)))}
+                    className="h-11 w-24 rounded-xl border border-border bg-background px-2 text-center text-lg font-mono-app font-extrabold"
+                    data-testid="input-timer-minutes"
+                  />
+                  <span className="mt-1 text-[10px] text-muted-foreground">minutes</span>
+                </div>
+                <button type="button" onClick={() => setCustomMinutes(Math.min(480, effectiveMinutes + 5))} className="grid size-10 shrink-0 place-items-center rounded-xl border border-border text-base font-bold transition-transform hover:bg-muted active:scale-95" data-testid="button-timer-plus" aria-label="Add 5 minutes">+</button>
+              </div>
+              <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+                {[autoMinutes, 15, 30, 45, 60].filter((v, idx, arr) => v > 0 && arr.indexOf(v) === idx).map((v) => <button key={v} type="button" onClick={() => setCustomMinutes(v)} className={cn('rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors', effectiveMinutes === v ? 'border-blue-500 bg-blue-500 text-white' : 'border-border text-muted-foreground hover:bg-muted')} data-testid={`button-timer-preset-${v}`}>{v === autoMinutes ? `${v} min (recommended)` : `${v} min`}</button>)}
+              </div>
+              <p className="mt-2.5 text-center text-[10px] text-muted-foreground">{isAuto ? '~1 min per question' : 'Custom pace'}, based on a {effectiveCount}-question set.</p>
+            </div>}
           </div>
 
-          {pendingMode === 'timed' && <div className="mt-4 rounded-2xl border border-border bg-muted/40 p-4 text-left">
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-[11px] font-bold text-muted-foreground">Set your own time</div>
-              {finishClock && <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-semibold text-muted-foreground" data-testid="text-estimated-finish"><Clock3 size={11} /> Ends ~{finishClock}</span>}
-            </div>
-            <div className="mt-3 flex items-center justify-center gap-3">
-              <button type="button" onClick={() => setCustomMinutes(Math.max(1, effectiveMinutes - 5))} className="grid size-10 shrink-0 place-items-center rounded-xl border border-border text-base font-bold transition-transform hover:bg-muted active:scale-95" data-testid="button-timer-minus" aria-label="Subtract 5 minutes">−</button>
-              <div className="flex flex-col items-center">
-                <input
-                  type="number"
-                  min={1}
-                  max={480}
-                  value={effectiveMinutes}
-                  onChange={(e) => setCustomMinutes(Math.max(1, Math.min(480, Number(e.target.value) || 1)))}
-                  className="h-11 w-24 rounded-xl border border-border bg-background px-2 text-center text-lg font-mono-app font-extrabold"
-                  data-testid="input-timer-minutes"
-                />
-                <span className="mt-1 text-[10px] text-muted-foreground">minutes</span>
-              </div>
-              <button type="button" onClick={() => setCustomMinutes(Math.min(480, effectiveMinutes + 5))} className="grid size-10 shrink-0 place-items-center rounded-xl border border-border text-base font-bold transition-transform hover:bg-muted active:scale-95" data-testid="button-timer-plus" aria-label="Add 5 minutes">+</button>
-            </div>
-            <div className="mt-3 flex flex-wrap justify-center gap-1.5">
-              {[autoMinutes, 15, 30, 45, 60].filter((v, idx, arr) => v > 0 && arr.indexOf(v) === idx).map((v) => <button key={v} type="button" onClick={() => setCustomMinutes(v)} className={cn('rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors', effectiveMinutes === v ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-muted-foreground hover:bg-muted')} data-testid={`button-timer-preset-${v}`}>{v === autoMinutes ? `${v} min (recommended)` : `${v} min`}</button>)}
-            </div>
-            <p className="mt-2.5 text-center text-[10px] text-muted-foreground">{isAuto ? '~1 min per question' : 'Custom pace'}, based on a {effectiveCount}-question set.</p>
-          </div>}
-
-          <button type="button" onClick={() => setShuffleQuestions((s) => !s)} className="mt-4 flex w-full items-center justify-between rounded-2xl border border-border bg-muted/40 px-4 py-3 text-left transition-colors hover:bg-muted/60" data-testid="button-toggle-shuffle" aria-pressed={shuffleQuestions}>
+          <button type="button" onClick={() => setShuffleQuestions((s) => !s)} className="mb-5 flex w-full items-center justify-between rounded-2xl border border-border bg-muted/40 px-4 py-3 text-left transition-colors hover:bg-muted/60" data-testid="button-toggle-shuffle" aria-pressed={shuffleQuestions}>
             <span className="flex items-center gap-2 text-xs font-bold"><Shuffle size={14} className="text-muted-foreground" /> Shuffle question order</span>
-            <span className={cn('relative h-5 w-9 shrink-0 rounded-full transition-colors', shuffleQuestions ? 'bg-primary' : 'bg-border')}><span className={cn('absolute top-0.5 size-4 rounded-full bg-white shadow transition-transform', shuffleQuestions ? 'translate-x-4' : 'translate-x-0.5')} /></span>
+            <span className={cn('relative h-5 w-9 shrink-0 rounded-full transition-colors', shuffleQuestions ? 'bg-blue-500' : 'bg-border')}><span className={cn('absolute top-0.5 size-4 rounded-full bg-white shadow transition-transform', shuffleQuestions ? 'translate-x-4' : 'translate-x-0.5')} /></span>
           </button>
 
-          <div className="mt-4 rounded-2xl bg-muted/40 p-4 text-left" data-testid="panel-test-summary">
-            <div className="mb-2 text-[11px] font-bold text-muted-foreground">Test Summary</div>
-            <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px]">
-              <div className="flex items-center gap-1.5 text-muted-foreground"><Target size={11} className="shrink-0" /> Topic: <span className="truncate font-bold text-foreground">{topicLabel}</span></div>
-              <div className="flex items-center gap-1.5 text-muted-foreground"><Activity size={11} className="shrink-0" /> Difficulty: <span className="font-bold text-foreground">{difficultyLabels[selectedDifficulty]}</span></div>
-              <div className="flex items-center gap-1.5 text-muted-foreground"><Hash size={11} className="shrink-0" /> Questions: <span className="font-bold text-foreground">{effectiveCount}</span></div>
-              <div className="flex items-center gap-1.5 text-muted-foreground"><Clock3 size={11} className="shrink-0" /> Mode: <span className="font-bold text-foreground">{pendingMode === 'timed' ? 'Timer' : 'Timeless'}</span></div>
+          <div className="mb-6 rounded-2xl bg-muted/40 p-4 text-left" data-testid="panel-test-summary">
+            <div className="mb-2.5 text-[11px] font-bold text-muted-foreground">Test Summary</div>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 text-[11px]">
+              <div className="flex items-center gap-1.5 text-muted-foreground"><Target size={11} className="shrink-0 text-blue-500" /> Topic: <span className="truncate font-bold text-foreground">{topicLabel}</span></div>
+              <div className="flex items-center gap-1.5 text-muted-foreground"><Activity size={11} className="shrink-0 text-blue-500" /> Difficulty: <span className="font-bold text-foreground">{difficultyLabels[selectedDifficulty]}</span></div>
+              <div className="flex items-center gap-1.5 text-muted-foreground"><Hash size={11} className="shrink-0 text-blue-500" /> Questions: <span className="font-bold text-foreground">{effectiveCount}</span></div>
+              <div className="flex items-center gap-1.5 text-muted-foreground"><Clock3 size={11} className="shrink-0 text-blue-500" /> Mode: <span className="font-bold text-foreground">{pendingMode === 'timed' ? 'Timer' : 'Timeless'}</span></div>
             </div>
           </div>
 
-          <button
-            onClick={startSession}
-            disabled={effectiveCount === 0}
-            className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3.5 text-xs font-extrabold text-primary-foreground shadow-sm transition-transform active:scale-[0.99] disabled:opacity-40"
-            data-testid="button-start-session"
-          ><Zap size={14} /> Start Test {pendingMode === 'timed' ? `(${effectiveMinutes} min)` : ''}</button>
+          <div className="flex justify-center">
+            <button
+              onClick={startSession}
+              disabled={effectiveCount === 0}
+              className="flex items-center justify-center gap-2 rounded-full bg-[#0f1e3d] px-8 py-3.5 text-xs font-extrabold text-white shadow-sm transition-transform active:scale-[0.99] disabled:opacity-40"
+              data-testid="button-start-session"
+            ><Play size={13} className="fill-white" /> Start Test {pendingMode === 'timed' ? `(${effectiveMinutes} min)` : ''}</button>
+          </div>
           <button
             onClick={() => saveSession.mutate({ name: `Practice — ${new Date().toLocaleDateString()}`, config: { topicId, pastPaperId } })}
             disabled={saveSession.isPending}
