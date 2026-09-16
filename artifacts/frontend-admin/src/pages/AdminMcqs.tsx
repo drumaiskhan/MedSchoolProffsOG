@@ -41,7 +41,7 @@ import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiReq
 // mutations already call invalidateQueries on the specific keys they
 // change, so edits still show up immediately — this only avoids redundant
 // background refetches of data nothing has touched.
-import { DifficultyPicker, ExplanationCoverage, SectionHeader, cn, ConfirmDialog, McqBankTree, groupBlocksForPicker, BackupScopePicker } from '@/lib/shared';
+import { DifficultyPicker, ExplanationCoverage, SectionHeader, cn, ConfirmDialog, McqBankTree, groupBlocksForPicker, BackupScopePicker, ProgramYearFilter, filterBlocksByProgramYear, studyYearToNumber } from '@/lib/shared';
 import { queryClient } from '@/lib/query-client';
 
 function AdminMcqs() {
@@ -194,6 +194,14 @@ function AdminMcqs() {
   // tree's grouping) need to filter/group by.
   const modulesQ = useQuery({ queryKey: ['admin-modules'], queryFn: moduleAdminApi.listAll });
   const allModules = modulesQ.data ?? [];
+  // Program (MBBS/BDS) + Year filter, ahead of Block — picking a program
+  // narrows Year to that program's own years (5 for MBBS, 4 for BDS via
+  // DEGREE_YEAR_OPTIONS), and narrows the Block/Module picker below to
+  // just that branch, same as groupBlocksForPicker's optgroups but as an
+  // explicit two-step filter instead of scanning every optgroup by hand.
+  const [programFilter, setProgramFilter] = useState('');
+  const [studyYearFilter, setStudyYearFilter] = useState('');
+  const filteredBlocks = filterBlocksByProgramYear(blocks, allModules, programFilter, studyYearToNumber(programFilter, studyYearFilter));
   // Narrow the module choices to the selected Block, same cascade the
   // flashcard admin form already uses — "All blocks" (default) shows every
   // module, matching the previous behavior when nothing is selected.
@@ -204,6 +212,10 @@ function AdminMcqs() {
   const topicsQ = useListTopics(subjectId ? { subjectId: Number(subjectId) } : undefined);
   const [topicId, setTopicId] = useState('');
   const targetReady = !!moduleId && !!subjectId && !!topicId;
+  // Changing Program/Year invalidates whatever Block/Module/Subject/Topic
+  // was already picked (it may no longer be in the filtered branch), same
+  // "reset everything below" pattern the Block select itself already uses.
+  const resetPickerBelowProgramYear = () => { setBlockId(''); setModuleId(''); setSubjectId(''); setTopicId(''); };
 
   // Optional: link imported/manual questions to a past paper
   const pastPapersQ = useQuery({ queryKey: ['admin-past-papers'], queryFn: () => pastPapersApi.list() });
@@ -253,10 +265,11 @@ function AdminMcqs() {
   };
 
   return <div><SectionHeader eyebrow="Assessment bank" title="MCQ management" action={<button onClick={() => setManualOpen((v) => !v)} className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 text-xs font-bold" data-testid="button-toggle-manual-mcq"><Pencil size={14} /> {manualOpen ? 'Hide manual entry' : 'Add one manually'}</button>} />
+    <div className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl border border-border bg-card p-4"><span className="text-[11px] font-extrabold uppercase tracking-wide text-muted-foreground">Program &amp; year</span><ProgramYearFilter program={programFilter} studyYear={studyYearFilter} onProgramChange={(v) => { setProgramFilter(v); resetPickerBelowProgramYear(); }} onStudyYearChange={(v) => { setStudyYearFilter(v); resetPickerBelowProgramYear(); }} testIdPrefix="mcq-filter" /><span className="text-[11px] text-muted-foreground">Narrows the Block/Module/Subject/Topic pickers below to MBBS or BDS and, optionally, one year.</span></div>
 
     <div className="rounded-3xl border border-primary/30 bg-[#eef7f1] p-6"><div className="flex items-start gap-3"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground"><FileText size={18} /></div><div><h3 className="text-sm font-extrabold">Bulk upload from a file</h3><p className="mt-1 text-xs leading-5 text-muted-foreground">Upload a question bank as .txt, .csv, .xlsx/.xls, .pdf, or .docx. We'll extract the questions automatically — review and fix anything before it's added to the bank.</p></div></div>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-5"><select value={blockId} onChange={(e) => { setBlockId(e.target.value); setModuleId(''); setSubjectId(''); setTopicId(''); }} className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-import-block"><option value="">All blocks</option>{groupBlocksForPicker(blocks, allModules).map((g) => <optgroup key={`${g.programLabel}-${g.yearLabel}`} label={`${g.programLabel} · ${g.yearLabel}`}>{g.blocks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</optgroup>)}</select><select value={moduleId} onChange={(e) => { setModuleId(e.target.value); setSubjectId(''); setTopicId(''); }} className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-import-module"><option value="">Select module</option>{modules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select><select value={subjectId} onChange={(e) => { setSubjectId(e.target.value); setTopicId(''); }} disabled={!moduleId} className="h-10 rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-import-subject"><option value="">Select subject</option>{(subjectsQ.data || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select><select value={topicId} onChange={(e) => setTopicId(e.target.value)} disabled={!subjectId} className="h-10 rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-import-topic"><option value="">Select topic</option>{(topicsQ.data || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select><select value={pastPaperId} onChange={(e) => setPastPaperId(e.target.value)} className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-import-past-paper"><option value="">No past paper (optional)</option>{(pastPapersQ.data || []).map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}</select></div>
+      <div className="mt-5 grid gap-3 sm:grid-cols-5"><select value={blockId} onChange={(e) => { setBlockId(e.target.value); setModuleId(''); setSubjectId(''); setTopicId(''); }} className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-import-block"><option value="">All blocks</option>{groupBlocksForPicker(filteredBlocks, allModules).map((g) => <optgroup key={`${g.programLabel}-${g.yearLabel}`} label={`${g.programLabel} · ${g.yearLabel}`}>{g.blocks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</optgroup>)}</select><select value={moduleId} onChange={(e) => { setModuleId(e.target.value); setSubjectId(''); setTopicId(''); }} className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-import-module"><option value="">Select module</option>{modules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select><select value={subjectId} onChange={(e) => { setSubjectId(e.target.value); setTopicId(''); }} disabled={!moduleId} className="h-10 rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-import-subject"><option value="">Select subject</option>{(subjectsQ.data || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select><select value={topicId} onChange={(e) => setTopicId(e.target.value)} disabled={!subjectId} className="h-10 rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-import-topic"><option value="">Select topic</option>{(topicsQ.data || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select><select value={pastPaperId} onChange={(e) => setPastPaperId(e.target.value)} className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-import-past-paper"><option value="">No past paper (optional)</option>{(pastPapersQ.data || []).map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}</select></div>
       {!targetReady && <p className="mt-2 text-[11px] font-semibold text-[#8a5a12]">Pick a module, subject, and topic before uploading — every imported question needs a home.</p>}
 
       <div className="mt-4 flex flex-wrap items-center gap-3">

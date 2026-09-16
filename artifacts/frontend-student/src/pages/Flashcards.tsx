@@ -18,7 +18,7 @@ import {
   getListMembershipPlansQueryKey, getListPaymentsQueryKey, getListMcqsQueryKey, getListModulesQueryKey, getListStudentsQueryKey, getListNotificationsQueryKey, getGetCurrentUserQueryKey,
   useApprovePayment, useCreateMembershipPlan, useCreateMcq, useCreateModule, useGetAdminDashboard,
   useGetCurrentUser, useGetStudentDashboard, useListFlashcards, useListMembershipPlans,
-  useListMcqs, useListModules, useListNotifications, useListPayments, useListResources,
+  useListMcqs, useListNotifications, useListPayments, useListResources,
   useListStudents, useListSubjects, useListTopics, useRejectPayment,
   useSubmitPayment, useUpdateMembershipPlan,
 } from '@workspace/api-client-react';
@@ -36,6 +36,7 @@ import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiReq
 import { VisualizationRenderer, isStepBased } from '@/components/visualizer/VisualizationRenderer';
 import { StepControls } from '@/components/visualizer/StepControls';
 import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 // Round 3, item 10 (performance) — this was `new QueryClient()` with no
 // options, meaning every query defaulted to `staleTime: 0` and refetched
@@ -52,14 +53,22 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // invalidateQueries after a save) already set their own options, which
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
-import { Badge, EmptyState, Progress, SkeletonPage, TopicBadge, cn, topicAccentStyles, topicColorVar } from '@/lib/shared';
+import { Badge, EmptyState, Progress, SkeletonPage, TopicBadge, cn, topicAccentStyles, topicColorVar, useModulesGrouping } from '@/lib/shared';
 
 function Flashcards() {
   const search = useSearch();
   const [, navigate] = useLocation();
   const urlTopicId = Number(new URLSearchParams(search).get('topic')) || undefined;
-  const modulesQ = useListModules();
-  const modules = modulesQ.data ?? [];
+  // useModulesGrouping() (the same hook the Blocks landing page and Practice
+  // use) instead of a standalone useListModules()/blocks fetch here: it
+  // keys its blocks query as ['blocks'], so a student who's already visited
+  // Blocks or started a Practice session gets this filter's Block dropdown
+  // populated straight from cache (30s staleTime, no window-refocus
+  // refetch — see the QueryClient config above) rather than waiting on a
+  // fresh round trip just to open Flashcards.
+  const { modules, blocks, modulesByBlock } = useModulesGrouping();
+  const [blockId, setBlockId] = useState('');
+  const modulesInBlock = blockId ? (modulesByBlock.get(Number(blockId)) ?? []) : modules;
   const [moduleId, setModuleId] = useState('');
   const subjectsQ = useListSubjects(moduleId ? { moduleId: Number(moduleId) } : undefined);
   // Unfiltered — used only to compute the "Subjects"/"Topics" stat cards
@@ -126,10 +135,66 @@ function Flashcards() {
 
   const statCards = <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">{stats.map(([label, value]) => <div key={label} className="rounded-2xl border border-border bg-card p-4 text-center"><div className="font-display text-2xl">{value}</div><div className="mt-1 text-[11px] font-semibold text-muted-foreground">{label}</div></div>)}</div>;
 
+  // Radix's Select can't take an empty-string item value (it reserves ""
+  // internally to mean "no selection", and throws if an item uses it), so
+  // "All Modules/Subjects/Topics" is modeled as the sentinel value "all"
+  // here and translated back to '' — the value the rest of the component
+  // (moduleId/subjectId/topicId state, the queries keyed off them) already
+  // expects — right where each select's value changes.
   const filterBar = <div className="mb-5 space-y-2 rounded-2xl border border-border bg-card p-4">
-    <select value={moduleId} onChange={(e) => { setModuleId(e.target.value); setSubjectId(''); setTopicId(''); navigate('/flashcards'); resetDeck(); }} className="h-10 w-full rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-flashcard-module"><option value="">All Modules</option>{modules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
-    <select value={subjectId} onChange={(e) => { setSubjectId(e.target.value); setTopicId(''); resetDeck(); }} disabled={!moduleId} className="h-10 w-full rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-flashcard-subject"><option value="">All Subjects</option>{(subjectsQ.data || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
-    <select value={topicId} onChange={(e) => { setTopicId(e.target.value); resetDeck(); }} disabled={!subjectId} className="h-10 w-full rounded-xl border border-border bg-card px-3 text-xs disabled:opacity-50" data-testid="select-flashcard-topic"><option value="">All Topics</option>{(topicsQ.data || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
+    {/* Coarsest filter, same level as the Blocks landing page. Optional —
+        a deployment with no blocks configured just shows nothing here and
+        the Module select below still lists everything, same as before. */}
+    {blocks.length > 0 && <Select
+      value={blockId || 'all'}
+      onValueChange={(v) => { const val = v === 'all' ? '' : v; setBlockId(val); setModuleId(''); setSubjectId(''); setTopicId(''); navigate('/flashcards'); resetDeck(); }}
+    >
+      <SelectTrigger className="h-10 w-full rounded-xl border-border bg-card px-3 text-xs transition-transform hover:-translate-y-0.5 hover:shadow-sm" data-testid="select-flashcard-block">
+        <SelectValue placeholder="All Blocks" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">All Blocks</SelectItem>
+        {blocks.map((b) => <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>)}
+      </SelectContent>
+    </Select>}
+    <Select
+      value={moduleId || 'all'}
+      onValueChange={(v) => { const val = v === 'all' ? '' : v; setModuleId(val); setSubjectId(''); setTopicId(''); navigate('/flashcards'); resetDeck(); }}
+    >
+      <SelectTrigger className="h-10 w-full rounded-xl border-border bg-card px-3 text-xs transition-transform hover:-translate-y-0.5 hover:shadow-sm" data-testid="select-flashcard-module">
+        <SelectValue placeholder={blockId ? 'All Modules in Block' : 'All Modules'} />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">{blockId ? 'All Modules in Block' : 'All Modules'}</SelectItem>
+        {modulesInBlock.map((m) => <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>)}
+      </SelectContent>
+    </Select>
+    <Select
+      value={subjectId || 'all'}
+      onValueChange={(v) => { const val = v === 'all' ? '' : v; setSubjectId(val); setTopicId(''); resetDeck(); }}
+      disabled={!moduleId}
+    >
+      <SelectTrigger className="h-10 w-full rounded-xl border-border bg-card px-3 text-xs transition-transform hover:-translate-y-0.5 hover:shadow-sm disabled:opacity-50 disabled:hover:translate-y-0" data-testid="select-flashcard-subject">
+        <SelectValue placeholder="All Subjects" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">All Subjects</SelectItem>
+        {(subjectsQ.data || []).map((s) => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
+      </SelectContent>
+    </Select>
+    <Select
+      value={topicId || 'all'}
+      onValueChange={(v) => { const val = v === 'all' ? '' : v; setTopicId(val); resetDeck(); }}
+      disabled={!subjectId}
+    >
+      <SelectTrigger className="h-10 w-full rounded-xl border-border bg-card px-3 text-xs transition-transform hover:-translate-y-0.5 hover:shadow-sm disabled:opacity-50 disabled:hover:translate-y-0" data-testid="select-flashcard-topic">
+        <SelectValue placeholder="All Topics" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">All Topics</SelectItem>
+        {(topicsQ.data || []).map((t) => <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>)}
+      </SelectContent>
+    </Select>
     <div className="relative"><Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><input value={queryText} onChange={(e) => setQueryText(e.target.value)} placeholder="Search flashcards..." className="h-10 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-xs" data-testid="input-flashcard-search" /></div>
   </div>;
 
@@ -153,7 +218,7 @@ function Flashcards() {
             <div className="flip-card-face card-lift flex flex-col overflow-hidden rounded-2xl border bg-card p-6" style={{ ...accent.border, ...accent.wash }}>
               <div aria-hidden className="pointer-events-none absolute -right-6 -top-8 size-24 rotate-12 rounded-2xl border-[8px] border-current opacity-[0.06]" />
               <div className="flex flex-wrap items-center gap-2"><span className="rounded-full border border-border bg-card px-2.5 py-1 text-[10px] font-bold">Question {i + 1}</span><TopicBadge label={c.topic} /></div>
-              <div className="flex flex-1 items-center justify-center"><p className="text-center text-base font-bold leading-7">{c.front}</p></div>
+              <div className="flex flex-1 min-h-0 items-[safe_center] justify-center overflow-y-auto py-1"><p className="text-center text-base font-bold leading-7">{c.front}</p></div>
               <div className="flex flex-wrap items-center justify-center gap-2"><Badge tone="neutral">{c.module}</Badge></div>
               <div className="mt-3 text-center text-[11px] font-semibold text-muted-foreground transition-colors group-hover:text-foreground">Click to reveal the answer</div>
             </div>
@@ -161,7 +226,7 @@ function Flashcards() {
             <div className="flip-card-face flip-card-back flex flex-col overflow-hidden rounded-2xl border p-6 shadow-sm" style={{ ...accent.border, background: 'hsl(var(--card))' }}>
               <div aria-hidden className="pointer-events-none absolute -bottom-8 -left-6 size-20 rounded-full border-[8px] border-current opacity-[0.06]" />
               <div className="flex flex-wrap items-center gap-2"><span className="rounded-full px-2.5 py-1 text-[10px] font-bold" style={accent.badge}>Answer {i + 1}</span><TopicBadge label={c.topic} /></div>
-              <div className="flex flex-1 items-center justify-center"><p className="text-center text-base font-bold leading-7">{c.back}</p></div>
+              <div className="flex flex-1 min-h-0 items-[safe_center] justify-center overflow-y-auto py-1"><p className="text-center text-base font-bold leading-7">{c.back}</p></div>
               <div className="flex flex-wrap items-center justify-center gap-2"><Badge tone="neutral">{c.module}</Badge></div>
               <div className="mt-3 text-center text-[11px] font-semibold text-muted-foreground">Click to flip back</div>
             </div>
@@ -211,13 +276,13 @@ function Flashcards() {
     <div className="mb-4 flex justify-center gap-1.5">{cards.map((c, i) => <div key={c.id} className={cn('h-1.5 w-6 rounded-full transition-colors', i === index % cards.length ? 'bg-primary' : known[c.id] === true ? 'bg-[#8bcbb8]' : known[c.id] === false ? 'bg-[#e5a952]' : 'bg-muted')} />)}</div>
     <div className="flex items-center gap-2 sm:gap-4">
       <button onClick={goPrev} disabled={index === 0} className="hidden size-11 shrink-0 rounded-full border border-border bg-card text-muted-foreground disabled:opacity-30 disabled:pointer-events-none hover:bg-muted sm:grid sm:place-items-center" data-testid="button-flashcard-prev" aria-label="Previous card"><ArrowLeft size={16} /></button>
-      <div className="flip-card flex-1" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}><button onClick={() => setFlipped(!flipped)} className={cn('flip-card-inner min-h-[350px] md:min-h-[420px]', flipped && 'is-flipped')} data-testid="button-flashcard">
+      <div className="flip-card flex-1" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}><button onClick={() => setFlipped(!flipped)} className={cn('flip-card-inner min-h-[380px] md:min-h-[460px]', flipped && 'is-flipped')} data-testid="button-flashcard">
         {/* Front — same badge row / footer language as the grid card's front face, just at single-card scale, plus 3 low-opacity decorative shapes behind the content so grid and study read as one design language. */}
         <div className="flip-card-face flex flex-col overflow-hidden rounded-3xl border p-9 text-left text-[#eaf2e9] shadow-lg md:p-14" style={{ background: `linear-gradient(155deg, hsl(var(${topicColorVar(card.topic || card.module)}) / 0.92), hsl(208 40% 14%))` }}>
           <div aria-hidden className="pointer-events-none absolute -right-10 -top-14 size-48 rotate-12 rounded-[2rem] border-[14px] border-white/10" />
           <div aria-hidden className="pointer-events-none absolute -bottom-16 -left-8 size-40 rounded-full border-[10px] border-white/10" />
           <div className="relative flex flex-wrap items-center gap-2"><span className="rounded-full border border-white/20 bg-white/10 px-2.5 py-1 text-[10px] font-bold">Question {cardNumber}</span><TopicBadge label={card.topic} /></div>
-          <div className="relative flex flex-1 items-center justify-center text-center"><h2 className="mx-auto max-w-xl font-display text-3xl leading-tight md:text-5xl">{card.front}</h2></div>
+          <div className="relative flex flex-1 min-h-0 items-[safe_center] justify-center overflow-y-auto py-2 text-center"><h2 className="mx-auto max-w-xl font-display text-2xl leading-tight md:text-4xl">{card.front}</h2></div>
           <div className="relative flex flex-wrap items-center justify-center gap-2"><Badge tone="neutral">{card.module}</Badge></div>
           <div className="relative mt-3 flex justify-center text-xs text-[#eaf2e9]/70">Click to reveal the answer <ArrowRight size={14} className="ml-2" /></div>
         </div>
@@ -225,7 +290,7 @@ function Flashcards() {
         <div className="flip-card-face flip-card-back flex flex-col overflow-hidden rounded-3xl border p-9 text-left shadow-lg md:p-14" style={{ background: `hsl(var(${topicColorVar(card.topic || card.module)}) / 0.1)`, ...cardAccent.border }}>
           <div aria-hidden className="pointer-events-none absolute -right-8 -bottom-12 size-40 rotate-12 rounded-[2rem]" style={{ ...cardAccent.wash }} />
           <div className="relative flex flex-wrap items-center gap-2"><span className="rounded-full px-2.5 py-1 text-[10px] font-bold" style={cardAccent.badge}>Answer {cardNumber}</span><TopicBadge label={card.topic} /></div>
-          <div className="relative flex flex-1 items-center justify-center text-center"><h2 className="mx-auto max-w-xl font-display text-2xl leading-tight text-[#164b4b] md:text-4xl">{card.back}</h2></div>
+          <div className="relative flex flex-1 min-h-0 items-[safe_center] justify-center overflow-y-auto py-2 text-center"><h2 className="mx-auto max-w-xl font-display text-xl leading-tight text-[#164b4b] md:text-3xl">{card.back}</h2></div>
           <div className="relative flex flex-wrap items-center justify-center gap-2"><Badge tone="neutral">{card.module}</Badge></div>
           <div className="relative mt-3 text-center text-xs" style={{ color: `hsl(var(${topicColorVar(card.topic || card.module)}))` }}>Click to flip back</div>
         </div>

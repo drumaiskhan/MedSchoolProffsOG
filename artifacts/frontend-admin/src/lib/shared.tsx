@@ -1033,6 +1033,51 @@ export function groupBlocksForPicker(blocks: AdminBlock[], modules: AdminModule[
   return groupByProgramYear(leaves).map((g) => ({ programLabel: g.programLabel, yearLabel: g.yearLabel, blocks: g.groups.map((l) => l.block) }));
 }
 
+// Program (MBBS/BDS) + Year filter for the Flashcards/MCQs admin content
+// pickers — narrows the Block dropdown (and therefore Module > Subject >
+// Topic beneath it) down to one program/year branch instead of making an
+// admin scan every "MBBS · Year 3" / "BDS · Year 2" optgroup by hand.
+// Reuses the same effective-program/year resolution as groupBlocksForPicker
+// above (a block's own targeting, falling back to one of its modules').
+export function filterBlocksByProgramYear(blocks: AdminBlock[], modules: AdminModule[], program: string, yearNumber?: number): AdminBlock[] {
+  if (!program && !yearNumber) return blocks;
+  const modulesByBlock = new Map<number, AdminModule[]>();
+  for (const m of modules) {
+    if (m.blockId == null) continue;
+    const list = modulesByBlock.get(m.blockId);
+    if (list) list.push(m); else modulesByBlock.set(m.blockId, [m]);
+  }
+  return blocks.filter((b) => {
+    const mods = modulesByBlock.get(b.id) ?? [];
+    const fallback = mods.find((m) => m.programTargetKind || m.yearTargetNumber);
+    const effProgram = b.programTargetKind || fallback?.programTargetKind || null;
+    const effYear = b.yearTargetNumber ?? fallback?.yearTargetNumber ?? null;
+    if (program && effProgram !== program) return false;
+    if (yearNumber && effYear !== yearNumber) return false;
+    return true;
+  });
+}
+
+// Program + Year selects, cascading the same way the Degree/Year picker in
+// Past papers/Exams works (DEGREE_OPTIONS -> DEGREE_YEAR_OPTIONS[program] —
+// picking MBBS shows all 5 MBBS years, BDS shows its 4), but for filtering
+// existing academic content down to one branch rather than tagging a new
+// row. Used by AdminFlashcards/AdminMcqs above their Block/Module/Subject/
+// Topic pickers so admins can jump straight to the right program/year
+// instead of scanning every optgroup.
+export function ProgramYearFilter({ program, studyYear, onProgramChange, onStudyYearChange, testIdPrefix }: { program: string; studyYear: string; onProgramChange: (v: string) => void; onStudyYearChange: (v: string) => void; testIdPrefix: string }) {
+  return <>
+    <select value={program} onChange={(e) => { onProgramChange(e.target.value); onStudyYearChange(''); }} className="h-10 rounded-xl border border-border bg-card px-3 text-xs font-semibold" data-testid={`select-${testIdPrefix}-program`}>
+      <option value="">All programs (MBBS/BDS)</option>
+      {DEGREE_OPTIONS.map((d) => <option key={d} value={d}>{d}</option>)}
+    </select>
+    <select value={studyYear} onChange={(e) => onStudyYearChange(e.target.value)} disabled={!program} className="h-10 rounded-xl border border-border bg-card px-3 text-xs font-semibold disabled:opacity-50" data-testid={`select-${testIdPrefix}-year`}>
+      <option value="">{program ? 'All years' : 'Pick a program first'}</option>
+      {(DEGREE_YEAR_OPTIONS[program] || []).map((y) => <option key={y} value={y}>{y}</option>)}
+    </select>
+  </>;
+}
+
 // Lets an admin narrow a whole-bank backup export/restore down to one
 // branch of the curriculum tree (Year > Block > Module > Subject > Topic)
 // instead of always covering everything — the picker half of the

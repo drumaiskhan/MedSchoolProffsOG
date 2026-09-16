@@ -241,11 +241,28 @@ router.post("/admin/mcqs/classify-difficulty", requireAdmin, async (req, res): P
     remaining = Math.max(0, Number(totalCount) - rows.length);
   }
 
+  // Classified in small concurrent batches rather than one row at a time —
+  // a fully sequential loop over up to CLASSIFY_BATCH_CAP (30) AI calls
+  // easily took 60-90+ seconds end to end, long enough that the hosting
+  // platform's gateway gave up and returned a 502/503/504 before this
+  // response ever arrived (surfaced to the admin as "This is taking longer
+  // than expected"). CLASSIFY_CONCURRENCY keeps a handful of requests in
+  // flight at once — fast enough to comfortably finish inside a normal
+  // gateway timeout, while still well short of hammering the AI provider's
+  // rate limit the way a full Promise.all(30) would (see queueAutoExplain's
+  // comment in mcq-import.ts for why that's avoided elsewhere in this file).
+  // classifyDifficulty never throws (falls back to "moderate" on its own),
+  // so no row here can fail the batch.
+  const CLASSIFY_CONCURRENCY = 6;
   const results: Array<{ id: number; difficulty: "easy" | "moderate" | "hard" }> = [];
-  for (const row of rows) {
-    const difficulty = await classifyDifficulty({ question: row.question, options: row.options as string[], correctAnswer: row.correctAnswer });
-    await db.update(mcqsTable).set({ difficulty }).where(eq(mcqsTable.id, row.id));
-    results.push({ id: row.id, difficulty });
+  for (let i = 0; i < rows.length; i += CLASSIFY_CONCURRENCY) {
+    const chunk = rows.slice(i, i + CLASSIFY_CONCURRENCY);
+    const chunkResults = await Promise.all(chunk.map(async (row) => {
+      const difficulty = await classifyDifficulty({ question: row.question, options: row.options as string[], correctAnswer: row.correctAnswer });
+      await db.update(mcqsTable).set({ difficulty }).where(eq(mcqsTable.id, row.id));
+      return { id: row.id, difficulty };
+    }));
+    results.push(...chunkResults);
   }
   res.json({ classified: results.length, remaining, results });
 });

@@ -128,6 +128,42 @@
     pointer-events: auto;
     z-index: 2;
   }
+
+  /* "3D" polish layered on top of the flip above. Deliberately 2D-only —
+     rotate() is a flat Z-axis turn and translateY/scale never leave the
+     page plane, so none of this touches perspective/preserve-3d/rotateX/
+     rotateY/backface-visibility, the exact combination the comment above
+     says corrupted the whole browser's paint (not just the card) on this
+     GPU/driver combo. Kept inside this same @layer for the reason the
+     comment further down explains: an unlayered rule would always beat
+     these regardless of specificity. */
+  .flip-card-inner { transition: transform .25s ease, filter .25s ease; }
+  .flip-card-inner:hover { transform: translateY(-3px) rotate(-0.35deg); filter: drop-shadow(0 10px 16px hsl(208 35% 19% / .16)); }
+  .flip-card-inner:active { transform: translateY(-1px) scale(.99); }
+  /* A soft diagonal gloss sweeps across the face that's turning in, once
+     per flip — sells "a card catching the light as it turns" using only
+     a background-position animation (paint/composite-safe, no 3D transform
+     involved at all). */
+  .flip-card-face { overflow: hidden; }
+  .flip-card-face::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(115deg, transparent 35%, hsl(0 0% 100% / .22) 48%, transparent 62%);
+    background-size: 240% 240%;
+    background-position: 130% -10%;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .flip-card-inner.is-flipped .flip-card-face.flip-card-back::after,
+  .flip-card-inner:not(.is-flipped) .flip-card-face:not(.flip-card-back)::after {
+    animation: cardGloss .55s ease-out .18s;
+  }
+}
+@keyframes cardGloss {
+  0% { opacity: 0; background-position: 130% -10%; }
+  30% { opacity: 1; }
+  100% { opacity: 0; background-position: -30% 110%; }
 }
 @layer base {
   /* Previously declared unlayered (no @layer wrapper) further down this
