@@ -7,6 +7,7 @@ import { authApi, blocksApi, type Block, challengesApi, ApiRequestError, type Ch
 import { getGetCurrentUserQueryKey, useListModules, useListSubjects, useListTopics } from '@workspace/api-client-react';
 import { EmptyState, SectionHeader, SkeletonPage, Badge, cn, initials, BrandSpinner } from '@/lib/shared';
 import { toast } from '@/hooks/use-toast';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const QUESTION_COUNT_PRESETS = [5, 10, 15, 20];
 
@@ -85,23 +86,45 @@ function FindFriend({ onChallenged }: { onChallenged: () => void }) {
 
       <div>
         <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground"><SlidersHorizontal size={12} /> Scope (optional — leave blank for the whole bank)</div>
+        {/* Radix Select (same component the Flashcards filters use), not a
+            native <select> — see PastPapers.tsx/Register.tsx for the same swap. */}
         <div className="grid grid-cols-2 gap-2">
-          <select value={blockId ?? ''} onChange={(e) => { const v = e.target.value ? Number(e.target.value) : undefined; setBlockId(v); setModuleId(undefined); setSubjectId(undefined); setTopicId(undefined); }} className="h-9 rounded-lg border border-border bg-card px-2 text-xs font-semibold outline-none focus:ring-2 focus:ring-primary/20" data-testid="select-challenge-block">
-            <option value="">Any block</option>
-            {(blocksQ.data || []).map((b: Block) => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-          <select value={moduleId ?? ''} onChange={(e) => { const v = e.target.value ? Number(e.target.value) : undefined; setModuleId(v); setSubjectId(undefined); setTopicId(undefined); }} className="h-9 rounded-lg border border-border bg-card px-2 text-xs font-semibold outline-none focus:ring-2 focus:ring-primary/20" data-testid="select-challenge-module">
-            <option value="">Any module</option>
-            {modulesInBlock.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>
-          <select value={subjectId ?? ''} onChange={(e) => { const v = e.target.value ? Number(e.target.value) : undefined; setSubjectId(v); setTopicId(undefined); }} disabled={!moduleId} className="h-9 rounded-lg border border-border bg-card px-2 text-xs font-semibold outline-none disabled:opacity-50 focus:ring-2 focus:ring-primary/20" data-testid="select-challenge-subject">
-            <option value="">Any subject</option>
-            {(subjectsQ.data || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-          <select value={topicId ?? ''} onChange={(e) => setTopicId(e.target.value ? Number(e.target.value) : undefined)} disabled={!subjectId} className="h-9 rounded-lg border border-border bg-card px-2 text-xs font-semibold outline-none disabled:opacity-50 focus:ring-2 focus:ring-primary/20" data-testid="select-challenge-topic">
-            <option value="">Any topic</option>
-            {(topicsQ.data || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
+          <Select value={blockId != null ? String(blockId) : 'all'} onValueChange={(v) => { const val = v === 'all' ? undefined : Number(v); setBlockId(val); setModuleId(undefined); setSubjectId(undefined); setTopicId(undefined); }}>
+            <SelectTrigger className="h-9 rounded-lg border-border bg-card px-2 text-xs font-semibold transition-transform hover:-translate-y-0.5 hover:shadow-sm" data-testid="select-challenge-block">
+              <SelectValue placeholder="Any block" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Any block</SelectItem>
+              {(blocksQ.data || []).map((b: Block) => <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={moduleId != null ? String(moduleId) : 'all'} onValueChange={(v) => { const val = v === 'all' ? undefined : Number(v); setModuleId(val); setSubjectId(undefined); setTopicId(undefined); }}>
+            <SelectTrigger className="h-9 rounded-lg border-border bg-card px-2 text-xs font-semibold transition-transform hover:-translate-y-0.5 hover:shadow-sm" data-testid="select-challenge-module">
+              <SelectValue placeholder="Any module" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Any module</SelectItem>
+              {modulesInBlock.map((m) => <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={subjectId != null ? String(subjectId) : 'all'} onValueChange={(v) => { const val = v === 'all' ? undefined : Number(v); setSubjectId(val); setTopicId(undefined); }} disabled={!moduleId}>
+            <SelectTrigger className="h-9 rounded-lg border-border bg-card px-2 text-xs font-semibold transition-transform hover:-translate-y-0.5 hover:shadow-sm disabled:opacity-50 disabled:hover:translate-y-0" data-testid="select-challenge-subject">
+              <SelectValue placeholder="Any subject" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Any subject</SelectItem>
+              {(subjectsQ.data || []).map((s) => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={topicId != null ? String(topicId) : 'all'} onValueChange={(v) => setTopicId(v === 'all' ? undefined : Number(v))} disabled={!subjectId}>
+            <SelectTrigger className="h-9 rounded-lg border-border bg-card px-2 text-xs font-semibold transition-transform hover:-translate-y-0.5 hover:shadow-sm disabled:opacity-50 disabled:hover:translate-y-0" data-testid="select-challenge-topic">
+              <SelectValue placeholder="Any topic" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Any topic</SelectItem>
+              {(topicsQ.data || []).map((t) => <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 

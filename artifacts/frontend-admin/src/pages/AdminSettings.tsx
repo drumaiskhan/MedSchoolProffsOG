@@ -250,6 +250,26 @@ function AdminSettings() {
             <label className="text-xs font-bold sm:col-span-2">API secret{values.CLOUDINARY_API_SECRET_SET === 'true' && <span className="ml-2 font-normal text-muted-foreground">Currently set · {values.CLOUDINARY_API_SECRET_MASKED}</span>}<input type="password" value={values.CLOUDINARY_API_SECRET || ''} onChange={(e) => set('CLOUDINARY_API_SECRET', e.target.value)} placeholder={values.CLOUDINARY_API_SECRET_SET === 'true' ? 'Leave blank to keep current key' : 'abc123...'} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-cloudinary-api-secret" /></label>
           </div>
         </div>
+
+        {/* Backup slot — same "extra numbered slot, tried automatically on
+            failure" idea as the AI tab's backup providers, just one slot
+            instead of five (a second Cloudinary account is heavier to set
+            up than an extra API key, and one backup covers "the primary
+            plan filled up" — the actual ask — without over-building this). */}
+        <div className="rounded-2xl border border-border bg-card p-6"><h3 className="flex items-center gap-2 font-bold">Backup Cloudinary account <span className="font-normal normal-case text-muted-foreground/80 text-[11px]">(optional)</span>
+            {values.CLOUDINARY_BACKUP_CONFIGURED === 'true' && <Badge tone="green">Saved</Badge>}
+            {testStorage.data && (testStorage.data.cloudinaryBackup.ok
+              ? <Badge tone="green">Connected</Badge>
+              : values.CLOUDINARY_BACKUP_CONFIGURED === 'true' && <Badge tone="red">Not working</Badge>)}
+          </h3>
+          <p className="mt-1 text-xs text-muted-foreground">A second Cloudinary account, tried automatically whenever the primary one's upload fails for any reason — full on its plan quota, a bad/expired key, a temporary outage. Every upload still tries the primary account first; this only kicks in on failure, so leaving it blank behaves exactly as before. Existing files aren't moved — this only affects new uploads made after the primary account starts failing.</p>
+          {testStorage.data && values.CLOUDINARY_BACKUP_CONFIGURED === 'true' && !testStorage.data.cloudinaryBackup.ok && <p className="mt-2 rounded-xl bg-[#fff5f0] p-3 text-[11px] text-[#9e4c39]" data-testid="text-cloudinary-backup-test-error">{testStorage.data.cloudinaryBackup.error}</p>}
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <label className="text-xs font-bold">Cloud name<input value={values.CLOUDINARY_CLOUD_NAME_2 || ''} onChange={(e) => set('CLOUDINARY_CLOUD_NAME_2', e.target.value)} placeholder="my-backup-cloud-name" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-cloudinary-backup-cloud-name" /></label>
+            <label className="text-xs font-bold">API key<input value={values.CLOUDINARY_API_KEY_2 || ''} onChange={(e) => set('CLOUDINARY_API_KEY_2', e.target.value)} placeholder="123456789012345" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-cloudinary-backup-api-key" /></label>
+            <label className="text-xs font-bold sm:col-span-2">API secret{values.CLOUDINARY_API_SECRET_2_SET === 'true' && <span className="ml-2 font-normal text-muted-foreground">Currently set · {values.CLOUDINARY_API_SECRET_2_MASKED}</span>}<input type="password" value={values.CLOUDINARY_API_SECRET_2 || ''} onChange={(e) => set('CLOUDINARY_API_SECRET_2', e.target.value)} placeholder={values.CLOUDINARY_API_SECRET_2_SET === 'true' ? 'Leave blank to keep current key' : 'abc123...'} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-cloudinary-backup-api-secret" /></label>
+          </div>
+        </div>
         <p className="text-[11px] text-muted-foreground">Save settings below, then re-upload anything affected by a past storage issue — old files aren't retroactively moved.</p>
       </>}
 

@@ -581,7 +581,7 @@ export const settingsApi = {
   get: () => request<PlatformSettings>('/admin/settings'),
   update: (body: Partial<PlatformSettings>) => request<PlatformSettings>('/admin/settings', { method: 'PATCH', body: JSON.stringify(body) }),
   rotateAdminCode: () => request<{ ADMIN_SIGNUP_CODE: string }>('/admin/settings/rotate-admin-code', { method: 'POST' }),
-  testStorage: () => request<{ cloudinary: { ok: boolean; error?: string } }>('/admin/settings/test-storage', { method: 'POST' }),
+  testStorage: () => request<{ cloudinary: { ok: boolean; error?: string }; cloudinaryBackup: { ok: boolean; error?: string } }>('/admin/settings/test-storage', { method: 'POST' }),
   testEmail: (to: string) => request<{ ok: boolean; error?: string }>('/admin/settings/test-email', { method: 'POST', body: JSON.stringify({ to }) }),
 };
 

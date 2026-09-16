@@ -53,6 +53,7 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
 import { EmptyState, PastPaperRowIcon, SkeletonPage, Stat, pastPaperEstimatedHours } from '@/lib/shared';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 function PastPapers() {
   const papers = useQuery({ queryKey: ['past-papers'], queryFn: () => pastPapersApi.list() });
@@ -78,9 +79,31 @@ function PastPapers() {
     <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-2"><Stat label="Available Papers" value={totals.papers} /><Stat label="Total Questions" value={totals.questions} /></div>
   </div>
 
+  {/* Radix Select (same component the Flashcards filters use), not a
+      native <select> — the native element's dropdown is rendered by the
+      browser itself with no control over how it's positioned, which is
+      what made it render squashed/overlapping the list below on some
+      browsers. Radix renders its own floating panel (via a portal, fixed
+      to the trigger), matching the Flashcards filter bar's behavior. */}
   <div className="mt-5 flex flex-wrap gap-2">
-    <select value={collegeFilter} onChange={(e) => setCollegeFilter(e.target.value)} className="h-10 rounded-xl border border-border bg-card px-3 text-xs font-semibold" data-testid="select-paper-filter-college"><option value="">Colleges/University</option>{colleges.map((c) => <option key={c} value={c}>{c}</option>)}</select>
-    <select value={yearFilter} onChange={(e) => setYearFilter(e.target.value)} className="h-10 rounded-xl border border-border bg-card px-3 text-xs font-semibold" data-testid="select-paper-filter-year"><option value="">Year</option>{years.map((y) => <option key={y} value={y}>{y}</option>)}</select>
+    <Select value={collegeFilter || 'all'} onValueChange={(v) => setCollegeFilter(v === 'all' ? '' : v)}>
+      <SelectTrigger className="h-10 w-auto min-w-[9rem] rounded-xl border-border bg-card px-3 text-xs font-semibold transition-transform hover:-translate-y-0.5 hover:shadow-sm" data-testid="select-paper-filter-college">
+        <SelectValue placeholder="Colleges/University" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">Colleges/University</SelectItem>
+        {colleges.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+      </SelectContent>
+    </Select>
+    <Select value={yearFilter || 'all'} onValueChange={(v) => setYearFilter(v === 'all' ? '' : v)}>
+      <SelectTrigger className="h-10 w-auto min-w-[7rem] rounded-xl border-border bg-card px-3 text-xs font-semibold transition-transform hover:-translate-y-0.5 hover:shadow-sm" data-testid="select-paper-filter-year">
+        <SelectValue placeholder="Year" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">Year</SelectItem>
+        {years.map((y) => <SelectItem key={y} value={y}>{y}</SelectItem>)}
+      </SelectContent>
+    </Select>
   </div>
 
   {papers.isLoading ? <SkeletonPage /> : filtered.length ? <div className="mt-5 space-y-3">{filtered.map((paper) => {

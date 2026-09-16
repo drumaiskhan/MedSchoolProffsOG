@@ -53,6 +53,7 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
 import { AuthLayout, IconField, PasswordStrength, cn, money, BrandSpinner, PaymentDestinationCard, trialScopeLabel } from '@/lib/shared';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 function Register() {
   const [institutionId, setInstitutionId] = useState('');
@@ -139,7 +140,21 @@ function Register() {
           are different institutions, so the college list can't be shown
           (or made sense of) until we know which one the student needs. */}
       <label className="block text-xs font-bold">Program<div className="mt-2 grid grid-cols-2 gap-2">{(['MBBS', 'BDS'] as const).map((p) => <button type="button" key={p} onClick={() => { setProgramKind(p); setYearNumber(''); }} className={cn('h-11 rounded-xl border text-sm font-bold transition-colors', programKind === p ? 'border-primary bg-[#eef7f1] text-primary' : 'border-border bg-card hover:bg-muted')} data-testid={`button-program-${p.toLowerCase()}`}>{p}</button>)}</div></label>
-      <label className="block text-xs font-bold">College<div className="relative mt-2"><GraduationCap size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" /><select required value={institutionId} onChange={(e) => setInstitutionId(e.target.value)} disabled={!programKind} className="h-11 w-full appearance-none rounded-xl border border-border bg-card pl-10 pr-9 text-sm outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50" data-testid="select-register-institution"><option value="">{!programKind ? 'Select program first' : institutions.isLoading ? 'Loading…' : `Select your ${programKind} college`}</option>{(institutions.data || []).map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}</select><ChevronRight size={14} className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 rotate-90 text-muted-foreground" /></div>{programKind && !institutions.isLoading && !institutions.data?.length && <p className="mt-1.5 text-[11px] text-muted-foreground">No {programKind} colleges are set up yet — ask an admin to add one first.</p>}</label>
+      {/* Radix Select (same component the Flashcards filters use), not a
+          native <select> — the native element renders its dropdown via the
+          browser itself, which is what made this field's picker (and Past
+          Papers' filters) render inconsistently. Validity is still enforced
+          manually on submit ("Please select your college."), same as before. */}
+      <label className="block text-xs font-bold">College<div className="relative mt-2"><GraduationCap size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 z-10 text-muted-foreground" />
+        <Select value={institutionId} onValueChange={setInstitutionId} disabled={!programKind}>
+          <SelectTrigger className="h-11 w-full rounded-xl border-border bg-card pl-10 pr-9 text-sm transition-transform hover:-translate-y-0.5 hover:shadow-sm disabled:opacity-50 disabled:hover:translate-y-0" data-testid="select-register-institution">
+            <SelectValue placeholder={!programKind ? 'Select program first' : institutions.isLoading ? 'Loading…' : `Select your ${programKind} college`} />
+          </SelectTrigger>
+          <SelectContent>
+            {(institutions.data || []).map((i) => <SelectItem key={i.id} value={String(i.id)}>{i.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>{programKind && !institutions.isLoading && !institutions.data?.length && <p className="mt-1.5 text-[11px] text-muted-foreground">No {programKind} colleges are set up yet — ask an admin to add one first.</p>}</label>
       {/* Buttons (not a <select>) to match the Program picker above — a row
           of tappable year buttons is faster to use on mobile than opening a
           dropdown for a list this short, and keeps the selected year

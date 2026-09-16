@@ -18,13 +18,43 @@ import { getSetting } from "./settings";
 // uploaded before this change don't suddenly break. New uploads never
 // produce a "supabase:" path.
 
-async function resolveCloudinaryConfig(): Promise<{ cloudName: string; apiKey: string; apiSecret: string } | null> {
-  const dbCloudName = await getSetting("CLOUDINARY_CLOUD_NAME", null);
-  const dbApiKey = await getSetting("CLOUDINARY_API_KEY", null);
-  const dbApiSecret = await getSetting("CLOUDINARY_API_SECRET", null);
+// Two Cloudinary "slots" — the primary account (unsuffixed keys, same as
+// before) and one backup account (same keys with a "_2" suffix), same
+// numbered-slot convention the AI provider fallback already uses (see
+// DB_SLOT_SUFFIXES in lib/aiExplain.ts) — just one backup slot here rather
+// than five, since Cloudinary accounts are heavier to provision than AI API
+// keys. Every function below that talks to Cloudinary takes a `slot` and
+// only ever touches that one account; the fallback/failover behavior itself
+// lives in uploadFile() further down, not here.
+type CloudinarySlot = "" | "_2";
+function slotName(slot: CloudinarySlot): string { return slot === "" ? "primary" : "backup"; }
+
+// Strips a storage path's Cloudinary prefix and reports which slot it was
+// uploaded to, so resolveFileUrl/deleteFromCloudinary/
+// reresolveLegacyCloudinaryPath below all parse the "which account is this
+// asset actually in" question the same one way instead of three slightly
+// different ways. Returns null for anything that isn't a Cloudinary path at
+// all (supabase:/local:/plain URLs).
+function parseCloudinaryPath(storagePath: string): { slot: CloudinarySlot; rest: string } | null {
+  if (storagePath.startsWith("cloudinary2:")) return { slot: "_2", rest: storagePath.slice("cloudinary2:".length) };
+  if (storagePath.startsWith("cloudinary:")) return { slot: "", rest: storagePath.slice("cloudinary:".length) };
+  return null;
+}
+
+async function resolveCloudinaryConfig(slot: CloudinarySlot = ""): Promise<{ cloudName: string; apiKey: string; apiSecret: string } | null> {
+  const dbCloudName = await getSetting(`CLOUDINARY_CLOUD_NAME${slot}`, null);
+  const dbApiKey = await getSetting(`CLOUDINARY_API_KEY${slot}`, null);
+  const dbApiSecret = await getSetting(`CLOUDINARY_API_SECRET${slot}`, null);
   if (dbCloudName && dbApiKey && dbApiSecret) return { cloudName: dbCloudName, apiKey: dbApiKey, apiSecret: dbApiSecret };
-  const { CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET } = process.env;
-  if (CLOUDINARY_CLOUD_NAME && CLOUDINARY_API_KEY && CLOUDINARY_API_SECRET) return { cloudName: CLOUDINARY_CLOUD_NAME, apiKey: CLOUDINARY_API_KEY, apiSecret: CLOUDINARY_API_SECRET };
+  // Env-var fallback only exists for the primary slot (matches how the
+  // AI provider slots work — only the unsuffixed AI_* keys have an env-var
+  // fallback, the numbered backup slots are DB-only). A backup Cloudinary
+  // account is a new admin-configured feature, so there's no pre-existing
+  // env var for it to fall back to.
+  if (slot === "") {
+    const { CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET } = process.env;
+    if (CLOUDINARY_CLOUD_NAME && CLOUDINARY_API_KEY && CLOUDINARY_API_SECRET) return { cloudName: CLOUDINARY_CLOUD_NAME, apiKey: CLOUDINARY_API_KEY, apiSecret: CLOUDINARY_API_SECRET };
+  }
   return null;
 }
 
@@ -43,12 +73,18 @@ async function resolveCloudinaryConfig(): Promise<{ cloudName: string; apiKey: s
 // be set (e.g. left over from before this change), never from admin
 // settings, since Supabase Storage is no longer admin-configurable.
 let cachedSupabaseUrl: string | null = process.env.SUPABASE_URL || null;
-let cachedCloudinaryCloudName: string | null = process.env.CLOUDINARY_CLOUD_NAME || null;
+// Keyed by CloudinarySlot ("" = primary, "_2" = backup) — see the comment
+// above resolveCloudinaryConfig for why there are two of these now.
+const cachedCloudinaryCloudNameBySlot: Record<CloudinarySlot, string | null> = {
+  "": process.env.CLOUDINARY_CLOUD_NAME || null,
+  "_2": null,
+};
 let lastConfigRefresh = 0;
 function refreshConfigCacheIfStale(): void {
   if (Date.now() - lastConfigRefresh <= 15_000) return;
   lastConfigRefresh = Date.now();
-  void getSetting("CLOUDINARY_CLOUD_NAME", null).then((name) => { if (name) cachedCloudinaryCloudName = name; }).catch(() => {});
+  void getSetting("CLOUDINARY_CLOUD_NAME", null).then((name) => { if (name) cachedCloudinaryCloudNameBySlot[""] = name; }).catch(() => {});
+  void getSetting("CLOUDINARY_CLOUD_NAME_2", null).then((name) => { if (name) cachedCloudinaryCloudNameBySlot["_2"] = name; }).catch(() => {});
 }
 
 /**
@@ -73,21 +109,25 @@ function refreshConfigCacheIfStale(): void {
  */
 export async function warmStorageConfigCache(): Promise<void> {
   try {
-    const name = await getSetting("CLOUDINARY_CLOUD_NAME", null);
-    if (name) cachedCloudinaryCloudName = name;
+    const [name, backupName] = await Promise.all([
+      getSetting("CLOUDINARY_CLOUD_NAME", null),
+      getSetting("CLOUDINARY_CLOUD_NAME_2", null),
+    ]);
+    if (name) cachedCloudinaryCloudNameBySlot[""] = name;
+    if (backupName) cachedCloudinaryCloudNameBySlot["_2"] = backupName;
     lastConfigRefresh = Date.now();
   } catch (err) {
     logger.error({ err }, "[storage] Could not warm Cloudinary config cache at boot — falling back to env var / lazy refresh.");
   }
 }
 
-export function setCachedCloudinaryCloudName(name: string | null): void {
-  if (name) cachedCloudinaryCloudName = name;
+export function setCachedCloudinaryCloudName(name: string | null, slot: CloudinarySlot = ""): void {
+  if (name) cachedCloudinaryCloudNameBySlot[slot] = name;
 }
 
-async function uploadToCloudinary(buffer: Buffer, safeName: string): Promise<{ path: string } | { error: string }> {
-  const config = await resolveCloudinaryConfig();
-  if (!config) return { error: "Cloudinary is not configured (missing cloud name, API key, or API secret)." };
+async function uploadToCloudinary(buffer: Buffer, safeName: string, slot: CloudinarySlot = ""): Promise<{ path: string } | { error: string }> {
+  const config = await resolveCloudinaryConfig(slot);
+  if (!config) return { error: `Cloudinary ${slotName(slot)} slot is not configured (missing cloud name, API key, or API secret).` };
   try {
     const { v2: cloudinary } = await import("cloudinary");
     cloudinary.config({ cloud_name: config.cloudName, api_key: config.apiKey, api_secret: config.apiSecret });
@@ -118,11 +158,21 @@ async function uploadToCloudinary(buffer: Buffer, safeName: string): Promise<{ p
     // to split on. Format is omitted (no "|") when Cloudinary didn't return
     // one (shouldn't normally happen, but resolveFileUrl handles it either
     // way by falling back to the old no-format behavior for that path).
+    //
+    // The backup slot uses a distinct top-level prefix — "cloudinary2:"
+    // instead of "cloudinary:" — rather than folding the slot into the
+    // existing prefix's path segment. That keeps every existing row (all of
+    // which were uploaded to the primary/only slot before this feature
+    // existed) resolving exactly as before with zero migration, and makes a
+    // backup-slot row trivially distinguishable everywhere a storage path is
+    // parsed (resolveFileUrl, deleteFromCloudinary, reresolveLegacyCloudinaryPath
+    // below) without needing to change the encoding within the path itself.
     const encoded = result.format ? `${result.public_id}|${result.format}` : result.public_id;
-    return { path: `cloudinary:${result.resource_type}/${encoded}` };
+    const prefix = slot === "" ? "cloudinary" : "cloudinary2";
+    return { path: `${prefix}:${result.resource_type}/${encoded}` };
   } catch (err) {
-    logger.error({ err }, "Cloudinary upload failed");
-    return { error: `Cloudinary: ${err instanceof Error ? err.message : "upload failed"}` };
+    logger.error({ err, slot: slotName(slot) }, "Cloudinary upload failed");
+    return { error: `Cloudinary (${slotName(slot)}): ${err instanceof Error ? err.message : "upload failed"}` };
   }
 }
 
@@ -132,24 +182,43 @@ async function uploadToCloudinary(buffer: Buffer, safeName: string): Promise<{ p
  * later resolved back to a downloadable URL via resolveFileUrl().
  *
  * Cloudinary is the only upload backend (configurable from Admin -> Platform
- * settings -> Storage; env vars still work as a fallback). Supabase is used
- * for this app's Postgres database only — see the comment atop this file.
- * There is deliberately no local-disk fallback — this app's compute
- * (Render/Railway/Netlify functions) all wipe local disk on redeploy or
- * restart, which is exactly how a previously "successfully" uploaded book
- * disappeared. If Cloudinary isn't configured, or the upload fails, this
- * throws instead of quietly writing somewhere that won't survive the next
- * deploy — and includes the real reason (bad key, wrong cloud name, etc.)
- * rather than a generic failure.
+ * settings -> Storage; env vars still work as a fallback for the primary
+ * slot). Supabase is used for this app's Postgres database only — see the
+ * comment atop this file. There is deliberately no local-disk fallback —
+ * this app's compute (Render/Railway/Netlify functions) all wipe local disk
+ * on redeploy or restart, which is exactly how a previously "successfully"
+ * uploaded book disappeared.
+ *
+ * Backup Cloudinary slot: if the primary account's upload fails for *any*
+ * reason — full on its plan quota, a bad/expired key, a temporary outage,
+ * whatever the actual error is — and a second Cloudinary account is
+ * configured (Admin -> Platform settings -> Storage -> "Backup Cloudinary
+ * account"), this automatically retries the exact same file on that backup
+ * account before giving up, same "fall through to the next configured slot"
+ * pattern the AI provider fallback already uses (see resolveProviders() in
+ * lib/aiExplain.ts). The caller/DB never need to know which slot a file
+ * landed on — resolveFileUrl()/deleteFromCloudinary() read that back out of
+ * the storage path's prefix ("cloudinary:" vs "cloudinary2:") automatically.
+ * If no backup slot is configured, or the backup upload also fails, this
+ * throws with both errors included instead of quietly writing somewhere
+ * that won't survive the next deploy.
  */
 export async function uploadFile(buffer: Buffer, originalName: string, mimeType: string, folder = "misc"): Promise<string> {
   const ext = path.extname(originalName) || "";
   const safeName = `${folder}/${Date.now()}-${crypto.randomBytes(8).toString("hex")}${ext}`;
 
-  const result = await uploadToCloudinary(buffer, safeName);
-  if ("path" in result) return result.path;
+  const primary = await uploadToCloudinary(buffer, safeName, "");
+  if ("path" in primary) return primary.path;
 
-  throw new Error(`Couldn't save the uploaded file. ${result.error}`);
+  const backupConfig = await resolveCloudinaryConfig("_2");
+  if (backupConfig) {
+    logger.warn({ err: primary.error }, "[storage] Primary Cloudinary slot failed — retrying on the backup slot.");
+    const backup = await uploadToCloudinary(buffer, safeName, "_2");
+    if ("path" in backup) return backup.path;
+    throw new Error(`Couldn't save the uploaded file. Primary: ${primary.error} — Backup: ${backup.error}`);
+  }
+
+  throw new Error(`Couldn't save the uploaded file. ${primary.error}`);
 }
 
 /**
@@ -160,8 +229,8 @@ export async function uploadFile(buffer: Buffer, originalName: string, mimeType:
  * and reports the real failure reason if it's misconfigured (bad key, wrong
  * cloud name, etc.).
  */
-export async function testCloudinaryConnection(): Promise<{ ok: boolean; error?: string }> {
-  const config = await resolveCloudinaryConfig();
+export async function testCloudinaryConnection(slot: CloudinarySlot = ""): Promise<{ ok: boolean; error?: string }> {
+  const config = await resolveCloudinaryConfig(slot);
   if (!config) return { ok: false, error: "Not configured — set a cloud name, API key, and API secret first." };
   try {
     const { v2: cloudinary } = await import("cloudinary");
@@ -197,8 +266,9 @@ export async function testCloudinaryConnection(): Promise<{ ok: boolean; error?:
  * isn't configured, or the asset can't be found (e.g. already deleted).
  */
 export async function reresolveLegacyCloudinaryPath(storagePath: string): Promise<string | null> {
-  if (!storagePath.startsWith("cloudinary:")) return null;
-  const rest = storagePath.slice("cloudinary:".length);
+  const parsed = parseCloudinaryPath(storagePath);
+  if (!parsed) return null;
+  const { slot, rest } = parsed;
   const slash = rest.indexOf("/");
   if (slash < 0) return null;
   const resourceType = rest.slice(0, slash) || "auto";
@@ -206,8 +276,9 @@ export async function reresolveLegacyCloudinaryPath(storagePath: string): Promis
   // Already in the new "{publicId}|{format}" encoding — nothing to do.
   if (publicId.includes("|")) return null;
 
-  const config = await resolveCloudinaryConfig();
+  const config = await resolveCloudinaryConfig(slot);
   if (!config) return null;
+  const prefix = slot === "" ? "cloudinary" : "cloudinary2";
   try {
     const { v2: cloudinary } = await import("cloudinary");
     cloudinary.config({ cloud_name: config.cloudName, api_key: config.apiKey, api_secret: config.apiSecret });
@@ -215,9 +286,9 @@ export async function reresolveLegacyCloudinaryPath(storagePath: string): Promis
     const resource = await cloudinary.api.resource(publicId, { resource_type: lookupResourceType });
     const format = resource?.format;
     if (!format) return null;
-    return `cloudinary:${resourceType === "auto" ? lookupResourceType : resourceType}/${publicId}|${format}`;
+    return `${prefix}:${resourceType === "auto" ? lookupResourceType : resourceType}/${publicId}|${format}`;
   } catch (err) {
-    logger.error({ err, publicId }, "Could not re-resolve legacy Cloudinary path");
+    logger.error({ err, publicId, slot: slotName(slot) }, "Could not re-resolve legacy Cloudinary path");
     return null;
   }
 }
@@ -240,8 +311,9 @@ export function resolveFileUrl(storagePath: string | null | undefined, opts?: { 
     if (!cachedSupabaseUrl) return null;
     return `${cachedSupabaseUrl}/storage/v1/object/public/${bucket}/${pathParts.join("/")}`;
   }
-  if (storagePath.startsWith("cloudinary:")) {
-    const rest = storagePath.slice("cloudinary:".length);
+  const cloudinaryPath = parseCloudinaryPath(storagePath);
+  if (cloudinaryPath) {
+    const { slot, rest } = cloudinaryPath;
     const slash = rest.indexOf("/");
     const resourceType = rest.slice(0, slash) || "auto";
     const idAndFormat = rest.slice(slash + 1);
@@ -255,6 +327,11 @@ export function resolveFileUrl(storagePath: string | null | undefined, opts?: { 
     const pipeIdx = idAndFormat.indexOf("|");
     const publicId = pipeIdx < 0 ? idAndFormat : idAndFormat.slice(0, pipeIdx);
     const format = pipeIdx < 0 ? null : idAndFormat.slice(pipeIdx + 1);
+    // Which slot's cloud name to build the URL from — a "cloudinary2:" path
+    // was uploaded to the backup account, so it only resolves against the
+    // backup slot's cloud name, never the primary's (different accounts
+    // serve from different cloud names entirely).
+    const cachedCloudinaryCloudName = cachedCloudinaryCloudNameBySlot[slot];
     if (!cachedCloudinaryCloudName) return null;
     const transformSegment = opts?.transform && resourceType === "image" ? `${opts.transform}/` : "";
     // The part that actually fixes the "PDF/thumbnail 404s" bug: Cloudinary
@@ -292,8 +369,9 @@ export const THUMBNAIL_TRANSFORM = "w_600,q_auto,f_auto";
  * part the user is actually waiting on.
  */
 export async function deleteFromCloudinary(storagePath: string | null | undefined): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
-  if (!storagePath || !storagePath.startsWith("cloudinary:")) return { ok: true, skipped: true };
-  const rest = storagePath.slice("cloudinary:".length);
+  const parsed = storagePath ? parseCloudinaryPath(storagePath) : null;
+  if (!parsed) return { ok: true, skipped: true };
+  const { slot, rest } = parsed;
   const slash = rest.indexOf("/");
   if (slash < 0) return { ok: true, skipped: true };
   const resourceType = rest.slice(0, slash) || "auto";
@@ -301,8 +379,11 @@ export async function deleteFromCloudinary(storagePath: string | null | undefine
   const pipeIdx = idAndFormat.indexOf("|");
   const publicId = pipeIdx < 0 ? idAndFormat : idAndFormat.slice(0, pipeIdx);
 
-  const config = await resolveCloudinaryConfig();
-  if (!config) return { ok: false, error: "Cloudinary is not configured — could not delete the remote file (the local record was still removed)." };
+  // Delete from whichever account this specific asset actually lives in — a
+  // "cloudinary2:" path was uploaded to the backup slot (the primary was
+  // full/down at the time), so it has to be deleted there, not on primary.
+  const config = await resolveCloudinaryConfig(slot);
+  if (!config) return { ok: false, error: `Cloudinary ${slotName(slot)} slot is not configured — could not delete the remote file (the local record was still removed).` };
   try {
     const { v2: cloudinary } = await import("cloudinary");
     cloudinary.config({ cloud_name: config.cloudName, api_key: config.apiKey, api_secret: config.apiSecret });
@@ -315,7 +396,7 @@ export async function deleteFromCloudinary(storagePath: string | null | undefine
     await cloudinary.uploader.destroy(publicId, { resource_type: resourceType === "auto" ? "image" : resourceType, invalidate: true });
     return { ok: true };
   } catch (err) {
-    logger.error({ err, publicId }, "Could not delete Cloudinary asset");
+    logger.error({ err, publicId, slot: slotName(slot) }, "Could not delete Cloudinary asset");
     return { ok: false, error: err instanceof Error ? err.message : "Cloudinary delete failed" };
   }
 }

@@ -157,6 +157,15 @@ const EDITABLE_KEYS = [
   "CLOUDINARY_CLOUD_NAME",
   "CLOUDINARY_API_KEY",
   "CLOUDINARY_API_SECRET",
+  // Backup Cloudinary account — same numbered-slot convention the AI
+  // provider backups above use ("_2" suffix). When the primary account's
+  // upload fails for any reason (full on its plan quota, bad/expired key,
+  // outage), uploadFile() in lib/storage.ts automatically retries on this
+  // account instead. Entirely optional — leaving these blank behaves
+  // exactly as before (primary-only, throws if it fails).
+  "CLOUDINARY_CLOUD_NAME_2",
+  "CLOUDINARY_API_KEY_2",
+  "CLOUDINARY_API_SECRET_2",
   // Transactional email — same "configurable from the admin panel, no
   // server env-var access needed" pattern as AI/Cloudinary above. EMAIL_
   // PROVIDER picks which of the three sections below is actually used
@@ -228,7 +237,7 @@ function withResolvedMedia(view: Record<string, string>): Record<string, string>
 // masked preview per key and only sends a new value in the PATCH body when
 // the admin is actually changing it (see the blank-value skip in the PATCH
 // handler below).
-const SECRET_KEYS = ["AI_API_KEY", "AI_API_KEY_2", "AI_API_KEY_3", "AI_API_KEY_4", "AI_API_KEY_5", "AI_API_KEY_6", "CLOUDINARY_API_SECRET", "BREVO_API_KEY", "SMTP_PASS", "CUSTOM_EMAIL_API_KEY"] as const;
+const SECRET_KEYS = ["AI_API_KEY", "AI_API_KEY_2", "AI_API_KEY_3", "AI_API_KEY_4", "AI_API_KEY_5", "AI_API_KEY_6", "CLOUDINARY_API_SECRET", "CLOUDINARY_API_SECRET_2", "BREVO_API_KEY", "SMTP_PASS", "CUSTOM_EMAIL_API_KEY"] as const;
 function withSecretsMasked(view: Record<string, string>): Record<string, string> {
   const masked: Record<string, string> = {};
   const rest = { ...view };
@@ -283,6 +292,9 @@ router.get("/admin/settings", requireAdmin, async (_req, res): Promise<void> => 
   // set. Checks the DB-backed settings first (the ones the admin can set
   // right here) before falling back to env vars.
   const cloudinaryConfigured = !!((view.CLOUDINARY_CLOUD_NAME && view.CLOUDINARY_API_KEY && view.CLOUDINARY_API_SECRET) || (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET));
+  // Same presence-only check for the backup Cloudinary slot — DB-only, no
+  // env-var fallback (see resolveCloudinaryConfig in lib/storage.ts).
+  const cloudinaryBackupConfigured = !!(view.CLOUDINARY_CLOUD_NAME_2 && view.CLOUDINARY_API_KEY_2 && view.CLOUDINARY_API_SECRET_2);
   // Same presence-only flag for email — "a provider looks configured,"
   // not "sending actually works" (use POST /admin/settings/test-email for
   // that, same distinction as CLOUDINARY_CONFIGURED above).
@@ -293,7 +305,7 @@ router.get("/admin/settings", requireAdmin, async (_req, res): Promise<void> => 
     process.env.BREVO_API_KEY || process.env.CUSTOM_EMAIL_API_URL ||
     (process.env.SMTP_HOST && process.env.SMTP_PORT && process.env.SMTP_USER && process.env.SMTP_PASS)
   );
-  res.json({ ...withSecretsMasked(withResolvedMedia(withThemeDefaults(view))), CLOUDINARY_CONFIGURED: String(cloudinaryConfigured), EMAIL_CONFIGURED: String(emailConfigured) });
+  res.json({ ...withSecretsMasked(withResolvedMedia(withThemeDefaults(view))), CLOUDINARY_CONFIGURED: String(cloudinaryConfigured), CLOUDINARY_BACKUP_CONFIGURED: String(cloudinaryBackupConfigured), EMAIL_CONFIGURED: String(emailConfigured) });
 });
 
 const SettingsBody = z.object(Object.fromEntries(EDITABLE_KEYS.map((key) => [key, z.string().max(4000).optional()])) as Record<(typeof EDITABLE_KEYS)[number], z.ZodOptional<z.ZodString>>);
@@ -313,6 +325,7 @@ router.patch("/admin/settings", requireAdmin, async (req, res): Promise<void> =>
     // saving Cloudinary settings and then immediately testing an upload
     // could still see "isn't loading back" for up to 15 seconds.
     if (key === "CLOUDINARY_CLOUD_NAME" && value) setCachedCloudinaryCloudName(value);
+    if (key === "CLOUDINARY_CLOUD_NAME_2" && value) setCachedCloudinaryCloudName(value, "_2");
   }
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "SETTINGS_UPDATED", entity: "platform_settings", metadata: JSON.stringify(Object.keys(parsed.data)) });
   const settings = await getAllSettings();
@@ -334,7 +347,12 @@ router.post("/admin/settings/rotate-admin-code", requireAdmin, async (req, res):
 // wrong (bad key, wrong cloud name, etc.) instead of a generic failure.
 router.post("/admin/settings/test-storage", requireAdmin, async (_req, res): Promise<void> => {
   const cloudinary = await testCloudinaryConnection();
-  res.json({ cloudinary });
+  // Backup slot is optional — only actually pinged if something's saved
+  // there, otherwise this just returns the same "Not configured" shape the
+  // primary slot returns when it's empty, rather than skipping the field
+  // entirely (keeps the response shape constant either way).
+  const cloudinaryBackup = await testCloudinaryConnection("_2");
+  res.json({ cloudinary, cloudinaryBackup });
 });
 
 // Real connectivity check for email, same reasoning as test-storage above —

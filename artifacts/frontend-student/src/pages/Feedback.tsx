@@ -54,6 +54,7 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // queries that didn't specify anything.
 import { MyFeedbackThread, SectionHeader } from '@/lib/shared';
 import { queryClient } from '@/lib/query-client';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 function Feedback() {
   const [message, setMessage] = useState('');
@@ -72,7 +73,21 @@ function Feedback() {
     </a>}
     <div className="rounded-2xl border border-border bg-card p-6"><form onSubmit={(e) => { e.preventDefault(); if (message.trim()) submit.mutate({ category, message: message.trim(), ...(rating > 0 ? { rating } : {}) }); }} className="space-y-3">
       <label className="block text-xs font-bold">Rate your experience<div className="mt-2 flex items-center gap-1" data-testid="input-feedback-rating">{[1, 2, 3, 4, 5].map((n) => <button key={n} type="button" onClick={() => setRating(n === rating ? 0 : n)} onMouseEnter={() => setHoverRating(n)} onMouseLeave={() => setHoverRating(0)} className="p-0.5" aria-label={`${n} star${n === 1 ? '' : 's'}`} data-testid={`button-rating-star-${n}`}><Star size={22} className={(hoverRating || rating) >= n ? 'fill-[#e8c34a] text-[#e8c34a]' : 'text-muted-foreground'} /></button>)}{rating > 0 && <span className="ml-2 text-[11px] font-bold text-muted-foreground">{rating}/5</span>}</div></label>
-      <label className="block text-xs font-bold">Category<select value={category} onChange={(e) => setCategory(e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="select-feedback-category"><option value="general">General</option><option value="bug">Bug report</option><option value="content">Content issue</option><option value="feature">Feature request</option></select></label>
+      {/* Radix Select (same component the Flashcards filters use), not a
+          native <select> — see PastPapers.tsx/Register.tsx for the same swap. */}
+      <label className="block text-xs font-bold">Category<div className="mt-2">
+        <Select value={category} onValueChange={setCategory}>
+          <SelectTrigger className="h-10 w-full rounded-xl border-border bg-background px-3 text-xs transition-transform hover:-translate-y-0.5 hover:shadow-sm" data-testid="select-feedback-category">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="general">General</SelectItem>
+            <SelectItem value="bug">Bug report</SelectItem>
+            <SelectItem value="content">Content issue</SelectItem>
+            <SelectItem value="feature">Feature request</SelectItem>
+          </SelectContent>
+        </Select>
+      </div></label>
       <label className="block text-xs font-bold">Message<textarea required value={message} onChange={(e) => setMessage(e.target.value)} className="mt-2 min-h-28 w-full rounded-xl border border-border bg-background p-3 text-sm" data-testid="input-feedback-message" /></label>
       <button disabled={submit.isPending} className="rounded-xl bg-primary px-5 py-3 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-submit-feedback">{submit.isPending ? 'Sending…' : 'Send feedback'}</button>
     </form></div>
