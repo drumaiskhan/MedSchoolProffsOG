@@ -36,7 +36,7 @@ import { toast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
-import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, analyticsApi, mcqImportApi, flashcardImportApi, mcqBackupApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, subjectAdminApi, topicAdminApi, flashcardsAdminApi, flashcardsAiApi, booksAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blockAdminApi, examsAdminApi, examsApi, explanationsApi, auditApi, adminSearchApi, type AdminSearchResponse, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type FlashcardCandidate, type StudentDetail, type SiteContent, type TeamMember, TEAM_CATEGORIES, TEAM_CATEGORY_LABELS, type TeamCategory, type AdminModule, type AdminBlock, type AdminSubject, type AdminTopic, type AdminFlashcard, type GeneratedFlashcard, type AdminMcqRow, type AdminBook, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type BankAccount, type PaymentMethodConfig, aiVisualizerAdminApi, type AiVisualizerLogEntry, type AuditLogEntry } from '@/lib/api';
+import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, analyticsApi, mcqImportApi, flashcardImportApi, mcqBackupApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, subjectAdminApi, topicAdminApi, flashcardsAdminApi, flashcardsAiApi, booksAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blockAdminApi, examsAdminApi, examsApi, explanationsApi, auditApi, adminSearchApi, type AdminSearchResponse, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type FlashcardCandidate, type StudentDetail, type SiteContent, type TeamMember, TEAM_CATEGORIES, TEAM_CATEGORY_LABELS, type TeamCategory, type AdminModule, type AdminBlock, type AdminSubject, type AdminTopic, type AdminFlashcard, type GeneratedFlashcard, type AdminMcqRow, type AdminBook, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type BankAccount, type PaymentMethodConfig, aiVisualizerAdminApi, type AiVisualizerLogEntry, type AuditLogEntry, type BackupScope } from '@/lib/api';
 
 // Round 3, item 10 (performance) — same over-fetching fix as the student
 // app (see its App.tsx for the full rationale): `new QueryClient()` with no
@@ -1010,6 +1010,97 @@ export function groupBlocksForPicker(blocks: AdminBlock[], modules: AdminModule[
   });
   return groupByProgramYear(leaves).map((g) => ({ programLabel: g.programLabel, yearLabel: g.yearLabel, blocks: g.groups.map((l) => l.block) }));
 }
+
+// Lets an admin narrow a whole-bank backup export/restore down to one
+// branch of the curriculum tree (Year > Block > Module > Subject > Topic)
+// instead of always covering everything — the picker half of the
+// backupScope.ts feature on the server. Shared between AdminMcqs' and
+// AdminFlashcards' "Backup / restore" panels since both trees use the same
+// Block > Module > Subject > Topic shape and neither cares which bank the
+// resulting scope is later applied to.
+export function BackupScopePicker({ blocks, allModules, onChange }: { blocks: AdminBlock[]; allModules: AdminModule[]; onChange: (scope: BackupScope | null) => void }) {
+  const [level, setLevel] = useState<'all' | 'year' | 'block' | 'module' | 'subject' | 'topic'>('all');
+  const [blockSel, setBlockSel] = useState('');
+  const [moduleSel, setModuleSel] = useState('');
+  const [subjectSel, setSubjectSel] = useState('');
+  const [topicSel, setTopicSel] = useState('');
+  const [yearSel, setYearSel] = useState('');
+  const subjectsQ = useListSubjects(moduleSel ? { moduleId: Number(moduleSel) } : undefined);
+  const topicsQ = useListTopics(subjectSel ? { subjectId: Number(subjectSel) } : undefined);
+
+  // Every academic year that shows up anywhere — a block's own
+  // yearTargetNumber, or (same fallback groupBlocksForPicker uses) one of
+  // its modules', plus every module's own. Matches the server's notion of
+  // a module's "effective year" in backupScope.ts.
+  const modulesByBlock = new Map<number, AdminModule[]>();
+  for (const m of allModules) { if (m.blockId == null) continue; const list = modulesByBlock.get(m.blockId); if (list) list.push(m); else modulesByBlock.set(m.blockId, [m]); }
+  const years = Array.from(new Set([
+    ...blocks.map((b) => b.yearTargetNumber ?? (modulesByBlock.get(b.id) ?? []).find((m) => m.yearTargetNumber)?.yearTargetNumber ?? null),
+    ...allModules.map((m) => m.yearTargetNumber ?? null),
+  ].filter((y): y is number => y != null))).sort((a, b) => a - b);
+
+  const modulesForBlock = blockSel ? allModules.filter((m) => String(m.blockId ?? '') === blockSel) : allModules;
+  const blockGroups = groupBlocksForPicker(blocks, allModules);
+
+  useEffect(() => {
+    if (level === 'all') { onChange(null); return; }
+    if (level === 'year') { onChange(yearSel ? { level: 'year', id: Number(yearSel), label: `Year ${yearSel}` } : null); return; }
+    if (level === 'block') { onChange(blockSel ? { level: 'block', id: Number(blockSel), label: blocks.find((b) => String(b.id) === blockSel)?.name ?? `Block #${blockSel}` } : null); return; }
+    if (level === 'module') { onChange(moduleSel ? { level: 'module', id: Number(moduleSel), label: allModules.find((m) => String(m.id) === moduleSel)?.name ?? `Module #${moduleSel}` } : null); return; }
+    if (level === 'subject') { onChange(subjectSel ? { level: 'subject', id: Number(subjectSel), label: (subjectsQ.data || []).find((s) => String(s.id) === subjectSel)?.name ?? `Subject #${subjectSel}` } : null); return; }
+    onChange(topicSel ? { level: 'topic', id: Number(topicSel), label: (topicsQ.data || []).find((t) => String(t.id) === topicSel)?.name ?? `Topic #${topicSel}` } : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [level, yearSel, blockSel, moduleSel, subjectSel, topicSel, subjectsQ.data, topicsQ.data]);
+
+  const resetBelow = (next: typeof level) => { setLevel(next); setBlockSel(''); setModuleSel(''); setSubjectSel(''); setTopicSel(''); setYearSel(''); };
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <select value={level} onChange={(e) => resetBelow(e.target.value as typeof level)} className="h-9 rounded-lg border border-border bg-background px-2 text-xs font-semibold" data-testid="select-backup-scope-level">
+        <option value="all">Whole bank</option>
+        <option value="year">One year</option>
+        <option value="block">One block</option>
+        <option value="module">One module</option>
+        <option value="subject">One subject</option>
+        <option value="topic">One topic</option>
+      </select>
+      {level === 'year' && <select value={yearSel} onChange={(e) => setYearSel(e.target.value)} className="h-9 rounded-lg border border-border bg-background px-2 text-xs" data-testid="select-backup-scope-year">
+        <option value="">Select year</option>{years.map((y) => <option key={y} value={y}>Year {y}</option>)}
+      </select>}
+      {level === 'block' && <select value={blockSel} onChange={(e) => setBlockSel(e.target.value)} className="h-9 rounded-lg border border-border bg-background px-2 text-xs" data-testid="select-backup-scope-block">
+        <option value="">Select block</option>{blockGroups.map((g) => <optgroup key={`${g.programLabel}-${g.yearLabel}`} label={`${g.programLabel} · ${g.yearLabel}`}>{g.blocks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</optgroup>)}
+      </select>}
+      {level === 'module' && <>
+        <select value={blockSel} onChange={(e) => { setBlockSel(e.target.value); setModuleSel(''); }} className="h-9 rounded-lg border border-border bg-background px-2 text-xs" data-testid="select-backup-scope-module-block">
+          <option value="">All blocks</option>{blockGroups.map((g) => <optgroup key={`${g.programLabel}-${g.yearLabel}`} label={`${g.programLabel} · ${g.yearLabel}`}>{g.blocks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}</optgroup>)}
+        </select>
+        <select value={moduleSel} onChange={(e) => setModuleSel(e.target.value)} className="h-9 rounded-lg border border-border bg-background px-2 text-xs" data-testid="select-backup-scope-module">
+          <option value="">Select module</option>{modulesForBlock.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+      </>}
+      {level === 'subject' && <>
+        <select value={moduleSel} onChange={(e) => { setModuleSel(e.target.value); setSubjectSel(''); }} className="h-9 rounded-lg border border-border bg-background px-2 text-xs" data-testid="select-backup-scope-subject-module">
+          <option value="">Select module</option>{allModules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+        <select value={subjectSel} onChange={(e) => setSubjectSel(e.target.value)} disabled={!moduleSel} className="h-9 rounded-lg border border-border bg-background px-2 text-xs disabled:opacity-50" data-testid="select-backup-scope-subject">
+          <option value="">Select subject</option>{(subjectsQ.data || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+      </>}
+      {level === 'topic' && <>
+        <select value={moduleSel} onChange={(e) => { setModuleSel(e.target.value); setSubjectSel(''); setTopicSel(''); }} className="h-9 rounded-lg border border-border bg-background px-2 text-xs" data-testid="select-backup-scope-topic-module">
+          <option value="">Select module</option>{allModules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+        <select value={subjectSel} onChange={(e) => { setSubjectSel(e.target.value); setTopicSel(''); }} disabled={!moduleSel} className="h-9 rounded-lg border border-border bg-background px-2 text-xs disabled:opacity-50" data-testid="select-backup-scope-topic-subject">
+          <option value="">Select subject</option>{(subjectsQ.data || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <select value={topicSel} onChange={(e) => setTopicSel(e.target.value)} disabled={!subjectSel} className="h-9 rounded-lg border border-border bg-background px-2 text-xs disabled:opacity-50" data-testid="select-backup-scope-topic">
+          <option value="">Select topic</option>{(topicsQ.data || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+      </>}
+    </div>
+  );
+}
+
 
 export function McqBankTree({ modules, blocks, search, statusFilter, selectedIds, onToggleSelect }: { modules: AdminModule[]; blocks: AdminBlock[]; search?: string; statusFilter?: ExplanationStatus | null; selectedIds: Set<number>; onToggleSelect: (id: number) => void }) {
   const treeQ = useQuery({ queryKey: ['admin-mcqs-tree'], queryFn: mcqAdminApi.list });

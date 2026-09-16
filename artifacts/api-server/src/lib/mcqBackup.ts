@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { db, mcqsTable, type Mcq } from "@workspace/db";
+import { buildScopeWhere, type BackupScope } from "./backupScope";
 
 // ---------------------------------------------------------------------------
 // Whole-question-bank backup — distinct from mcq-import.ts's file parser.
@@ -20,21 +21,46 @@ export interface McqBackupFile {
   formatVersion: number;
   exportedAt: string;
   count: number;
+  // Present only for a scoped backup (one Year/Block/Module/Subject/Topic
+  // branch rather than the whole bank) — absent means "whole bank", same as
+  // every backup made before this field existed. Carried through to the
+  // file itself (not just the download filename) so a "replace" restore
+  // later can tell it's only meant to wipe that branch, not the entire
+  // bank — see importMcqBackup's route.
+  scope?: BackupScope;
   mcqs: Mcq[];
 }
 
-// Builds the full backup payload. Intentionally exports every column
-// (including id, timestamps, moduleId/subjectId/topicId/pastPaperId/examId,
-// explanationStatus, tags, imagePath, source) so a restore can reproduce the
-// bank exactly rather than a lossy re-import.
-export async function buildMcqBackup(): Promise<McqBackupFile> {
-  const mcqs = await db.select().from(mcqsTable);
+// Builds the backup payload — the whole bank when `scope` is omitted, or
+// just the MCQs under one Year/Block/Module/Subject/Topic branch when given.
+// Intentionally exports every column (including id, timestamps,
+// moduleId/subjectId/topicId/pastPaperId/examId, explanationStatus, tags,
+// imagePath, source) so a restore can reproduce the rows exactly rather
+// than a lossy re-import.
+export async function buildMcqBackup(scope?: BackupScope): Promise<McqBackupFile> {
+  const query = db.select().from(mcqsTable);
+  const mcqs = scope
+    ? await query.where(await buildScopeWhere(scope, { moduleId: mcqsTable.moduleId, subjectId: mcqsTable.subjectId, topicId: mcqsTable.topicId }))
+    : await query;
   return {
     formatVersion: MCQ_BACKUP_FORMAT_VERSION,
     exportedAt: new Date().toISOString(),
     count: mcqs.length,
+    ...(scope ? { scope } : {}),
     mcqs,
   };
+}
+
+// Selects just the ids of MCQs that fall under a scope — used by the import
+// route's scoped "replace" mode, which (unlike a whole-bank replace) must
+// only wipe the branch the backup itself covers before restoring it, not
+// every question in the bank.
+export async function selectMcqIdsInScope(scope: BackupScope): Promise<number[]> {
+  const rows = await db
+    .select({ id: mcqsTable.id })
+    .from(mcqsTable)
+    .where(await buildScopeWhere(scope, { moduleId: mcqsTable.moduleId, subjectId: mcqsTable.subjectId, topicId: mcqsTable.topicId }));
+  return rows.map((r) => r.id);
 }
 
 // Validates the shape of one backed-up MCQ row. Deliberately permissive on
@@ -63,10 +89,21 @@ const BackupMcqSchema = z.object({
   examId: z.number().nullable().optional(),
 });
 
+// Matches BackupScope (backupScope.ts) loosely enough to accept a backup
+// hand-edited or produced by a slightly different app version — restoring
+// only ever reads `scope` to decide what a scoped "replace" should wipe, it
+// never trusts `label` for anything beyond display.
+const BackupScopeSchema = z.object({
+  level: z.enum(["year", "block", "module", "subject", "topic"]),
+  id: z.number().int(),
+  label: z.string(),
+});
+
 export const McqBackupFileSchema = z.object({
   formatVersion: z.number().int().optional(), // missing entirely = pre-versioning export, still accepted
   exportedAt: z.string().optional(),
   count: z.number().optional(),
+  scope: BackupScopeSchema.optional(), // absent = whole-bank backup, same as every pre-scope export
   mcqs: z.array(BackupMcqSchema).min(1).max(50_000),
 });
 

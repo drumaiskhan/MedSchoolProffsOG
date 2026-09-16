@@ -149,15 +149,17 @@ export const flashcardImportApi = {
 
 // Whole-bank backup/restore — the flashcard-side counterpart to
 // mcqBackupApi below. Export downloads every flashcard (every field) as
-// one JSON file; import restores a file like it, either alongside the
-// existing bank or replacing it entirely.
+// one JSON file, or (given a scope) just the cards under one
+// Year/Block/Module/Subject/Topic branch; import restores a file like it,
+// either alongside the existing bank or replacing it (a scoped backup's
+// "replace" only wipes that same branch first).
 export const flashcardBackupApi = {
   exportUrl: () => `${API_BASE}/admin/flashcard-backup/export`,
   // Not a plain <a href> download — same reasoning as mcqBackupApi's
   // downloadBackup: needs the admin's session cookie and a real error
   // message instead of a bare failed navigation if it fails.
-  downloadBackup: async (): Promise<void> => {
-    const res = await fetch(`${API_BASE}/admin/flashcard-backup/export`, { credentials: 'include' });
+  downloadBackup: async (scope?: BackupScope | null): Promise<void> => {
+    const res = await fetch(`${API_BASE}/admin/flashcard-backup/export?${backupScopeQuery(scope)}`, { credentials: 'include' });
     if (!res.ok) {
       const data = await res.json().catch(() => null);
       throw new ApiRequestError(res.status, (data && data.error) || 'Could not download the backup', data);
@@ -174,7 +176,7 @@ export const flashcardBackupApi = {
     a.remove();
     URL.revokeObjectURL(url);
   },
-  importBackup: async (file: File, mode: 'append' | 'replace'): Promise<{ restored: number; mode: 'append' | 'replace'; deletedFirst: number }> => {
+  importBackup: async (file: File, mode: 'append' | 'replace'): Promise<{ restored: number; mode: 'append' | 'replace'; deletedFirst: number; scope: BackupScope | null }> => {
     const form = new FormData();
     form.append('file', file);
     const res = await fetch(`${API_BASE}/admin/flashcard-backup/import?mode=${mode}`, { method: 'POST', credentials: 'include', body: form });
@@ -387,18 +389,30 @@ export const mcqImportApi = {
     request<{ imported: number; ids: number[] }>('/admin/mcq-import/commit', { method: 'POST', body: JSON.stringify(body) }),
 };
 
+// Narrows a whole-bank backup export down to one branch of the curriculum
+// tree — mirrors the server's BackupScope (backupScope.ts). `id` is the
+// block/module/subject/topic's row id, or the academic year number (1-5)
+// itself for level 'year'. `label` is only for the filename/UI.
+export interface BackupScope { level: 'year' | 'block' | 'module' | 'subject' | 'topic'; id: number; label: string }
+function backupScopeQuery(scope?: BackupScope | null): string {
+  if (!scope) return '';
+  return `scopeLevel=${encodeURIComponent(scope.level)}&scopeId=${scope.id}&scopeLabel=${encodeURIComponent(scope.label)}`;
+}
+
 // Whole-bank backup/restore — separate from mcqImportApi's file parser
 // above. Export downloads every MCQ (every field, across the main tree,
-// past papers, and exams) as one JSON file; import restores a file like it,
-// either alongside the existing bank or replacing it entirely.
+// past papers, and exams) as one JSON file, or (given a scope) just the
+// questions under one Year/Block/Module/Subject/Topic branch; import
+// restores a file like it, either alongside the existing bank or replacing
+// it (a scoped backup's "replace" only wipes that same branch first).
 export const mcqBackupApi = {
   exportUrl: () => `${API_BASE}/admin/mcq-backup/export`,
   // Not a plain <a href> download because it needs the admin's session
   // cookie (credentials: 'include') and a nicer error than a bare failed
   // navigation if the export fails — fetch it as a blob and trigger the
   // save ourselves.
-  downloadBackup: async (): Promise<void> => {
-    const res = await fetch(`${API_BASE}/admin/mcq-backup/export`, { credentials: 'include' });
+  downloadBackup: async (scope?: BackupScope | null): Promise<void> => {
+    const res = await fetch(`${API_BASE}/admin/mcq-backup/export?${backupScopeQuery(scope)}`, { credentials: 'include' });
     if (!res.ok) {
       const data = await res.json().catch(() => null);
       throw new ApiRequestError(res.status, (data && data.error) || 'Could not download the backup', data);
@@ -415,7 +429,7 @@ export const mcqBackupApi = {
     a.remove();
     URL.revokeObjectURL(url);
   },
-  importBackup: async (file: File, mode: 'append' | 'replace'): Promise<{ restored: number; mode: 'append' | 'replace'; deletedFirst: number }> => {
+  importBackup: async (file: File, mode: 'append' | 'replace'): Promise<{ restored: number; mode: 'append' | 'replace'; deletedFirst: number; scope: BackupScope | null }> => {
     const form = new FormData();
     form.append('file', file);
     const res = await fetch(`${API_BASE}/admin/mcq-backup/import?mode=${mode}`, { method: 'POST', credentials: 'include', body: form });

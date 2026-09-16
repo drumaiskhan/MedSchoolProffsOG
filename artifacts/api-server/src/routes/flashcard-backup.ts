@@ -1,16 +1,19 @@
 import { Router, type IRouter } from "express";
 import multer from "multer";
 import { z } from "zod";
+import { inArray } from "drizzle-orm";
 import { auditLogsTable, db, flashcardsTable } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
 import { dbErrorMessage } from "../lib/dbErrors";
 import {
   buildFlashcardBackup,
   restoreFlashcardBackup,
+  selectFlashcardIdsInScope,
   FlashcardBackupFileSchema,
   FLASHCARD_BACKUP_FORMAT_VERSION,
 } from "../lib/flashcardBackup";
 import { logger } from "../lib/logger";
+import { BACKUP_SCOPE_LEVELS, describeScope, sanitizeScopeLabel, scopeFilenamePart, type BackupScope } from "../lib/backupScope";
 
 const router: IRouter = Router();
 
@@ -30,15 +33,41 @@ const upload = multer({
 });
 
 // ---------------------------------------------------------------------------
-// Export — download the entire flashcard bank as one JSON backup file.
+// Export — download the whole flashcard bank, or (given ?scopeLevel &
+// ?scopeId) just the cards under one Year/Block/Module/Subject/Topic
+// branch, as one JSON backup file.
 // ---------------------------------------------------------------------------
 
-router.get("/admin/flashcard-backup/export", requireAdmin, async (_req, res): Promise<void> => {
+const ExportQuery = z.object({
+  scopeLevel: z.enum(BACKUP_SCOPE_LEVELS).optional(),
+  // The row id for block/module/subject/topic scopes, or the year number
+  // (1-5) itself for a "year" scope — see backupScope.ts.
+  scopeId: z.coerce.number().int().optional(),
+  // Optional, admin-supplied label straight from whatever the picker showed
+  // them — used as-is for the filename/embedded scope so it always matches
+  // what they picked, with describeScope as a fallback when it's missing.
+  scopeLabel: z.string().optional(),
+});
+
+router.get("/admin/flashcard-backup/export", requireAdmin, async (req, res): Promise<void> => {
+  const queryParsed = ExportQuery.safeParse(req.query);
+  if (!queryParsed.success) { res.status(400).json({ error: "Invalid scope" }); return; }
+  const { scopeLevel, scopeId, scopeLabel } = queryParsed.data;
+  if (scopeLevel && scopeId === undefined) { res.status(400).json({ error: "scopeId is required alongside scopeLevel" }); return; }
+
   try {
-    const backup = await buildFlashcardBackup();
+    const scope: BackupScope | undefined = scopeLevel && scopeId !== undefined
+      ? { level: scopeLevel, id: scopeId, label: sanitizeScopeLabel(scopeLabel || (await describeScope(scopeLevel, scopeId))) }
+      : undefined;
+
+    const backup = await buildFlashcardBackup(scope);
+    if (scope && backup.flashcards.length === 0) {
+      res.status(404).json({ error: `No flashcards found under ${scope.label} — nothing to back up.` });
+      return;
+    }
     const stamp = backup.exportedAt.slice(0, 10);
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Content-Disposition", `attachment; filename="flashcard-bank-backup-${stamp}.json"`);
+    res.setHeader("Content-Disposition", `attachment; filename="flashcard-bank-backup-${scopeFilenamePart(scope ?? null)}-${stamp}.json"`);
     res.status(200).send(JSON.stringify(backup, null, 2));
   } catch (err) {
     res.status(500).json({ error: `Could not build the backup: ${dbErrorMessage(err, "unknown error")}` });
@@ -86,12 +115,25 @@ router.post("/admin/flashcard-backup/import", requireAdmin, upload.single("file"
     return;
   }
 
+  const scope = parsed.data.scope;
+
   try {
     let deletedCount = 0;
     if (mode === "replace") {
-      const existing = await db.select({ id: flashcardsTable.id }).from(flashcardsTable);
-      if (existing.length) await db.delete(flashcardsTable);
-      deletedCount = existing.length;
+      // A scoped backup (one Year/Block/Module/Subject/Topic branch) only
+      // wipes that same branch before restoring — replacing the *entire*
+      // bank because the admin restored one subject's backup would
+      // silently destroy everything outside it. A whole-bank backup (no
+      // embedded scope) keeps the original full wipe.
+      if (scope) {
+        const ids = await selectFlashcardIdsInScope(scope);
+        if (ids.length) await db.delete(flashcardsTable).where(inArray(flashcardsTable.id, ids));
+        deletedCount = ids.length;
+      } else {
+        const existing = await db.select({ id: flashcardsTable.id }).from(flashcardsTable);
+        if (existing.length) await db.delete(flashcardsTable);
+        deletedCount = existing.length;
+      }
     }
 
     const created = await restoreFlashcardBackup(parsed.data.flashcards);
@@ -100,10 +142,10 @@ router.post("/admin/flashcard-backup/import", requireAdmin, upload.single("file"
       actorId: req.user!.id,
       action: "FLASHCARDS_BACKUP_RESTORED",
       entity: "flashcard",
-      metadata: JSON.stringify({ mode, restored: created, deletedFirst: deletedCount }),
+      metadata: JSON.stringify({ mode, restored: created, deletedFirst: deletedCount, scope: scope ?? null }),
     });
 
-    res.status(201).json({ restored: created, mode, deletedFirst: deletedCount });
+    res.status(201).json({ restored: created, mode, deletedFirst: deletedCount, scope: scope ?? null });
   } catch (err) {
     logger.error({ err }, "[flashcard-backup] restore failed");
     res.status(422).json({ error: `Could not restore this backup: ${dbErrorMessage(err, "unknown database error")}` });

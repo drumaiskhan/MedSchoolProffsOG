@@ -33,7 +33,7 @@ import { toast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
-import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, analyticsApi, mcqImportApi, flashcardImportApi, mcqBackupApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, subjectAdminApi, topicAdminApi, flashcardsAdminApi, flashcardsAiApi, booksAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blockAdminApi, examsAdminApi, examsApi, explanationsApi, auditApi, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type FlashcardCandidate, type StudentDetail, type SiteContent, type TeamMember, TEAM_CATEGORIES, TEAM_CATEGORY_LABELS, type TeamCategory, type AdminModule, type AdminBlock, type AdminSubject, type AdminTopic, type AdminFlashcard, type GeneratedFlashcard, type AdminMcqRow, type AdminBook, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type BankAccount, type PaymentMethodConfig, aiVisualizerAdminApi, type AiVisualizerLogEntry, type AuditLogEntry } from '@/lib/api';
+import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, analyticsApi, mcqImportApi, flashcardImportApi, mcqBackupApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, subjectAdminApi, topicAdminApi, flashcardsAdminApi, flashcardsAiApi, booksAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blockAdminApi, examsAdminApi, examsApi, explanationsApi, auditApi, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type FlashcardCandidate, type StudentDetail, type SiteContent, type TeamMember, TEAM_CATEGORIES, TEAM_CATEGORY_LABELS, type TeamCategory, type AdminModule, type AdminBlock, type AdminSubject, type AdminTopic, type AdminFlashcard, type GeneratedFlashcard, type AdminMcqRow, type AdminBook, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type BankAccount, type PaymentMethodConfig, aiVisualizerAdminApi, type AiVisualizerLogEntry, type AuditLogEntry, type BackupScope } from '@/lib/api';
 
 // Round 3, item 10 (performance) — same over-fetching fix as the student
 // app (see its App.tsx for the full rationale): `new QueryClient()` with no
@@ -41,7 +41,7 @@ import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiReq
 // mutations already call invalidateQueries on the specific keys they
 // change, so edits still show up immediately — this only avoids redundant
 // background refetches of data nothing has touched.
-import { DifficultyPicker, ExplanationCoverage, SectionHeader, cn, ConfirmDialog, McqBankTree, groupBlocksForPicker } from '@/lib/shared';
+import { DifficultyPicker, ExplanationCoverage, SectionHeader, cn, ConfirmDialog, McqBankTree, groupBlocksForPicker, BackupScopePicker } from '@/lib/shared';
 import { queryClient } from '@/lib/query-client';
 
 function AdminMcqs() {
@@ -72,8 +72,11 @@ function AdminMcqs() {
 
   // Whole-bank backup/restore — separate from the file-import flow above
   // (which parses loosely-formatted question papers). This exports/restores
-  // every MCQ field verbatim as one JSON file.
+  // every MCQ field verbatim as one JSON file, optionally narrowed to one
+  // Year/Block/Module/Subject/Topic branch via backupScope (null = whole
+  // bank, the original behavior).
   const [backupOpen, setBackupOpen] = useState(false);
+  const [backupScope, setBackupScope] = useState<BackupScope | null>(null);
   const [backupFile, setBackupFile] = useState<File | null>(null);
   const [backupMode, setBackupMode] = useState<'append' | 'replace'>('append');
   const [backupConfirmOpen, setBackupConfirmOpen] = useState(false);
@@ -81,7 +84,7 @@ function AdminMcqs() {
   const downloadBackup = async () => {
     setDownloadingBackup(true);
     try {
-      await mcqBackupApi.downloadBackup();
+      await mcqBackupApi.downloadBackup(backupScope);
     } catch (err) {
       toast({ title: 'Could not download backup', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' });
     } finally {
@@ -94,7 +97,8 @@ function AdminMcqs() {
       invalidateMcqs();
       setBackupFile(null);
       setBackupConfirmOpen(false);
-      toast({ title: `Restored ${res.restored} question${res.restored === 1 ? '' : 's'}`, description: res.mode === 'replace' ? `Replaced the bank (${res.deletedFirst} previous question${res.deletedFirst === 1 ? '' : 's'} removed first).` : 'Added alongside the existing bank.' });
+      const scopeNote = res.scope ? ` (${res.scope.label})` : '';
+      toast({ title: `Restored ${res.restored} question${res.restored === 1 ? '' : 's'}${scopeNote}`, description: res.mode === 'replace' ? `Replaced ${res.scope ? 'that branch' : 'the whole bank'} (${res.deletedFirst} previous question${res.deletedFirst === 1 ? '' : 's'} removed first).` : 'Added alongside the existing bank.' });
     },
     onError: (err: unknown) => { setBackupConfirmOpen(false); toast({ title: 'Restore failed', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }); },
   });
@@ -296,33 +300,36 @@ function AdminMcqs() {
       {backupOpen && <div className="mt-4 space-y-4 rounded-2xl border border-border bg-card p-5 animate-in fade-in slide-in-from-top-2 duration-300">
         <div>
           <p className="text-xs font-bold">Backup MCQs bank</p>
-          <p className="mt-1 text-[11px] text-muted-foreground">Downloads every question in the bank — main tree, past papers, and exams alike, with every field (explanations, hints, difficulty, tags) — as one JSON file you can keep as a snapshot or move to another environment.</p>
+          <p className="mt-1 text-[11px] text-muted-foreground">Downloads questions as one JSON file you can keep as a snapshot or move to another environment, with every field (explanations, hints, difficulty, tags) intact.</p>
+          <div className="mt-3"><BackupScopePicker blocks={blocks} allModules={allModules} onChange={setBackupScope} /></div>
+          <p className="mt-2 text-[11px] text-muted-foreground">{backupScope ? <>Backing up just <span className="font-semibold text-foreground">{backupScope.label}</span>.</> : 'Backing up the whole bank — main tree, past papers, and exams alike.'}</p>
           <button disabled={downloadingBackup} onClick={downloadBackup} className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-extrabold text-primary-foreground transition-transform hover:scale-[1.03] active:scale-95 disabled:opacity-50 disabled:hover:scale-100" data-testid="button-download-backup">{downloadingBackup ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} {downloadingBackup ? 'Preparing…' : 'Download backup'}</button>
         </div>
 
         <div className="border-t border-border pt-4">
-          <p className="text-xs font-bold">Import whole backed-up MCQs</p>
-          <p className="mt-1 text-[11px] text-muted-foreground">Restore a backup JSON file made by the button above. Every question comes back with its original module/subject/topic (or past paper/exam) placement — no need to pick a target first.</p>
+          <p className="text-xs font-bold">Import backed-up MCQs</p>
+          <p className="mt-1 text-[11px] text-muted-foreground">Restore a backup JSON file made by the button above. Every question comes back with its original module/subject/topic (or past paper/exam) placement — no need to pick a target first. A backup made for one Year/Block/Module/Subject/Topic only affects that same branch, even in Replace mode.</p>
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <input type="file" accept=".json,application/json" onChange={(e) => setBackupFile(e.target.files?.[0] ?? null)} className="flex-1 rounded-xl border border-dashed border-border bg-background px-3 py-2.5 text-xs transition-colors focus-within:border-primary" data-testid="input-backup-file" />
             <select value={backupMode} onChange={(e) => setBackupMode(e.target.value as 'append' | 'replace')} className="h-10 rounded-xl border border-border bg-background px-3 text-xs transition-colors focus:border-primary" data-testid="select-backup-mode">
               <option value="append">Add alongside existing bank</option>
-              <option value="replace">Replace entire bank</option>
+              <option value="replace">Replace (that backup's scope, or the entire bank if it has none)</option>
             </select>
             <button disabled={!backupFile || restoreBackup.isPending} onClick={() => setBackupConfirmOpen(true)} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground transition-transform hover:scale-[1.03] active:scale-95 disabled:opacity-50 disabled:hover:scale-100" data-testid="button-restore-backup">{restoreBackup.isPending && <Loader2 size={13} className="animate-spin" />} {restoreBackup.isPending ? 'Restoring…' : 'Import backup'}</button>
           </div>
           {backupFile && !restoreBackup.isPending && <p className="mt-2 text-[11px] text-muted-foreground animate-in fade-in duration-200">Selected: <span className="font-semibold text-foreground">{backupFile.name}</span></p>}
-          {backupMode === 'replace' && <p className="mt-2 text-[11px] font-semibold text-destructive animate-in fade-in duration-200">Replace deletes every existing question (and its practice/exam history) before restoring — this can't be undone.</p>}
+          {backupMode === 'replace' && <p className="mt-2 text-[11px] font-semibold text-destructive animate-in fade-in duration-200">Replace deletes every existing question in that branch (and its practice/exam history) before restoring — or the entire bank, if the file is a whole-bank backup. This can't be undone.</p>}
         </div>
       </div>}
       {backupConfirmOpen && <ConfirmDialog
-        title={backupMode === 'replace' ? 'Replace the entire question bank?' : 'Import this backup?'}
-        body={backupMode === 'replace' ? "Every existing question, plus its practice history and exam attachments, will be permanently deleted first, then replaced with the backup file's contents." : "The backup file's questions will be added alongside what's already in the bank."}
+        title={backupMode === 'replace' ? 'Replace with this backup?' : 'Import this backup?'}
+        body={backupMode === 'replace' ? "Every existing question in this backup's branch (or the whole bank, if it was a whole-bank backup), plus its practice history and exam attachments, will be permanently deleted first, then replaced with the backup file's contents." : "The backup file's questions will be added alongside what's already in the bank."}
         confirmLabel={backupMode === 'replace' ? 'Delete and restore' : 'Import'}
         onCancel={() => setBackupConfirmOpen(false)}
         onConfirm={() => restoreBackup.mutate()}
         pending={restoreBackup.isPending}
       />}
+
 
       {bulkAddOpen && <div className="mt-4 space-y-4 rounded-2xl border border-primary/30 bg-[#eef7f1] p-5">
         <div className="flex items-center justify-between"><p className="text-xs font-bold">Add multiple MCQs at once — uses the module/subject/topic selected above.</p><button onClick={() => setBulkRows((rows) => [...rows, ...bulkAddRowsInit()])} className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[11px] font-bold" data-testid="button-add-bulk-row"><Plus size={12} /> Add row</button></div>
