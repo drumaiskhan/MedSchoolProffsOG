@@ -99,6 +99,23 @@ function Flashcards() {
   const [known, setKnown] = useState<Record<number, boolean>>({});
   const cards: Flashcard[] = q.data ?? [];
   const visibleCards = queryText.trim() ? cards.filter((c) => c.front.toLowerCase().includes(queryText.trim().toLowerCase()) || c.back.toLowerCase().includes(queryText.trim().toLowerCase())) : cards;
+  // Grid view used to mount every visible card's DOM (two flip faces each,
+  // with gradients/borders/decorative shapes) in one go. That's fine for
+  // a few dozen cards, but the flashcard bank has grown into the
+  // hundreds/thousands after bulk imports, and building that much DOM at
+  // once is what froze the tab on load. The API has no server-side
+  // pagination to lean on here (listFlashcards always returns the full
+  // filtered array), so we window the *rendering* client-side instead —
+  // same data already in memory, just a bounded slice mounted at a time.
+  const GRID_PAGE_SIZE = 30;
+  const [gridPage, setGridPage] = useState(0);
+  const gridPageCount = Math.max(1, Math.ceil(visibleCards.length / GRID_PAGE_SIZE));
+  const clampedGridPage = Math.min(gridPage, gridPageCount - 1);
+  const pagedCards = visibleCards.slice(clampedGridPage * GRID_PAGE_SIZE, (clampedGridPage + 1) * GRID_PAGE_SIZE);
+  // Jump back to page 1 whenever the underlying set of cards changes —
+  // otherwise a narrower filter/search can leave gridPage pointing past
+  // the new (shorter) result set.
+  useEffect(() => { setGridPage(0); }, [activeTopicId, subjectId, moduleId, blockId, queryText]);
   const card = cards[index % Math.max(cards.length, 1)];
   const knownCount = Object.values(known).filter(Boolean).length;
   const askAi = useMutation({ mutationFn: () => explanationsApi.askAiFlashcard(card!.id) });
@@ -205,7 +222,13 @@ function Flashcards() {
 
   if (view === 'grid') {
     return <div className="mx-auto max-w-3xl">{header}{toolbar}{statCards}{filterBar}
-      {!visibleCards.length ? <EmptyState icon={Search} title="No matches" body="No flashcards match your search — try a different term." /> : <div className="space-y-5">{visibleCards.map((c, i) => {
+      {!visibleCards.length ? <EmptyState icon={Search} title="No matches" body="No flashcards match your search — try a different term." /> : <>
+      {visibleCards.length > GRID_PAGE_SIZE && <div className="mb-3 flex items-center justify-between text-[11px] font-semibold text-muted-foreground">
+        <span>Showing {clampedGridPage * GRID_PAGE_SIZE + 1}–{Math.min((clampedGridPage + 1) * GRID_PAGE_SIZE, visibleCards.length)} of {visibleCards.length}</span>
+        <span>Page {clampedGridPage + 1} of {gridPageCount}</span>
+      </div>}
+      <div className="space-y-5">{pagedCards.map((c, pageI) => {
+        const i = clampedGridPage * GRID_PAGE_SIZE + pageI;
         const isFlipped = flippedIds.has(c.id);
         const accent = topicAccentStyles(c.topic || c.module);
         return <div key={c.id} className="flip-card" data-testid={`card-flashcard-grid-${c.id}`}>
@@ -232,7 +255,13 @@ function Flashcards() {
             </div>
           </button>
         </div>;
-      })}</div>}
+      })}</div>
+      {gridPageCount > 1 && <div className="mt-5 flex items-center justify-center gap-3">
+        <button onClick={() => setGridPage((p) => Math.max(0, p - 1))} disabled={clampedGridPage === 0} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold text-muted-foreground disabled:opacity-30 disabled:pointer-events-none hover:bg-muted" data-testid="button-flashcard-grid-page-prev"><ArrowLeft size={13} /> Previous</button>
+        <span className="font-mono-app text-[11px] text-muted-foreground">Page {clampedGridPage + 1} of {gridPageCount}</span>
+        <button onClick={() => setGridPage((p) => Math.min(gridPageCount - 1, p + 1))} disabled={clampedGridPage >= gridPageCount - 1} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold text-muted-foreground disabled:opacity-30 disabled:pointer-events-none hover:bg-muted" data-testid="button-flashcard-grid-page-next">Next <ArrowRight size={13} /></button>
+      </div>}
+      </>}
     </div>;
   }
 
