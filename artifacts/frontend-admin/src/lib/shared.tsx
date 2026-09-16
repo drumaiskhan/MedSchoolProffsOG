@@ -700,6 +700,16 @@ export function McqEditForm({ mcq, onDone }: { mcq: AdminMcqRow; onDone: () => v
   const [options, setOptions] = useState<string[]>([...mcq.options, '', '', '', '', ''].slice(0, 5));
   const [correctAnswer, setCorrectAnswer] = useState(mcq.correctAnswer ?? '');
   const [explanation, setExplanation] = useState(mcq.explanation ?? '');
+  // Bug fix: this edit form — the one used for every question in the main
+  // bank tree, i.e. how most existing questions actually get touched —
+  // had no per-option explanation fields and never sent optionExplanations
+  // in its update. So even a question that DID have per-option
+  // explanations (imported, or AI-generated) couldn't have them edited
+  // here, and a question that didn't could never gain them here — only
+  // via the separate bulk-add/AI-generate flows. Index-aligned with
+  // `options` above, same convention as those flows.
+  const [optionExplanations, setOptionExplanations] = useState<(string | null)[]>([...(mcq.optionExplanations ?? []), null, null, null, null, null].slice(0, 5));
+  const [showOptionExplanations, setShowOptionExplanations] = useState(!!mcq.optionExplanations?.some((e) => e?.trim()));
   const [status, setStatus] = useState(mcq.status);
   const [difficulty, setDifficulty] = useState(mcq.difficulty || 'moderate');
   const save = useMutation({
@@ -708,6 +718,7 @@ export function McqEditForm({ mcq, onDone }: { mcq: AdminMcqRow; onDone: () => v
       options: options.map((o) => o.trim()).filter(Boolean),
       correctAnswer: correctAnswer.trim() || null,
       explanation: explanation.trim() || null,
+      optionExplanations: optionExplanations.slice(0, cleanedOptions.length).some((e) => e?.trim()) ? optionExplanations.slice(0, cleanedOptions.length).map((e) => e?.trim() || null) : null,
       status,
       difficulty,
     }),
@@ -725,6 +736,8 @@ export function McqEditForm({ mcq, onDone }: { mcq: AdminMcqRow; onDone: () => v
       <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} className="h-8 rounded-lg border border-border bg-card px-2 text-xs capitalize" data-testid={`select-edit-mcq-difficulty-${mcq.id}`}>{['easy', 'moderate', 'hard'].map((x) => <option key={x} value={x}>{x}</option>)}</select>
     </div>
     <textarea value={explanation} onChange={(e) => setExplanation(e.target.value)} placeholder="Explanation (optional)" className="min-h-12 w-full rounded-lg border border-border bg-card p-2 text-xs" data-testid={`input-edit-mcq-explanation-${mcq.id}`} />
+    <button type="button" onClick={() => setShowOptionExplanations((v) => !v)} className="inline-flex items-center gap-1 text-[11px] font-bold text-primary" data-testid={`button-toggle-edit-option-explanations-${mcq.id}`}><CircleHelp size={12} /> {showOptionExplanations ? 'Hide' : 'Add'} per-option explanations</button>
+    {showOptionExplanations && <div className="space-y-1.5 rounded-lg bg-card p-2.5">{cleanedOptions.map((opt, oi) => <div key={oi} className="flex items-start gap-2"><span className={cn('mt-1.5 grid size-5 shrink-0 place-items-center rounded text-[10px] font-bold', correctAnswer === opt ? 'bg-[#d7eee4] text-[#287058]' : 'bg-[#fff1ed] text-[#a34c3e]')}>{String.fromCharCode(65 + oi)}</span><textarea value={optionExplanations[oi] ?? ''} onChange={(e) => { const next = [...optionExplanations]; next[oi] = e.target.value || null; setOptionExplanations(next); }} placeholder={correctAnswer === opt ? 'Why this is correct...' : 'Why this is wrong...'} className="min-h-9 flex-1 rounded-lg border border-border bg-background p-2 text-xs" data-testid={`input-edit-mcq-option-explanation-${mcq.id}-${oi}`} /></div>)}</div>}
     <div className="flex gap-2"><button onClick={() => save.mutate()} disabled={save.isPending || !question.trim() || cleanedOptions.length < 2} className="rounded-lg bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground disabled:opacity-50" data-testid={`button-save-edit-mcq-${mcq.id}`}>{save.isPending ? 'Saving…' : 'Save changes'}</button><button onClick={onDone} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold" data-testid={`button-cancel-edit-mcq-${mcq.id}`}>Cancel</button></div>
   </div>;
 }
