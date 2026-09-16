@@ -116,7 +116,7 @@ export interface AuditLogEntry { id: number; actorId: number | null; actorName: 
 
 export interface StudentSummary { id: number; name: string; email: string; institution: string; program: string; status: string; joinedAt: string; progress: number }
 export interface StudentDetail {
-  id: number; name: string; email: string; phone: string | null; rollNumber: string | null; status: string; emailVerified: boolean;
+  id: number; name: string; email: string; phone: string | null; rollNumber: string | null; status: string; statusMessage: string | null; emailVerified: boolean;
   institution: string | null; program: string | null; academicYear: string | null; batch: string | null;
   currentStreak: number; longestStreak: number; lastLoginAt: string | null; joinedAt: string;
   payments: PaymentRow[]; activeMembership: { expiresAt: string; isTrial: boolean } | null;
@@ -308,7 +308,7 @@ export const examsApi = {
 export const studentsAdminApi = {
   detail: (id: number) => request<StudentDetail>(`/students/${id}`),
   update: (id: number, body: Partial<{ name: string; phone: string; rollNumber: string }>) => request<{ ok: true }>(`/students/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
-  updateStatus: (id: number, status: string, emailVerified?: boolean) => request<{ ok: true; status: string; emailVerified: boolean }>(`/students/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status, ...(emailVerified !== undefined ? { emailVerified } : {}) }) }),
+  updateStatus: (id: number, status: string, emailVerified?: boolean, message?: string) => request<{ ok: true; status: string; emailVerified: boolean; statusMessage: string | null }>(`/students/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status, ...(emailVerified !== undefined ? { emailVerified } : {}), ...(message !== undefined ? { message } : {}) }) }),
   verifyEmail: (id: number) => request<{ ok: true; status: string; emailVerified: boolean }>(`/students/${id}/verify-email`, { method: 'POST' }),
   startTrial: (id: number, durationDays: number) => request<{ ok: true; expiresAt: string }>(`/students/${id}/trial`, { method: 'POST', body: JSON.stringify({ durationDays }) }),
   endTrial: (id: number) => request<{ ok: true }>(`/students/${id}/trial`, { method: 'DELETE' }),

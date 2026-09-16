@@ -686,4 +686,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS med_challenge_attempts_challenge_user_idx
 -- med_challenges already existed before block_id was added above.
 ALTER TABLE med_challenges ADD COLUMN IF NOT EXISTS block_id INTEGER;
 
+-- Admin account-rejection flow: an admin rejecting a student's account
+-- (PATCH /students/:id/status with status=REJECTED) now requires a message,
+-- stored here so it can be shown back in the admin UI and emailed to the
+-- student. See routes/medschool.ts.
+ALTER TABLE med_users ADD COLUMN IF NOT EXISTS status_message TEXT;
+
 COMMIT;

@@ -49,7 +49,7 @@ async function fetchWithTimeout(url: string, init: RequestInit, providerLabel: s
 
 export class AiNotConfiguredError extends Error {
   constructor() {
-    super("No AI provider is configured. Set a primary (and optionally a backup) provider from Admin -> Platform settings -> AI, or set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY in the environment.");
+    super("No AI provider is configured. Set a primary (and optionally up to five backup) providers from Admin -> Platform settings -> AI, or set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY in the environment.");
     this.name = "AiNotConfiguredError";
   }
 }
@@ -588,13 +588,30 @@ const DEFAULT_MODELS: Record<AiProvider, string> = {
 
 export interface ResolvedProvider { provider: AiProvider; apiKey: string; model: string; baseUrl?: string; label: string }
 
+// Ordered list of DB-configured provider slots. "" is the original/primary
+// fields (AI_PROVIDER/AI_API_KEY/AI_MODEL/AI_BASE_URL); "_2".."_6" are five
+// additional backup slots (AI_PROVIDER_2/AI_API_KEY_2/..., AI_PROVIDER_3/...,
+// etc.) so an admin can queue up several different providers/accounts —
+// e.g. Anthropic, then OpenAI, then a couple of Groq/OpenRouter/DeepSeek
+// keys via "custom" — and requests fail over down the chain instead of
+// stopping at a single backup. Six DB slots plus the three env-var fallbacks
+// below (ANTHROPIC_API_KEY/OPENAI_API_KEY/GEMINI_API_KEY) means up to nine
+// candidates can be tried for one request before it actually fails.
+const DB_SLOT_SUFFIXES = ["", "_2", "_3", "_4", "_5", "_6"] as const;
+type DbSlotSuffix = typeof DB_SLOT_SUFFIXES[number];
+
+function slotLabel(suffix: DbSlotSuffix): string {
+  if (suffix === "") return "primary provider";
+  const n = Number(suffix.slice(1)) - 1; // "_2" -> 1st backup, "_3" -> 2nd backup, ...
+  return `backup provider ${n}`;
+}
+
 /**
- * A single DB-configured provider slot. Slot "" is the original/primary
- * fields (AI_PROVIDER/AI_API_KEY/AI_MODEL/AI_BASE_URL); slot "_2" is the
- * backup added for multi-provider failover (AI_PROVIDER_2/AI_API_KEY_2/...).
- * Both read the same way, just different setting keys.
+ * A single DB-configured provider slot — see DB_SLOT_SUFFIXES above for how
+ * the slots relate to each other. All slots read the same way, just
+ * different setting keys.
  */
-async function resolveDbSlot(suffix: "" | "_2", modelOverride?: string): Promise<{ provider: AiProvider; apiKey: string; model: string; baseUrl?: string } | null> {
+async function resolveDbSlot(suffix: DbSlotSuffix, modelOverride?: string): Promise<{ provider: AiProvider; apiKey: string; model: string; baseUrl?: string } | null> {
   const dbProvider = await getSetting(`AI_PROVIDER${suffix}`, null);
   const dbKey = await getSetting(`AI_API_KEY${suffix}`, null);
   const dbModel = await getSetting(`AI_MODEL${suffix}`, null);
@@ -613,16 +630,19 @@ async function resolveDbSlot(suffix: "" | "_2", modelOverride?: string): Promise
  * request can fall through to the next one instead of failing outright.
  * Order:
  *   1. The primary DB-configured provider (Admin -> Platform settings -> AI).
- *   2. The optional backup DB-configured provider (same page, "Backup AI
- *      provider" section) — lets an admin pair two *different* providers
- *      (e.g. Anthropic primary, OpenAI backup) so an outage on one vendor
- *      doesn't take "Ask AI to explain" down with it.
+ *   2. Up to five backup DB-configured providers (same page, "Backup AI
+ *      providers" section) — lets an admin queue several different
+ *      providers/accounts (e.g. Anthropic primary, OpenAI backup, a couple
+ *      of Groq/OpenRouter/DeepSeek keys via "custom") so an outage or
+ *      rate-limit on one vendor doesn't take "Ask AI to explain" down with
+ *      it — the request just moves on to the next configured one.
  *   3. Every provider with an API key present in the environment
  *      (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, in that order) —
- *      previously only the *first* one found was ever used; now all of them
- *      are kept as further fallbacks instead of being silently ignored.
- * Duplicate provider+key combinations are skipped so the same account isn't
- * tried twice back-to-back.
+ *      kept as further fallbacks instead of being silently ignored.
+ * That's up to nine candidates in total (6 DB slots + 3 env vars) tried in
+ * order before a request actually fails. Duplicate provider+key
+ * combinations are skipped so the same account isn't tried twice
+ * back-to-back.
  */
 async function resolveProviders(modelOverride?: string): Promise<ResolvedProvider[]> {
   const candidates: ResolvedProvider[] = [];
@@ -635,8 +655,9 @@ async function resolveProviders(modelOverride?: string): Promise<ResolvedProvide
     candidates.push({ ...cfg, label });
   };
 
-  add(await resolveDbSlot("", modelOverride), "primary provider");
-  add(await resolveDbSlot("_2", modelOverride), "backup provider");
+  for (const suffix of DB_SLOT_SUFFIXES) {
+    add(await resolveDbSlot(suffix, modelOverride), slotLabel(suffix));
+  }
 
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   if (anthropicKey) add({ provider: "anthropic", apiKey: anthropicKey, model: modelOverride || DEFAULT_MODELS.anthropic }, "ANTHROPIC_API_KEY");

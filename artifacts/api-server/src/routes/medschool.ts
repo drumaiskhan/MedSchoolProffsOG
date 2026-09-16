@@ -76,7 +76,7 @@ import { getStudentTargeting, getVisibleModuleIds, getVisibleBlockIds, describeM
 import { resolveFileUrl, THUMBNAIL_TRANSFORM } from "../lib/storage";
 import { dbErrorMessage } from "../lib/dbErrors";
 import { shuffleMcqOptions } from "../lib/mcqShuffle";
-import { sendEmail, membershipActivatedEmailHtml, trialActivatedEmailHtml, paymentSubmittedEmailHtml, paymentRejectedEmailHtml } from "../lib/email";
+import { sendEmail, membershipActivatedEmailHtml, trialActivatedEmailHtml, paymentSubmittedEmailHtml, paymentRejectedEmailHtml, accountRejectedEmailHtml } from "../lib/email";
 
 const router: IRouter = Router();
 
@@ -1286,7 +1286,7 @@ router.get("/students/:id", requireAdmin, async (req, res): Promise<void> => {
   const memberships = await db.select().from(membershipsTable).where(eq(membershipsTable.userId, id)).orderBy(desc(membershipsTable.expiresAt));
   res.json({
     id: student.id, name: student.name, email: student.email, phone: student.phone, rollNumber: student.rollNumber,
-    status: student.status, emailVerified: student.emailVerified,
+    status: student.status, statusMessage: student.statusMessage, emailVerified: student.emailVerified,
     institution: student.institution, program: student.program, academicYear: academicYear?.label ?? null, batch: batch?.label ?? null,
     currentStreak: student.currentStreak, longestStreak: student.longestStreak,
     lastLoginAt: student.lastLoginAt?.toISOString() ?? null, joinedAt: student.createdAt.toISOString(),
@@ -1312,16 +1312,49 @@ const STUDENT_STATUSES = ["UNVERIFIED", "VERIFIED", "PAYMENT_PENDING_REVIEW", "A
 
 router.patch("/students/:id/status", requireAdmin, async (req, res): Promise<void> => {
   const id = Number(req.params.id);
-  const parsed = z.object({ status: z.enum(STUDENT_STATUSES), emailVerified: z.boolean().optional(), planId: z.number().int().positive().optional(), durationDays: z.number().int().positive().optional() }).safeParse(req.body);
+  const parsed = z
+    .object({
+      status: z.enum(STUDENT_STATUSES),
+      emailVerified: z.boolean().optional(),
+      planId: z.number().int().positive().optional(),
+      durationDays: z.number().int().positive().optional(),
+      // Required when rejecting — same idea as POST /payments/:id/reject's
+      // `reason`, just at the account level instead of a single payment.
+      // Optional for every other status change (nothing stops an admin
+      // from leaving a note on those too, e.g. why a student was
+      // suspended).
+      message: z.string().trim().min(1).max(1000).optional(),
+    })
+    .safeParse(req.body);
   if (!parsed.success || Number.isNaN(id)) { res.status(400).json({ error: "Invalid request" }); return; }
+  if (parsed.data.status === "REJECTED" && !parsed.data.message) {
+    res.status(400).json({ error: "A message explaining the rejection is required" });
+    return;
+  }
   // Moving a student to VERIFIED, PAYMENT_PENDING_REVIEW, or ACTIVE implies
   // an admin has confirmed their identity — auto-clear the email-verification
   // gate too, so the account status change actually lets them log in instead
   // of silently leaving them blocked at the "please verify your email" step.
   const impliesVerified = parsed.data.status === "VERIFIED" || parsed.data.status === "PAYMENT_PENDING_REVIEW" || parsed.data.status === "ACTIVE";
   const emailVerified = parsed.data.emailVerified ?? (impliesVerified ? true : undefined);
-  const [row] = await db.update(usersTable).set({ status: parsed.data.status, ...(emailVerified !== undefined ? { emailVerified } : {}) }).where(and(eq(usersTable.id, id), eq(usersTable.role, "student"))).returning();
+  const [row] = await db
+    .update(usersTable)
+    .set({
+      status: parsed.data.status,
+      ...(emailVerified !== undefined ? { emailVerified } : {}),
+      // Keep the account's last status message around even when a later
+      // change (e.g. re-activating) doesn't pass one — only overwrite it
+      // when this call actually provided a new one.
+      ...(parsed.data.message !== undefined ? { statusMessage: parsed.data.message } : {}),
+    })
+    .where(and(eq(usersTable.id, id), eq(usersTable.role, "student")))
+    .returning();
   if (!row) { res.status(404).json({ error: "Student not found" }); return; }
+
+  if (parsed.data.status === "REJECTED" && parsed.data.message) {
+    await db.insert(notificationsTable).values({ userId: row.id, title: "Your account application was rejected", body: parsed.data.message, type: "warning" });
+    void sendEmail(row.email, "Your MedschoolProffs application needs attention", accountRejectedEmailHtml(row.name, parsed.data.message)).catch(() => {});
+  }
 
   // IMPORTANT: GET /student/dashboard reads membership status/expiry only
   // from membershipsTable (never usersTable.status) — see planView()/the
@@ -1363,8 +1396,8 @@ router.patch("/students/:id/status", requireAdmin, async (req, res): Promise<voi
     }
   }
 
-  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "STUDENT_STATUS_UPDATED", entity: "user", entityId: row.id, metadata: JSON.stringify({ status: parsed.data.status, emailVerified: row.emailVerified, grantedMembership }) });
-  res.json({ ok: true, status: row.status, emailVerified: row.emailVerified, grantedMembership });
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "STUDENT_STATUS_UPDATED", entity: "user", entityId: row.id, metadata: JSON.stringify({ status: parsed.data.status, emailVerified: row.emailVerified, grantedMembership, message: parsed.data.message ?? null }) });
+  res.json({ ok: true, status: row.status, emailVerified: row.emailVerified, grantedMembership, statusMessage: row.statusMessage });
 });
 
 // Trial mode: grant a student temporary access without a payment, for an

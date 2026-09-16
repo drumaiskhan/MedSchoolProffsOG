@@ -734,6 +734,12 @@ ALTER TABLE med_email_verification_tokens ADD COLUMN IF NOT EXISTS attempts INTE
 -- Topic (see routes/challenges.ts).
 ALTER TABLE med_challenges ADD COLUMN IF NOT EXISTS block_id INTEGER;
 
+-- Admin account-rejection flow: an admin rejecting a student's account
+-- (PATCH /students/:id/status with status=REJECTED) now requires a message,
+-- stored here so it can be shown back in the admin UI and emailed to the
+-- student. See routes/medschool.ts.
+ALTER TABLE med_users ADD COLUMN IF NOT EXISTS status_message TEXT;
+
 COMMIT;
 `;
 

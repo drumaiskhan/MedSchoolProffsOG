@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, desc, eq, gt, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   db,
@@ -115,7 +115,10 @@ const RegisterSchema = z.object({
   method: z.string().max(60).optional(),
   reference: z.string().max(120).optional(),
   paymentDate: z.string().max(20).optional(),
-  proofPath: z.string().max(500).optional(),
+  // Required — an account can no longer be created without evidence of
+  // payment. This is what /uploads/payment-proof-signup returns; the
+  // registration form uploads the file first and only then submits.
+  proofPath: z.string().min(1, "Please upload your payment proof before submitting").max(500),
 });
 
 const YEAR_ORDINAL: Record<number, string> = { 1: "1st", 2: "2nd", 3: "3rd", 4: "4th", 5: "5th" };
@@ -325,6 +328,14 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     return;
   }
 
+  // Rejected accounts already got the specific reason by email (see
+  // PATCH /students/:id/status) — no need to repeat it here, just block
+  // the login itself.
+  if (user.status === "REJECTED") {
+    res.status(403).json({ error: "Your account application was not approved. Check your email for details, or contact support." });
+    return;
+  }
+
   await db.update(usersTable).set({ failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() }).where(eq(usersTable.id, user.id));
 
   const token = setSessionCookie(res, user);
@@ -452,7 +463,21 @@ router.post("/auth/verify-otp", async (req, res): Promise<void> => {
   }
 
   await db.update(emailVerificationTokensTable).set({ usedAt: new Date() }).where(eq(emailVerificationTokensTable.id, record.id));
-  const [verifiedUser] = await db.update(usersTable).set({ emailVerified: true, status: "VERIFIED" }).where(eq(usersTable.id, user.id)).returning();
+  // Only bump UNVERIFIED -> VERIFIED here. Registration already puts the
+  // student in PAYMENT_PENDING_REVIEW (their payment proof is submitted at
+  // signup — see /auth/register), and confirming the OTP only proves the
+  // email address, not the payment. Overwriting that to "VERIFIED"
+  // unconditionally used to silently drop the account out of the
+  // admin's payment queue state and skip straight past manual review.
+  // Same CASE-based pattern as the admin-triggered
+  // POST /students/:id/verify-email route in routes/medschool.ts, kept in
+  // sync intentionally — a student should never be able to self-activate
+  // past a pending payment just by confirming their inbox.
+  const [verifiedUser] = await db
+    .update(usersTable)
+    .set({ emailVerified: true, status: sql`CASE WHEN ${usersTable.status} = 'UNVERIFIED' THEN 'VERIFIED' ELSE ${usersTable.status} END` })
+    .where(eq(usersTable.id, user.id))
+    .returning();
 
   // Fire-and-forget, same as every other transactional email in this file —
   // a slow/down mail provider should never delay or fail the verification
@@ -461,7 +486,12 @@ router.post("/auth/verify-otp", async (req, res): Promise<void> => {
     void sendEmail(verifiedUser.email, "Welcome to MedschoolProffs", welcomeEmailHtml(verifiedUser.name, `${APP_URL}/login`)).catch(() => {});
   }
 
-  res.json({ message: "Email verified. You can now log in." });
+  res.json({
+    message:
+      verifiedUser?.status === "PAYMENT_PENDING_REVIEW"
+        ? "Email verified. Your payment is now awaiting admin review — you'll be notified once your account is activated."
+        : "Email verified. You can now log in.",
+  });
 });
 
 router.post("/auth/resend-verification", async (req, res): Promise<void> => {

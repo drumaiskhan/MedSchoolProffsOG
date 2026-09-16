@@ -228,6 +228,11 @@ export function paymentRejectedEmailHtml(name: string, reason: string): string {
   return `<p>Hi ${name},</p><p>We weren't able to verify your recent payment submission.</p><p><strong>Reason:</strong> ${reason}</p><p>You're welcome to submit it again with corrected details, or reach out to support if you think this is a mistake.</p>`;
 }
 
+/** Sent when an admin rejects a student's account application, with the message they gave. */
+export function accountRejectedEmailHtml(name: string, message: string): string {
+  return `<p>Hi ${name},</p><p>Your MedschoolProffs account application wasn't approved.</p><p><strong>Message from the team:</strong> ${message}</p><p>If you think this is a mistake or have questions, please reach out to support.</p>`;
+}
+
 /** Sent to the opponent the moment a challenge is created — see POST /challenges. */
 export function challengeInviteEmailHtml(opponentName: string, challengerName: string, questionCount: number, appUrl: string): string {
   return `<p>Hi ${opponentName},</p><p><strong>${challengerName}</strong> just challenged you to a ${questionCount}-question quiz match on MedschoolProffs.</p><p><a href="${appUrl}/challenge">Accept the challenge and play</a></p><p>Whoever scores higher wins bragging rights — good luck!</p>`;

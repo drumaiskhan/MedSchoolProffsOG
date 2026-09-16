@@ -89,6 +89,12 @@ export const usersTable = pgTable(
     role: text("role").notNull().default("student"), // student | admin (legacy "superadmin" rows are normalized to "admin" at boot — see api-server/src/lib/normalizeLegacyRoles.ts)
     status: text("status").notNull().default("UNVERIFIED"),
     // UNVERIFIED | VERIFIED | PENDING_PAYMENT | PAYMENT_PENDING_REVIEW | ACTIVE | EXPIRED | SUSPENDED | REJECTED
+    // Admin's free-text note attached to the student's current status —
+    // written whenever an admin rejects the account (a reason is required
+    // for that transition, same as rejecting a payment) so the student
+    // gets told *why*. Kept generic (not "rejectionReason") since nothing
+    // stops an admin from also leaving one on other status changes later.
+    statusMessage: text("status_message"),
     emailVerified: boolean("email_verified").notNull().default(false),
     institutionId: integer("institution_id"),
     programId: integer("program_id"),

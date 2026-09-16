@@ -111,17 +111,35 @@ const EDITABLE_KEYS = [
   "AI_API_KEY",
   "AI_MODEL", // optional override; each provider has a sensible default if left blank
   "AI_BASE_URL", // required only when AI_PROVIDER = "custom" — an OpenAI-compatible /chat/completions base URL
-  // Optional backup provider — same shape as AI_PROVIDER/AI_API_KEY/AI_MODEL/
-  // AI_BASE_URL above, tried automatically whenever the primary provider's
-  // request fails (outage, rate limit, bad/expired key, timeout), so one
-  // provider "going off" doesn't take "Ask AI to explain" down with it. See
-  // resolveProviders() in lib/aiExplain.ts. Leaving this blank just means
-  // there's no backup configured — the primary (and any env-var keys) still
-  // work exactly as before.
+  // Up to five optional backup providers — same shape as
+  // AI_PROVIDER/AI_API_KEY/AI_MODEL/AI_BASE_URL above (suffixed _2.._6),
+  // tried in order automatically whenever an earlier provider's request
+  // fails (outage, rate limit, bad/expired key, timeout), so one provider
+  // "going off" doesn't take "Ask AI to explain" down with it — the request
+  // just moves on to the next configured one. See resolveProviders() /
+  // DB_SLOT_SUFFIXES in lib/aiExplain.ts. Leaving a slot blank just means
+  // it isn't configured — earlier slots (and any env-var keys) still work
+  // exactly as before.
   "AI_PROVIDER_2",
   "AI_API_KEY_2",
   "AI_MODEL_2",
   "AI_BASE_URL_2",
+  "AI_PROVIDER_3",
+  "AI_API_KEY_3",
+  "AI_MODEL_3",
+  "AI_BASE_URL_3",
+  "AI_PROVIDER_4",
+  "AI_API_KEY_4",
+  "AI_MODEL_4",
+  "AI_BASE_URL_4",
+  "AI_PROVIDER_5",
+  "AI_API_KEY_5",
+  "AI_MODEL_5",
+  "AI_BASE_URL_5",
+  "AI_PROVIDER_6",
+  "AI_API_KEY_6",
+  "AI_MODEL_6",
+  "AI_BASE_URL_6",
   // Round 3, item 4b: auto-generate explanations (+ hints) at MCQ-import
   // time instead of only on-demand via "Ask AI to explain". Boolean-ish
   // string, same "on"/"off"-by-presence pattern as REGISTRATION_ENABLED —
@@ -210,7 +228,7 @@ function withResolvedMedia(view: Record<string, string>): Record<string, string>
 // masked preview per key and only sends a new value in the PATCH body when
 // the admin is actually changing it (see the blank-value skip in the PATCH
 // handler below).
-const SECRET_KEYS = ["AI_API_KEY", "AI_API_KEY_2", "CLOUDINARY_API_SECRET", "BREVO_API_KEY", "SMTP_PASS", "CUSTOM_EMAIL_API_KEY"] as const;
+const SECRET_KEYS = ["AI_API_KEY", "AI_API_KEY_2", "AI_API_KEY_3", "AI_API_KEY_4", "AI_API_KEY_5", "AI_API_KEY_6", "CLOUDINARY_API_SECRET", "BREVO_API_KEY", "SMTP_PASS", "CUSTOM_EMAIL_API_KEY"] as const;
 function withSecretsMasked(view: Record<string, string>): Record<string, string> {
   const masked: Record<string, string> = {};
   const rest = { ...view };
