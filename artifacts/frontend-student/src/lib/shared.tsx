@@ -168,7 +168,13 @@ export function PracticeResultCard({ mcqs, answers, backHref, backLabel, onResta
       <div className="mt-3 space-y-2.5">{wrongMcqs.map((m, i) => <div key={m.id} className="rounded-2xl border border-[#f0d3cc] bg-[#fff6f3] p-4" data-testid={`row-review-wrong-${i}`}>
         <p className="text-sm font-bold leading-5">{m.question}</p>
         <div className="mt-2 text-xs"><span className="font-bold text-[#a34c3e]">Your answer: {answers[m.id]}</span>{m.correctAnswer && <span className="ml-3 font-bold text-[#287058]">Correct answer: {m.correctAnswer}</span>}</div>
-        {m.explanation && <p className="mt-2 text-[11px] leading-5 text-muted-foreground">{m.explanation}</p>}
+        {/* Per-option breakdown when the question has one (same pattern as
+            ExamResult.tsx's review) — this used to only show the single
+            whole-question m.explanation and silently dropped
+            m.optionExplanations even though it's on the same object. */}
+        {m.optionExplanations?.some((e) => e?.trim())
+          ? <div className="mt-2 space-y-1.5">{m.options.map((opt, oi) => { const optExplanation = m.optionExplanations?.[oi]; const isCorrectOpt = opt === m.correctAnswer; return <div key={opt} className={cn('rounded-lg px-2.5 py-1.5 text-[11px]', isCorrectOpt ? 'bg-[#e6f3ed]' : opt === answers[m.id] ? 'bg-white/70' : 'bg-muted/30')}><div className={cn('font-bold', isCorrectOpt ? 'text-[#287058]' : 'text-muted-foreground')}>{String.fromCharCode(65 + oi)}. {opt}{isCorrectOpt ? ' (correct)' : ''}</div>{optExplanation && <div className="mt-0.5 leading-5 text-muted-foreground">{optExplanation}</div>}</div>; })}</div>
+          : m.explanation && <p className="mt-2 text-[11px] leading-5 text-muted-foreground">{m.explanation}</p>}
       </div>)}</div>
     </div>}
   </div>;
