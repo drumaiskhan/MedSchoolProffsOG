@@ -206,10 +206,15 @@ router.post("/admin/mcqs/generate", requireAdmin, async (req, res): Promise<void
 // ---------------------------------------------------------------------------
 
 const ClassifyDifficultyBody = z.union([
-  z.object({ ids: z.array(z.number().int().positive()).min(1).max(30) }),
+  z.object({ ids: z.array(z.number().int().positive()).min(1).max(20) }),
   z.object({ all: z.literal(true), filters: z.object({ moduleId: z.number().int().optional(), subjectId: z.number().int().optional(), topicId: z.number().int().optional() }).optional() }),
 ]);
-const CLASSIFY_BATCH_CAP = 30;
+// Was 30 — lowered alongside CLASSIFY_CONCURRENCY below (see that comment)
+// so a full batch's worst-case wall-clock time has headroom under
+// Netlify's 26s proxy ceiling. classifyDifficulty itself now also has a
+// hard per-row deadline (see withHardDeadline in aiExplain.ts) — this cap
+// just keeps the round count low on top of that.
+const CLASSIFY_BATCH_CAP = 20;
 
 router.post("/admin/mcqs/classify-difficulty", requireAdmin, async (req, res): Promise<void> => {
   const parsed = ClassifyDifficultyBody.safeParse(req.body);
@@ -242,18 +247,23 @@ router.post("/admin/mcqs/classify-difficulty", requireAdmin, async (req, res): P
   }
 
   // Classified in small concurrent batches rather than one row at a time —
-  // a fully sequential loop over up to CLASSIFY_BATCH_CAP (30) AI calls
-  // easily took 60-90+ seconds end to end, long enough that the hosting
-  // platform's gateway gave up and returned a 502/503/504 before this
-  // response ever arrived (surfaced to the admin as "This is taking longer
-  // than expected"). CLASSIFY_CONCURRENCY keeps a handful of requests in
-  // flight at once — fast enough to comfortably finish inside a normal
-  // gateway timeout, while still well short of hammering the AI provider's
-  // rate limit the way a full Promise.all(30) would (see queueAutoExplain's
-  // comment in mcq-import.ts for why that's avoided elsewhere in this file).
-  // classifyDifficulty never throws (falls back to "moderate" on its own),
-  // so no row here can fail the batch.
-  const CLASSIFY_CONCURRENCY = 6;
+  // a fully sequential loop over up to CLASSIFY_BATCH_CAP (20) AI calls
+  // easily took 60-90+ seconds end to end, long enough that Netlify's proxy
+  // (which forwards this admin app's /api/* calls to the Railway backend —
+  // see netlify.admin.toml) gives up after its hard, non-configurable 26s
+  // limit and returns a bare 504 (surfaced to the admin as "This is taking
+  // longer than expected"). CLASSIFY_CONCURRENCY keeps several requests in
+  // flight at once so a full batch needs only 2 rounds (20 / 10), each now
+  // bounded by classifyDifficulty's own 6s hard deadline (see
+  // withHardDeadline in aiExplain.ts) instead of the previous unbounded
+  // multi-provider failover time — 2 x 6s stays comfortably under the 26s
+  // ceiling even in the worst case, while still well short of hammering the
+  // AI provider's rate limit the way a full Promise.all(20) would (see
+  // queueAutoExplain's comment in mcq-import.ts for why that's avoided
+  // elsewhere in this file). classifyDifficulty never throws or hangs past
+  // its deadline (falls back to "moderate" on its own), so no row here can
+  // fail or stall the batch.
+  const CLASSIFY_CONCURRENCY = 10;
   const results: Array<{ id: number; difficulty: "easy" | "moderate" | "hard" }> = [];
   for (let i = 0; i < rows.length; i += CLASSIFY_CONCURRENCY) {
     const chunk = rows.slice(i, i + CLASSIFY_CONCURRENCY);
@@ -277,10 +287,14 @@ router.post("/admin/mcqs/classify-difficulty", requireAdmin, async (req, res): P
 // ---------------------------------------------------------------------------
 
 const GenerateOptionExplanationsBody = z.union([
-  z.object({ ids: z.array(z.number().int().positive()).min(1).max(30) }),
+  z.object({ ids: z.array(z.number().int().positive()).min(1).max(10) }),
   z.object({ all: z.literal(true), filters: z.object({ moduleId: z.number().int().optional(), subjectId: z.number().int().optional(), topicId: z.number().int().optional() }).optional() }),
 ]);
-const OPTION_EXPLANATIONS_BATCH_CAP = 30;
+// Was 30 — lowered alongside GENERATE_CONCURRENCY below so a full batch
+// fits in one round under generateOptionExplanations' own 12s hard
+// deadline (see withHardDeadline in aiExplain.ts), keeping this route's
+// worst-case wall-clock time well under Netlify's 26s proxy ceiling.
+const OPTION_EXPLANATIONS_BATCH_CAP = 10;
 
 router.post("/admin/mcqs/generate-option-explanations", requireAdmin, async (req, res): Promise<void> => {
   const parsed = GenerateOptionExplanationsBody.safeParse(req.body);
@@ -315,10 +329,16 @@ router.post("/admin/mcqs/generate-option-explanations", requireAdmin, async (req
   }
 
   // Concurrency-limited for the same reason as classify-difficulty: a fully
-  // sequential loop over up to 30 AI calls (each one bigger than a
-  // difficulty call, since it returns a full explanation per option) risks
-  // the hosting platform's gateway timing out before this response returns.
-  const GENERATE_CONCURRENCY = 4;
+  // sequential loop over up to OPTION_EXPLANATIONS_BATCH_CAP (10) AI calls
+  // (each one bigger than a difficulty call, since it returns a full
+  // explanation per option) risks Netlify's hard 26s proxy timeout (see
+  // netlify.admin.toml, and the CLASSIFY_CONCURRENCY comment above) before
+  // this response returns. Set equal to the batch cap so a full batch
+  // completes in a single round of generateOptionExplanations' own 12s
+  // hard deadline (see withHardDeadline in aiExplain.ts) rather than the
+  // previous unbounded multi-provider failover time — one round of 12s
+  // leaves ample headroom under the 26s ceiling.
+  const GENERATE_CONCURRENCY = 10;
   const results: Array<{ id: number; optionExplanations: string[] }> = [];
   for (let i = 0; i < rows.length; i += GENERATE_CONCURRENCY) {
     const chunk = rows.slice(i, i + GENERATE_CONCURRENCY);

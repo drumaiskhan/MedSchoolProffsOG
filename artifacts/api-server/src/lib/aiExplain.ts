@@ -796,11 +796,50 @@ function buildDifficultyPrompt({ question, options, correctAnswer }: Explanation
 
 const VALID_DIFFICULTIES = new Set(["easy", "moderate", "hard"]);
 
+// classifyDifficulty/generateOptionExplanations are both called in tight
+// concurrent batches from admin bulk routes (classify-difficulty,
+// generate-option-explanations) whose HTTP response has to land inside
+// Netlify's *hard, non-configurable* 26s proxy-redirect timeout (the admin
+// app's /api/* calls are proxied through Netlify to the Railway backend —
+// see netlify.admin.toml — and Netlify kills the connection at 26s no
+// matter what, returning exactly the bare 504 "This is taking longer than
+// expected" the admin sees). AI_FETCH_TIMEOUT_MS (25s) bounds a single
+// provider *fetch*, but runPrompt() fails over across every configured
+// backup provider in sequence (see resolveProviders/runPrompt above) —
+// with several providers configured, one that's merely slow (not fully
+// down, so it doesn't fail fast) can make a *single* classify/explain call
+// take 25s x N-providers, which by itself already blows the 26s ceiling
+// before the batch loop even gets to its second row. withHardDeadline
+// below puts an outer wall-clock cap on the whole call (every provider
+// attempt included) so one row can never stall the batch past a bound
+// small enough that CLASSIFY_CONCURRENCY/GENERATE_CONCURRENCY rounds in
+// explanations.ts stay comfortably under 26s — falling back to the same
+// safe default (`moderate` / `[]`) these functions already use on any
+// other failure. The slow call itself isn't cancelled (fetchWithTimeout's
+// own AbortController still cleans it up on its own schedule); this just
+// stops the caller from waiting on it.
+async function withHardDeadline<T>(promise: Promise<T>, ms: number, onTimeout: () => T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<T>((resolve) => { timer = setTimeout(() => resolve(onTimeout()), ms); });
+  try {
+    return await Promise.race([promise, deadline]);
+  } finally {
+    clearTimeout(timer!);
+  }
+}
+
+// 6s is generous for a single-word (max 100 tokens) classification against
+// any one provider — typical latency is 1-3s — while keeping
+// CLASSIFY_CONCURRENCY x this value comfortably under Netlify's 26s ceiling
+// even in the worst case where every row in a round hits it.
+const CLASSIFY_HARD_DEADLINE_MS = 6_000;
+
 /** Auto-classifies difficulty for a freshly-imported/AI-drafted MCQ instead
  * of leaving every import stuck at the parser's "moderate" placeholder.
- * Falls back to "moderate" on an unparseable/unexpected response rather
- * than throwing — this is a nice-to-have on top of a successful import,
- * not something that should fail the import itself.
+ * Falls back to "moderate" on an unparseable/unexpected response, an error,
+ * OR simply taking too long (see withHardDeadline above) — this is a
+ * nice-to-have on top of a successful import, not something that should
+ * fail (or stall) the caller.
  *
  * maxTokens is 100 (up from the original 20) even though the answer itself
  * is one word — 20 was tight enough that any provider preamble, stray
@@ -809,13 +848,15 @@ const VALID_DIFFICULTIES = new Set(["easy", "moderate", "hard"]);
  * silently pushing every import to the "moderate" fallback below instead
  * of an actual classification. */
 export async function classifyDifficulty(request: ExplanationRequest, modelOverride?: string): Promise<"easy" | "moderate" | "hard"> {
-  try {
-    const raw = await runPrompt(buildDifficultyPrompt(request), 100, false, modelOverride);
-    const normalized = raw.trim().toLowerCase().replace(/[^a-z]/g, "");
-    return VALID_DIFFICULTIES.has(normalized) ? (normalized as "easy" | "moderate" | "hard") : "moderate";
-  } catch {
-    return "moderate";
-  }
+  return withHardDeadline((async () => {
+    try {
+      const raw = await runPrompt(buildDifficultyPrompt(request), 100, false, modelOverride);
+      const normalized = raw.trim().toLowerCase().replace(/[^a-z]/g, "");
+      return VALID_DIFFICULTIES.has(normalized) ? (normalized as "easy" | "moderate" | "hard") : "moderate";
+    } catch {
+      return "moderate";
+    }
+  })(), CLASSIFY_HARD_DEADLINE_MS, () => "moderate");
 }
 
 function buildOptionExplanationsPrompt({ question, options, correctAnswer }: ExplanationRequest): string {
@@ -835,24 +876,37 @@ function buildOptionExplanationsPrompt({ question, options, correctAnswer }: Exp
   ].filter(Boolean).join("\n");
 }
 
+// 12s per row — this call returns a full explanation per option (more
+// tokens, more latency than classifyDifficulty's single word) so it gets a
+// larger deadline, but still small enough that GENERATE_CONCURRENCY rounds
+// in explanations.ts stay well under Netlify's 26s proxy ceiling even in
+// the worst case. See withHardDeadline's comment above classifyDifficulty
+// for why an outer deadline (rather than just AI_FETCH_TIMEOUT_MS) is
+// needed here at all.
+const GENERATE_OPTION_EXPLANATIONS_HARD_DEADLINE_MS = 12_000;
+
 /** Backfills `optionExplanations` for an existing MCQ that already has
  * options/correctAnswer but no (or incomplete) per-option explanations —
  * the bulk "generate option explanations" admin action, same shape as
  * classifyDifficulty. Only trusts the response if it comes back as exactly
  * one string per option (a mismatched-length array would silently
  * misattribute explanations to the wrong option index downstream, same
- * concern as parseMcqJson above) — returns [] otherwise/on error so the
- * caller can skip that row rather than write bad data. */
+ * concern as parseMcqJson above) — returns [] on a bad shape, an error, OR
+ * simply taking too long (see withHardDeadline above classifyDifficulty)
+ * so the caller can skip that row rather than write bad data or stall the
+ * batch. */
 export async function generateOptionExplanations(request: ExplanationRequest, modelOverride?: string): Promise<string[]> {
-  try {
-    const raw = await runPrompt(buildOptionExplanationsPrompt(request), Math.max(500, request.options.length * 150), "array", modelOverride);
-    const cleaned = stripReasoningArtifacts(raw).replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
-    const parsed: unknown = JSON.parse(cleaned);
-    if (!Array.isArray(parsed) || parsed.length !== request.options.length) return [];
-    return parsed.map((e) => String(e ?? "").trim());
-  } catch {
-    return [];
-  }
+  return withHardDeadline((async () => {
+    try {
+      const raw = await runPrompt(buildOptionExplanationsPrompt(request), Math.max(500, request.options.length * 150), "array", modelOverride);
+      const cleaned = stripReasoningArtifacts(raw).replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+      const parsed: unknown = JSON.parse(cleaned);
+      if (!Array.isArray(parsed) || parsed.length !== request.options.length) return [];
+      return parsed.map((e) => String(e ?? "").trim());
+    } catch {
+      return [];
+    }
+  })(), GENERATE_OPTION_EXPLANATIONS_HARD_DEADLINE_MS, () => []);
 }
 
 export async function generateFlashcardExplanation(request: FlashcardExplanationRequest): Promise<string> {
