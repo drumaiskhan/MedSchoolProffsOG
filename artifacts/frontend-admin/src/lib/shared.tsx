@@ -827,31 +827,67 @@ export function analyzeMcqRows(rows: AdminMcqRow[]) {
 
 export function AnalysisPanel({ rows, label, filters }: { rows: AdminMcqRow[]; label: string; filters: { moduleId?: number; subjectId?: number; topicId?: number } }) {
   const a = analyzeMcqRows(rows);
-  // AI re-classification is separate from the client-side count above — it
-  // actually calls the model per question (capped at 30/request server-side,
-  // see /admin/mcqs/classify-difficulty), so it's a deliberate action with
-  // its own pending/result state, not something that runs automatically
-  // just from opening this panel.
+  // AI re-classification calls the model per question. The server still
+  // caps each individual HTTP call (see CLASSIFY_BATCH_CAP in
+  // classify-difficulty.ts) so a single request can't run long enough to
+  // hit the hosting platform's gateway timeout — but this one click now
+  // drives that capped endpoint in a loop, client-side, until the whole
+  // scope (however large) is done, instead of making the admin click
+  // "again" themselves for every batch of 30.
   const classify = useMutation({
-    mutationFn: () => mcqAdminApi.classifyDifficulty({ all: true, filters }),
+    mutationFn: async () => {
+      let classified = 0;
+      let remaining = Infinity;
+      const progress = toast({ title: 'Classifying difficulty…', description: `Starting "${label}"…` });
+      try {
+        while (remaining > 0) {
+          const res = await mcqAdminApi.classifyDifficulty({ all: true, filters });
+          classified += res.classified;
+          remaining = res.remaining;
+          if (res.classified === 0) break; // nothing left matched — avoid spinning forever
+          progress.update({ id: progress.id, title: 'Classifying difficulty…', description: remaining > 0 ? `${classified} done so far in "${label}" — ${remaining} left…` : `${classified} done in "${label}" — finishing up…` });
+        }
+      } finally {
+        progress.dismiss();
+      }
+      return { classified };
+    },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['admin-mcqs-tree'] });
       queryClient.invalidateQueries({ queryKey: getListMcqsQueryKey() });
-      toast({ title: `AI classified ${res.classified} question${res.classified === 1 ? '' : 's'}`, description: res.remaining > 0 ? `${res.remaining} more left in "${label}" — click again to continue.` : undefined });
+      toast({ title: `AI classified ${res.classified} question${res.classified === 1 ? '' : 's'} in "${label}"` });
     },
     onError: (err: unknown) => toast({ title: 'Could not classify difficulty', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
   // Backfills per-option explanations for questions in this scope that are
-  // missing them — same batch-capped/click-again shape as classify above
-  // (see /admin/mcqs/generate-option-explanations), so a bank of 100+
-  // questions gets worked through 30 at a time rather than one call trying
-  // to do it all and timing out.
+  // missing them. Same loop-until-done shape as classify above: the server
+  // endpoint is still batch-capped per call (see
+  // OPTION_EXPLANATIONS_BATCH_CAP), but this mutation now keeps calling it
+  // — with a running progress toast — until every question in the whole
+  // block/module/subject/topic scope has been covered, so a bank of
+  // hundreds or thousands of questions is handled in one click.
   const generateOptionExplanations = useMutation({
-    mutationFn: () => mcqAdminApi.generateOptionExplanations({ all: true, filters }),
+    mutationFn: async () => {
+      let generated = 0;
+      let remaining = Infinity;
+      const progress = toast({ title: 'Generating option explanations…', description: `Starting "${label}"…` });
+      try {
+        while (remaining > 0) {
+          const res = await mcqAdminApi.generateOptionExplanations({ all: true, filters });
+          generated += res.generated;
+          remaining = res.remaining;
+          if (res.generated === 0) break; // nothing left matched — avoid spinning forever
+          progress.update({ id: progress.id, title: 'Generating option explanations…', description: remaining > 0 ? `${generated} done so far in "${label}" — ${remaining} left…` : `${generated} done in "${label}" — finishing up…` });
+        }
+      } finally {
+        progress.dismiss();
+      }
+      return { generated };
+    },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['admin-mcqs-tree'] });
       queryClient.invalidateQueries({ queryKey: getListMcqsQueryKey() });
-      toast({ title: `AI generated option explanations for ${res.generated} question${res.generated === 1 ? '' : 's'}`, description: res.remaining > 0 ? `${res.remaining} more left in "${label}" — click again to continue.` : undefined });
+      toast({ title: `AI generated option explanations for ${res.generated} question${res.generated === 1 ? '' : 's'} in "${label}"` });
     },
     onError: (err: unknown) => toast({ title: 'Could not generate option explanations', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
@@ -879,8 +915,8 @@ export function AnalysisPanel({ rows, label, filters }: { rows: AdminMcqRow[]; l
       <div className="rounded-lg bg-muted p-2 text-center"><div className="text-sm font-extrabold">{a.explained}/{a.total}</div><div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Explained</div></div>
     </div>
     <div className="mt-2 flex flex-wrap gap-2">
-      <button type="button" disabled={classify.isPending} onClick={(e) => { e.stopPropagation(); classify.mutate(); }} className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-[#eef7f1] px-2.5 py-1.5 text-[11px] font-bold text-primary disabled:opacity-50" data-testid="button-classify-difficulty" title="Re-runs AI difficulty classification on up to 30 questions in this scope per click">{classify.isPending ? 'Classifying…' : <><Wand2 size={12} /> AI: classify difficulty (up to 30)</>}</button>
-      <button type="button" disabled={generateOptionExplanations.isPending} onClick={(e) => { e.stopPropagation(); generateOptionExplanations.mutate(); }} className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-[#eef7f1] px-2.5 py-1.5 text-[11px] font-bold text-primary disabled:opacity-50" data-testid="button-generate-option-explanations" title="Generates per-option explanations for up to 30 questions in this scope that are missing them, per click — click again for the rest (works for banks of 100+)">{generateOptionExplanations.isPending ? 'Generating…' : <><Wand2 size={12} /> AI: generate option explanations (up to 30)</>}</button>
+      <button type="button" disabled={classify.isPending} onClick={(e) => { e.stopPropagation(); classify.mutate(); }} className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-[#eef7f1] px-2.5 py-1.5 text-[11px] font-bold text-primary disabled:opacity-50" data-testid="button-classify-difficulty" title={`Re-runs AI difficulty classification on every question in "${label}" (${a.total} total) — one click, processed in the background in small batches`}>{classify.isPending ? 'Classifying…' : <><Wand2 size={12} /> AI: classify difficulty (all {a.total})</>}</button>
+      <button type="button" disabled={generateOptionExplanations.isPending} onClick={(e) => { e.stopPropagation(); generateOptionExplanations.mutate(); }} className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-[#eef7f1] px-2.5 py-1.5 text-[11px] font-bold text-primary disabled:opacity-50" data-testid="button-generate-option-explanations" title={`Generates per-option explanations for every question in "${label}" that's missing them — one click, processed in the background in small batches`}>{generateOptionExplanations.isPending ? 'Generating…' : <><Wand2 size={12} /> AI: generate option explanations (all)</>}</button>
       <button type="button" disabled={shuffle.isPending} onClick={(e) => { e.stopPropagation(); shuffle.mutate(); }} className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-[#eef7f1] px-2.5 py-1.5 text-[11px] font-bold text-primary disabled:opacity-50" data-testid="button-shuffle-options" title="Randomly reorders every question's options in this scope, so the correct answer isn't always the same letter — the correct option moves with its text, it stays correct wherever it lands">{shuffle.isPending ? 'Shuffling…' : <><Shuffle size={12} /> Shuffle option order (all {a.total})</>}</button>
     </div>
   </div>;

@@ -358,18 +358,22 @@ export const mcqAdminApi = {
     request<{ ok: true; created: number; mcqs: AdminMcqRow[] }>('/admin/mcqs/bulk', { method: 'POST', body: JSON.stringify({ mcqs }) }),
   generateAi: (topicId: number, count: number, difficulty?: 'easy' | 'moderate' | 'hard') =>
     request<{ drafts: Array<{ question: string; options: string[]; correctAnswer: string; explanation: string; optionExplanations?: (string | null)[]; difficulty?: string }>; topicLabel: string }>('/admin/mcqs/generate', { method: 'POST', body: JSON.stringify({ topicId, count, difficulty }) }),
-  // AI-reclassifies difficulty for existing questions (easy/moderate/hard),
-  // capped at 30 per call server-side — pass {all:true, filters} for a
-  // scope, {ids} for an explicit batch. Returns how many are still left in
-  // that scope so the UI can offer "classify next batch".
+  // AI-reclassifies difficulty for existing questions (easy/moderate/hard).
+  // Each call is still capped server-side (see CLASSIFY_BATCH_CAP) so a
+  // single request can't run long enough to hit a hosting gateway timeout
+  // — pass {all:true, filters} for a scope, {ids} for an explicit batch.
+  // Returns how many are still left in that scope; callers that want the
+  // *whole* scope done should call this again while `remaining > 0` (the
+  // AnalysisPanel button in shared.tsx does this loop automatically).
   classifyDifficulty: (body: { ids: number[] } | { all: true; filters?: { moduleId?: number; subjectId?: number; topicId?: number } }) =>
     request<{ classified: number; remaining: number; results: Array<{ id: number; difficulty: 'easy' | 'moderate' | 'hard' }> }>('/admin/mcqs/classify-difficulty', { method: 'POST', body: JSON.stringify(body) }),
   // AI-backfills optionExplanations for existing questions that are
-  // missing them (or have an incomplete set), capped at 30 per call
-  // server-side — same {ids} / {all, filters} shape as classifyDifficulty
-  // above, so a bank of 100+ questions is worked through by clicking
-  // "again" until remaining is 0. Skips questions that already have a full
-  // set of per-option explanations rather than overwriting them.
+  // missing them (or have an incomplete set). Same capped-per-call /
+  // {ids} / {all, filters} shape as classifyDifficulty above — a bank of
+  // 100+ questions is worked through by calling this repeatedly while
+  // `remaining > 0` (handled automatically by the AnalysisPanel button in
+  // shared.tsx). Skips questions that already have a full set of
+  // per-option explanations rather than overwriting them.
   generateOptionExplanations: (body: { ids: number[] } | { all: true; filters?: { moduleId?: number; subjectId?: number; topicId?: number } }) =>
     request<{ generated: number; remaining: number; results: Array<{ id: number; optionExplanations: string[] }> }>('/admin/mcqs/generate-option-explanations', { method: 'POST', body: JSON.stringify(body) }),
   // One-click fix for the "imported 406, module only shows 380" gap — see
