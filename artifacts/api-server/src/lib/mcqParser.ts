@@ -22,7 +22,22 @@ export interface ParsedMcqCandidate {
   // reliable signal for this from raw file text, so every candidate starts
   // at "moderate" and the admin adjusts it per-question in the review UI
   // before committing — same default the DB column itself uses.
+  // Tabular sources (see extractMcqsFromRows) CAN carry a real difficulty
+  // column though (e.g. "Difficulty_Scale": Easy/Medium/Hard) — when one is
+  // found and recognized, this is the mapped value instead of the blanket
+  // "moderate" fallback.
   difficulty: "easy" | "moderate" | "hard";
+  // Populated only from tabular sources with recognizable Block/Module/
+  // Subject/Topic-ish columns (see HEADER_ALIASES and extractMcqsFromRows
+  // below) — e.g. an "enriched" question-bank export that tags every row
+  // with its place in the curriculum (Block-I > Module 3 > Subject >
+  // Chapter/Theme). This is a *suggestion* only: nothing in the app's
+  // Block -> Module -> Subject -> Topic hierarchy is auto-created or
+  // matched from it. The import-review UI/commit route would need to read
+  // this, let the admin confirm/edit it, and resolve or create the actual
+  // rows (moduleAdminApi/blockAdminApi/subjectAdminApi/topicAdminApi) for
+  // it to do anything yet — see AI_HANDOFF note on this feature.
+  suggestedPath?: { block: string | null; module: string | null; subject: string | null; topic: string | null } | null;
 }
 
 export interface ImportPatternSet {
@@ -243,37 +258,97 @@ export function extractMcqsFromText(rawText: string, patterns: ImportPatternSet 
     const hint = block.hintLines.join(" ").trim() || null;
     const reference = block.referenceLines.join(" ").trim() || null;
     const needsReview = !question || options.length < 2 || !correctAnswer;
-    return { question, options, correctAnswer, explanation, optionExplanations: hasAnyOptionExplanation ? optionExplanationTexts : null, reference, hint, needsReview, rawBlock: block.raw.join("\n"), difficulty: "moderate" as const };
+    return { question, options, correctAnswer, explanation, optionExplanations: hasAnyOptionExplanation ? optionExplanationTexts : null, reference, hint, needsReview, rawBlock: block.raw.join("\n"), difficulty: "moderate" as const, suggestedPath: null };
   }).filter((c) => c.question.length > 0);
 }
 
 const HEADER_ALIASES: Record<string, string[]> = {
-  question: ["question", "questions", "q", "stem"],
+  // "stem" and "question stem" cover the "enriched question-bank" export
+  // style (e.g. "Question_stem") seen alongside per-option clarification
+  // columns and a curriculum-hierarchy tag per row — see the block/module/
+  // subject/topic aliases and suggestedPath below.
+  question: ["question", "questions", "q", "stem", "question stem"],
   optionA: ["optiona", "option a", "a", "choice a", "opt a"],
   optionB: ["optionb", "option b", "b", "choice b", "opt b"],
   optionC: ["optionc", "option c", "c", "choice c", "opt c"],
   optionD: ["optiond", "option d", "d", "choice d", "opt d"],
   optionE: ["optione", "option e", "e", "choice e", "opt e"],
-  answer: ["answer", "correct answer", "correct", "key", "ans"],
-  explanation: ["explanation", "rationale", "explain", "reason"],
+  answer: ["answer", "correct answer", "correct", "key", "ans", "correct option"],
+  explanation: ["explanation", "rationale", "explain", "reason", "concept explanation"],
   // Per-option explanation columns — "why is A right/wrong", "why is B
   // right/wrong", etc. Distinct from the single whole-question
-  // "explanation" column above.
-  explanationA: ["explanationa", "explanation a", "why a", "rationale a", "explain a", "reason a"],
-  explanationB: ["explanationb", "explanation b", "why b", "rationale b", "explain b", "reason b"],
-  explanationC: ["explanationc", "explanation c", "why c", "rationale c", "explain c", "reason c"],
-  explanationD: ["explanationd", "explanation d", "why d", "rationale d", "explain d", "reason d"],
-  explanationE: ["explanatione", "explanation e", "why e", "rationale e", "explain e", "reason e"],
+  // "explanation" column above. "option clarification a" etc. covers the
+  // enriched-export naming ("Option_Clarification_A").
+  explanationA: ["explanationa", "explanation a", "why a", "rationale a", "explain a", "reason a", "option clarification a"],
+  explanationB: ["explanationb", "explanation b", "why b", "rationale b", "explain b", "reason b", "option clarification b"],
+  explanationC: ["explanationc", "explanation c", "why c", "rationale c", "explain c", "reason c", "option clarification c"],
+  explanationD: ["explanationd", "explanation d", "why d", "rationale d", "explain d", "reason d", "option clarification d"],
+  explanationE: ["explanatione", "explanation e", "why e", "rationale e", "explain e", "reason e", "option clarification e"],
   reference: ["reference", "ref", "source"],
-  hint: ["hint", "tip", "clue"],
+  hint: ["hint", "tip", "clue", "question hint"],
+  // Real difficulty signal when a source provides one (e.g.
+  // "Difficulty_Scale": Easy/Medium/Hard) — mapped to the app's
+  // easy/moderate/hard enum in extractMcqsFromRows below, instead of every
+  // row silently defaulting to "moderate".
+  difficulty: ["difficulty", "difficulty scale", "difficulty level"],
+  // Bonus context columns some enriched exports include per question.
+  // These don't have their own DB field, so they're folded into the
+  // whole-question `explanation` as labeled paragraphs (see
+  // buildEnrichedExplanation below) rather than silently dropped.
+  keyTakeaway: ["key takeaway", "takeaway"],
+  commonPitfall: ["common pitfall", "pitfall"],
+  clinicalPearl: ["clinical pearl", "pearl"],
+  learningObjective: ["lo", "learning objective", "objective"],
+  // Curriculum-placement columns — see suggestedPath on
+  // ParsedMcqCandidate. "chapter"/"topic" are treated as the same
+  // (whichever the file uses) since both are the finest-grained label
+  // available, one level below "theme".
+  hierBlock: ["block"],
+  hierModule: ["module"],
+  hierSubject: ["subject"],
+  hierTheme: ["theme"],
+  hierChapter: ["chapter", "topic"],
 };
 
 function matchHeader(header: string): string | null {
-  const normalized = header.trim().toLowerCase();
+  // Normalize underscores/hyphens to spaces (so "Option_A" / "Option-A"
+  // match the "option a" alias the same as "Option A" does) and collapse
+  // repeated whitespace before comparing.
+  const normalized = header.trim().toLowerCase().replace(/[_\-]+/g, " ").replace(/\s+/g, " ").trim();
   for (const [key, aliases] of Object.entries(HEADER_ALIASES)) {
     if (aliases.includes(normalized)) return key;
   }
   return null;
+}
+
+const DIFFICULTY_ALIASES: Record<string, "easy" | "moderate" | "hard"> = {
+  easy: "easy", e: "easy", low: "easy", basic: "easy", "1": "easy",
+  medium: "moderate", moderate: "moderate", mid: "moderate", m: "moderate", average: "moderate", "2": "moderate",
+  hard: "hard", h: "hard", difficult: "hard", high: "hard", "3": "hard",
+};
+
+function normalizeDifficulty(raw: string | undefined): "easy" | "moderate" | "hard" {
+  if (!raw) return "moderate";
+  const key = raw.trim().toLowerCase();
+  return DIFFICULTY_ALIASES[key] ?? "moderate";
+}
+
+/**
+ * Folds the bonus per-question context columns some enriched exports carry
+ * (Key_Takeaway, Common_Pitfall, Clinical_Pearl, LO) into the whole-question
+ * explanation as labeled paragraphs, so a file that has them doesn't lose
+ * them just because there's no dedicated DB column for each. Only adds a
+ * paragraph for whichever of the four columns is actually present and
+ * non-empty on this row.
+ */
+function buildEnrichedExplanation(base: string | null, extra: { keyTakeaway?: string; commonPitfall?: string; clinicalPearl?: string; learningObjective?: string }): string | null {
+  const parts = [base?.trim() || null];
+  if (extra.learningObjective?.trim()) parts.push(`Learning objective: ${extra.learningObjective.trim()}`);
+  if (extra.keyTakeaway?.trim()) parts.push(`Key takeaway: ${extra.keyTakeaway.trim()}`);
+  if (extra.commonPitfall?.trim()) parts.push(`Common pitfall: ${extra.commonPitfall.trim()}`);
+  if (extra.clinicalPearl?.trim()) parts.push(`Clinical pearl: ${extra.clinicalPearl.trim()}`);
+  const joined = parts.filter((p): p is string => !!p).join("\n\n");
+  return joined || null;
 }
 
 /**
@@ -294,6 +369,20 @@ export function extractMcqsFromRows(rows: string[][]): ParsedMcqCandidate[] | nu
   const hasPerOptionExplanations = explanationCols.some((c) => c >= 0);
   const referenceCol = headerRow.indexOf("reference");
   const hintCol = headerRow.indexOf("hint");
+  const difficultyCol = headerRow.indexOf("difficulty");
+  // Bonus context + curriculum-placement columns (see HEADER_ALIASES'
+  // own comments) — all optional, all -1 (ignored) for a plain question
+  // bank that doesn't have them.
+  const keyTakeawayCol = headerRow.indexOf("keyTakeaway");
+  const commonPitfallCol = headerRow.indexOf("commonPitfall");
+  const clinicalPearlCol = headerRow.indexOf("clinicalPearl");
+  const learningObjectiveCol = headerRow.indexOf("learningObjective");
+  const blockCol = headerRow.indexOf("hierBlock");
+  const moduleCol = headerRow.indexOf("hierModule");
+  const subjectCol = headerRow.indexOf("hierSubject");
+  const themeCol = headerRow.indexOf("hierTheme");
+  const chapterCol = headerRow.indexOf("hierChapter");
+  const hasHierarchyCols = blockCol >= 0 || moduleCol >= 0 || subjectCol >= 0 || themeCol >= 0 || chapterCol >= 0;
 
   const candidates: ParsedMcqCandidate[] = [];
   for (let i = 1; i < rows.length; i++) {
@@ -325,10 +414,33 @@ export function extractMcqsFromRows(rows: string[][]): ParsedMcqCandidate[] | nu
     const optionExplanations = hasPerOptionExplanations
       ? optionCols.map((c, idx) => (c >= 0 ? (explanationCols[idx] >= 0 ? String(row[explanationCols[idx]] ?? "").trim() || null : null) : undefined)).filter((v) => v !== undefined) as (string | null)[]
       : null;
-    const explanation = explanationCol >= 0 ? String(row[explanationCol] ?? "").trim() || null : (optionExplanations && correctIndex >= 0 ? optionExplanations[correctIndex] : null);
+    const baseExplanation = explanationCol >= 0 ? String(row[explanationCol] ?? "").trim() || null : (optionExplanations && correctIndex >= 0 ? optionExplanations[correctIndex] : null);
+    // Fold in Key_Takeaway/Common_Pitfall/Clinical_Pearl/LO-style bonus
+    // columns when present, so an "enriched" export's extra per-question
+    // context survives the import instead of being silently dropped just
+    // because there's no dedicated column for each of them.
+    const explanation = buildEnrichedExplanation(baseExplanation, {
+      keyTakeaway: keyTakeawayCol >= 0 ? String(row[keyTakeawayCol] ?? "") : undefined,
+      commonPitfall: commonPitfallCol >= 0 ? String(row[commonPitfallCol] ?? "") : undefined,
+      clinicalPearl: clinicalPearlCol >= 0 ? String(row[clinicalPearlCol] ?? "") : undefined,
+      learningObjective: learningObjectiveCol >= 0 ? String(row[learningObjectiveCol] ?? "") : undefined,
+    });
     const reference = referenceCol >= 0 ? String(row[referenceCol] ?? "").trim() || null : null;
     const hint = hintCol >= 0 ? String(row[hintCol] ?? "").trim() || null : null;
-    candidates.push({ question, options, correctAnswer, explanation, optionExplanations: optionExplanations && optionExplanations.some((e) => e != null) ? optionExplanations : null, reference, hint, needsReview: options.length < 2 || !correctAnswer, difficulty: "moderate" });
+    const difficulty = difficultyCol >= 0 ? normalizeDifficulty(String(row[difficultyCol] ?? "")) : "moderate";
+    // Curriculum-placement suggestion (Block > Module > Subject > Topic) —
+    // "topic" prefers the more granular Chapter column over Theme when a
+    // file has both (see hierChapter's own comment above). This is only a
+    // suggestion carried through to the review UI/commit payload; nothing
+    // reads or acts on it yet — see suggestedPath's own comment on
+    // ParsedMcqCandidate.
+    const suggestedPath = hasHierarchyCols ? {
+      block: blockCol >= 0 ? String(row[blockCol] ?? "").trim() || null : null,
+      module: moduleCol >= 0 ? String(row[moduleCol] ?? "").trim() || null : null,
+      subject: subjectCol >= 0 ? String(row[subjectCol] ?? "").trim() || null : null,
+      topic: (chapterCol >= 0 ? String(row[chapterCol] ?? "").trim() || null : null) ?? (themeCol >= 0 ? String(row[themeCol] ?? "").trim() || null : null),
+    } : null;
+    candidates.push({ question, options, correctAnswer, explanation, optionExplanations: optionExplanations && optionExplanations.some((e) => e != null) ? optionExplanations : null, reference, hint, needsReview: options.length < 2 || !correctAnswer, difficulty, suggestedPath });
   }
   return candidates;
 }

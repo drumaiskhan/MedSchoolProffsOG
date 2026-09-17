@@ -41,7 +41,7 @@ import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiReq
 // mutations already call invalidateQueries on the specific keys they
 // change, so edits still show up immediately — this only avoids redundant
 // background refetches of data nothing has touched.
-import { DifficultyPicker, ExplanationCoverage, SectionHeader, cn, ConfirmDialog, McqBankTree, groupBlocksForPicker, BackupScopePicker, ProgramYearFilter, filterBlocksByProgramYear, studyYearToNumber } from '@/lib/shared';
+import { DifficultyPicker, ExplanationCoverage, SectionHeader, cn, ConfirmDialog, McqBankTree, groupBlocksForPicker, BackupScopePicker, ProgramYearFilter, filterBlocksByProgramYear, studyYearToNumber, SuggestedPathHint } from '@/lib/shared';
 import { queryClient } from '@/lib/query-client';
 
 function AdminMcqs() {
@@ -286,6 +286,7 @@ function AdminMcqs() {
         <div className="max-h-[32rem] space-y-3 overflow-y-auto pr-1">{candidates.map((c, i) => <div key={i} className={cn('rounded-2xl border bg-card p-4', c.needsReview ? 'border-[#e5a952]' : 'border-border')} data-testid={`card-candidate-${i}`}>
           <div className="flex items-center justify-between"><span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold', c.needsReview ? 'bg-[#fdeecb] text-[#8a5a12]' : 'bg-[#d7eee4] text-[#164b4b]')}>{c.needsReview ? 'Needs review' : 'Looks good'}</span><button onClick={() => removeCandidate(i)} className="text-[11px] font-bold text-destructive" data-testid={`button-remove-candidate-${i}`}>Remove</button></div>
           <textarea value={c.question} onChange={(e) => updateCandidate(i, { question: e.target.value })} className="mt-2 min-h-14 w-full rounded-lg border border-border bg-background p-2 text-xs" data-testid={`input-candidate-question-${i}`} />
+          <SuggestedPathHint path={c.suggestedPath} />
           <div className="mt-2 grid gap-2 sm:grid-cols-2">{[0, 1, 2, 3, 4].map((oi) => <input key={oi} value={c.options[oi] || ''} onChange={(e) => { const opts = [...c.options]; opts[oi] = e.target.value; updateCandidate(i, { options: opts }); }} placeholder={`Option ${String.fromCharCode(65 + oi)}${oi === 4 ? ' (optional)' : ''}`} className="h-9 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`input-candidate-option-${i}-${oi}`} />)}</div>
           <div className="mt-2 flex items-center gap-2"><span className="text-[11px] font-bold text-muted-foreground">Correct:</span><select value={c.correctAnswer ?? ''} onChange={(e) => updateCandidate(i, { correctAnswer: e.target.value || null })} className="h-8 flex-1 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`select-candidate-answer-${i}`}><option value="">Not set</option>{c.options.map((opt, oi) => opt && <option key={oi} value={opt}>{String.fromCharCode(65 + oi)}. {opt.slice(0, 40)}</option>)}</select></div>
           <div className="mt-2 flex items-center gap-2"><span className="text-[11px] font-bold text-muted-foreground">Difficulty:</span><DifficultyPicker value={c.difficulty} onChange={(v) => updateCandidate(i, { difficulty: v })} testId={`button-candidate-difficulty-${i}`} /></div>

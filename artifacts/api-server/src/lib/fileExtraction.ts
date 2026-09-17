@@ -24,12 +24,12 @@ export async function extractFileContent(buffer: Buffer, originalName: string, m
   }
 
   if (ext === ".csv" || mimeType.includes("csv")) {
-    const text = buffer.toString("utf8");
-    const rows = text
-      .replace(/\r\n/g, "\n")
-      .split("\n")
-      .filter((line) => line.length > 0)
-      .map((line) => parseCsvLine(line));
+    // Strip a UTF-8 BOM (common from Excel/Google Sheets exports) so the
+    // header row's first cell — e.g. "Question_ID" — doesn't come through
+    // as "\uFEFFQuestion_ID" and silently fail every header-alias match.
+    let text = buffer.toString("utf8");
+    if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+    const rows = parseCsv(text);
     return { kind: "rows", rows };
   }
 
@@ -49,26 +49,41 @@ export async function extractFileContent(buffer: Buffer, originalName: string, m
   return { kind: "text", text: buffer.toString("utf8") };
 }
 
-/** Minimal CSV line parser handling quoted fields with commas. */
-function parseCsvLine(line: string): string[] {
-  const cells: string[] = [];
-  let current = "";
+/**
+ * Full-text CSV parser (replaces the old line-by-line parseCsvLine, which
+ * split on "\n" BEFORE handling quotes — so any quoted cell containing a
+ * literal newline, e.g. a multi-paragraph explanation pasted from a Word
+ * doc or a Google Sheets export, silently split into two corrupted rows
+ * instead of staying one cell). This scans the whole buffer character by
+ * character so a newline inside an open quote is just part of the cell.
+ * Handles doubled-quote ("") escaping the same as before, and both \r\n and
+ * \n line endings.
+ */
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
   let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
+  let i = 0;
+  const n = text.length;
+  const endCell = () => { row.push(cell); cell = ""; };
+  const endRow = () => { endCell(); rows.push(row); row = []; };
+  while (i < n) {
+    const char = text[i];
     if (inQuotes) {
-      if (char === '"' && line[i + 1] === '"') { current += '"'; i++; }
-      else if (char === '"') { inQuotes = false; }
-      else current += char;
-    } else if (char === '"') {
-      inQuotes = true;
-    } else if (char === ",") {
-      cells.push(current);
-      current = "";
-    } else {
-      current += char;
+      if (char === '"' && text[i + 1] === '"') { cell += '"'; i += 2; continue; }
+      if (char === '"') { inQuotes = false; i++; continue; }
+      cell += char; i++; continue;
     }
+    if (char === '"') { inQuotes = true; i++; continue; }
+    if (char === ",") { endCell(); i++; continue; }
+    if (char === "\r" && text[i + 1] === "\n") { endRow(); i += 2; continue; }
+    if (char === "\n" || char === "\r") { endRow(); i++; continue; }
+    cell += char; i++;
   }
-  cells.push(current);
-  return cells;
+  // Final cell/row if the file doesn't end on a line break.
+  if (cell.length > 0 || row.length > 0) endRow();
+  // Drop fully-empty trailing/blank lines (e.g. a stray newline at EOF),
+  // same as the old filter((line) => line.length > 0) did.
+  return rows.filter((r) => !(r.length === 1 && r[0] === ""));
 }

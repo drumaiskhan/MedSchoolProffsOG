@@ -125,7 +125,13 @@ export interface PaymentRow { id: number; studentName: string; institution: stri
 export const STUDENT_STATUSES = ['UNVERIFIED', 'VERIFIED', 'PAYMENT_PENDING_REVIEW', 'ACTIVE', 'EXPIRED', 'SUSPENDED', 'REJECTED', 'DELETED'] as const;
 
 export interface McqImportProfile { id: number; name: string; questionPattern: string; optionPattern: string; answerPattern: string; explanationPattern: string; hintPattern?: string | null; referencePattern?: string | null; isDefault: boolean }
-export interface McqCandidate { question: string; options: string[]; correctAnswer: string | null; explanation: string | null; optionExplanations: (string | null)[] | null; reference: string | null; hint: string | null; needsReview: boolean; rawBlock?: string; difficulty: 'easy' | 'moderate' | 'hard' }
+// suggestedPath: only populated for tabular sources with recognizable
+// Block/Module/Subject/Topic-ish columns (an "enriched" export tagging
+// every question with its place in the curriculum) — see mcqParser.ts.
+// It's a suggestion only; no review UI reads/edits it yet and commit
+// doesn't act on it (no module/subject/topic gets created or matched from
+// it) — see AI_HANDOFF_ENRICHED_IMPORT.md for wiring this up.
+export interface McqCandidate { question: string; options: string[]; correctAnswer: string | null; explanation: string | null; optionExplanations: (string | null)[] | null; reference: string | null; hint: string | null; needsReview: boolean; rawBlock?: string; difficulty: 'easy' | 'moderate' | 'hard'; suggestedPath?: { block: string | null; module: string | null; subject: string | null; topic: string | null } | null }
 export interface McqParseResult { fileName: string; totalFound: number; needsReviewCount: number; candidates: McqCandidate[] }
 
 export interface FlashcardCandidate { front: string; back: string; needsReview: boolean; rawBlock?: string }
