@@ -3,7 +3,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, mcqsTable, flashcardsTable, topicsTable, subjectsTable, modulesTable, auditLogsTable } from "@workspace/db";
 import { requireAdmin, requireAuth, requireActiveMembership } from "../middlewares/auth";
-import { generateExplanation, generateFlashcardExplanation, generateFlashcardSet, generateMcqSet, classifyDifficulty, AiNotConfiguredError } from "../lib/aiExplain";
+import { generateExplanation, generateFlashcardExplanation, generateFlashcardSet, generateMcqSet, classifyDifficulty, generateOptionExplanations, AiNotConfiguredError } from "../lib/aiExplain";
 import { getAllSettings } from "../lib/settings";
 
 const router: IRouter = Router();
@@ -265,6 +265,74 @@ router.post("/admin/mcqs/classify-difficulty", requireAdmin, async (req, res): P
     results.push(...chunkResults);
   }
   res.json({ classified: results.length, remaining, results });
+});
+
+// ---------------------------------------------------------------------------
+// Admin: bulk-generate per-option explanations for existing questions — same
+// shape/pattern as classify-difficulty above (ids or {all, filters}, capped
+// per call since each question is its own AI request; the admin button
+// re-fetches remaining counts and lets the admin click again for banks of
+// 100+ questions instead of one call trying to do it all at once and timing
+// out).
+// ---------------------------------------------------------------------------
+
+const GenerateOptionExplanationsBody = z.union([
+  z.object({ ids: z.array(z.number().int().positive()).min(1).max(30) }),
+  z.object({ all: z.literal(true), filters: z.object({ moduleId: z.number().int().optional(), subjectId: z.number().int().optional(), topicId: z.number().int().optional() }).optional() }),
+]);
+const OPTION_EXPLANATIONS_BATCH_CAP = 30;
+
+router.post("/admin/mcqs/generate-option-explanations", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = GenerateOptionExplanationsBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+
+  const scopeFilter = "ids" in parsed.data ? undefined : and(
+    parsed.data.filters?.moduleId ? eq(mcqsTable.moduleId, parsed.data.filters.moduleId) : undefined,
+    parsed.data.filters?.subjectId ? eq(mcqsTable.subjectId, parsed.data.filters.subjectId) : undefined,
+    parsed.data.filters?.topicId ? eq(mcqsTable.topicId, parsed.data.filters.topicId) : undefined,
+  );
+
+  // Only rows actually missing (or incomplete) per-option explanations —
+  // "all" scope should skip questions that already have them rather than
+  // re-generating and overwriting existing admin-reviewed text every click.
+  const missing = sql`(${mcqsTable.optionExplanations} IS NULL OR array_length(${mcqsTable.optionExplanations}, 1) IS DISTINCT FROM array_length(${mcqsTable.options}, 1) OR EXISTS (SELECT 1 FROM unnest(${mcqsTable.optionExplanations}) e WHERE e IS NULL OR trim(e) = ''))`;
+
+  const rows = "ids" in parsed.data
+    ? await db.select({ id: mcqsTable.id, question: mcqsTable.question, options: mcqsTable.options, correctAnswer: mcqsTable.correctAnswer })
+        .from(mcqsTable).where(inArray(mcqsTable.id, parsed.data.ids))
+    : await db.select({ id: mcqsTable.id, question: mcqsTable.question, options: mcqsTable.options, correctAnswer: mcqsTable.correctAnswer })
+        .from(mcqsTable).where(and(scopeFilter, missing)).limit(OPTION_EXPLANATIONS_BATCH_CAP);
+
+  if (!rows.length) { res.json({ generated: 0, remaining: 0, results: [] }); return; }
+
+  // Total-still-missing count so the frontend can show "generated 30 of
+  // 214 — click again" instead of implying the whole scope is done after
+  // one capped batch — same pattern as classify-difficulty's `remaining`.
+  let remaining = 0;
+  if (!("ids" in parsed.data)) {
+    const [{ count: totalCount } = { count: 0 }] = await db.select({ count: sql<number>`count(*)` }).from(mcqsTable).where(and(scopeFilter, missing));
+    remaining = Math.max(0, Number(totalCount) - rows.length);
+  }
+
+  // Concurrency-limited for the same reason as classify-difficulty: a fully
+  // sequential loop over up to 30 AI calls (each one bigger than a
+  // difficulty call, since it returns a full explanation per option) risks
+  // the hosting platform's gateway timing out before this response returns.
+  const GENERATE_CONCURRENCY = 4;
+  const results: Array<{ id: number; optionExplanations: string[] }> = [];
+  for (let i = 0; i < rows.length; i += GENERATE_CONCURRENCY) {
+    const chunk = rows.slice(i, i + GENERATE_CONCURRENCY);
+    const chunkResults = await Promise.all(chunk.map(async (row) => {
+      const optionExplanations = await generateOptionExplanations({ question: row.question, options: row.options as string[], correctAnswer: row.correctAnswer });
+      if (optionExplanations.length) {
+        await db.update(mcqsTable).set({ optionExplanations }).where(eq(mcqsTable.id, row.id));
+      }
+      return { id: row.id, optionExplanations };
+    }));
+    results.push(...chunkResults);
+  }
+  const generated = results.filter((r) => r.optionExplanations.length).length;
+  res.json({ generated, remaining, results });
 });
 
 // ---------------------------------------------------------------------------

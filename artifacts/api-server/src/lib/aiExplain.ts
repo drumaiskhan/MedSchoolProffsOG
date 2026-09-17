@@ -800,14 +800,58 @@ const VALID_DIFFICULTIES = new Set(["easy", "moderate", "hard"]);
  * of leaving every import stuck at the parser's "moderate" placeholder.
  * Falls back to "moderate" on an unparseable/unexpected response rather
  * than throwing — this is a nice-to-have on top of a successful import,
- * not something that should fail the import itself. */
+ * not something that should fail the import itself.
+ *
+ * maxTokens is 100 (up from the original 20) even though the answer itself
+ * is one word — 20 was tight enough that any provider preamble, stray
+ * whitespace/punctuation, or a reasoning-capable model's invisible
+ * "thinking" tokens could eat the whole budget before the word came out,
+ * silently pushing every import to the "moderate" fallback below instead
+ * of an actual classification. */
 export async function classifyDifficulty(request: ExplanationRequest, modelOverride?: string): Promise<"easy" | "moderate" | "hard"> {
   try {
-    const raw = await runPrompt(buildDifficultyPrompt(request), 20, false, modelOverride);
+    const raw = await runPrompt(buildDifficultyPrompt(request), 100, false, modelOverride);
     const normalized = raw.trim().toLowerCase().replace(/[^a-z]/g, "");
     return VALID_DIFFICULTIES.has(normalized) ? (normalized as "easy" | "moderate" | "hard") : "moderate";
   } catch {
     return "moderate";
+  }
+}
+
+function buildOptionExplanationsPrompt({ question, options, correctAnswer }: ExplanationRequest): string {
+  const optionList = options.map((opt, i) => `${String.fromCharCode(65 + i)}. ${opt}`).join("\n");
+  return [
+    "You are writing per-option distractor analysis for a medical school MCQ (MBBS/BDS level) — the kind of answer key where EVERY option gets its own explanation, not just the correct one.",
+    "For each option below, write a short 1-2 sentence explanation of why that specific option is right or wrong. The correct option's explanation should say why it's correct; each wrong option's explanation should say specifically why it's wrong (e.g. what it's confused with, or what's missing/incorrect about it) — real distractor analysis, not a generic restatement.",
+    "Keep each explanation factual and exam-focused. Do not use markdown.",
+    NO_REASONING_INSTRUCTION,
+    "",
+    `Question: ${question}`,
+    `Options:\n${optionList}`,
+    correctAnswer ? `Correct answer: ${correctAnswer}` : "",
+    "",
+    `Respond with ONLY a valid JSON array of exactly ${options.length} strings, no prose before or after, no code fences — one explanation per option, in the exact same order as the options above:`,
+    `[${options.map(() => '"..."').join(", ")}]`,
+  ].filter(Boolean).join("\n");
+}
+
+/** Backfills `optionExplanations` for an existing MCQ that already has
+ * options/correctAnswer but no (or incomplete) per-option explanations —
+ * the bulk "generate option explanations" admin action, same shape as
+ * classifyDifficulty. Only trusts the response if it comes back as exactly
+ * one string per option (a mismatched-length array would silently
+ * misattribute explanations to the wrong option index downstream, same
+ * concern as parseMcqJson above) — returns [] otherwise/on error so the
+ * caller can skip that row rather than write bad data. */
+export async function generateOptionExplanations(request: ExplanationRequest, modelOverride?: string): Promise<string[]> {
+  try {
+    const raw = await runPrompt(buildOptionExplanationsPrompt(request), Math.max(500, request.options.length * 150), "array", modelOverride);
+    const cleaned = stripReasoningArtifacts(raw).replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+    const parsed: unknown = JSON.parse(cleaned);
+    if (!Array.isArray(parsed) || parsed.length !== request.options.length) return [];
+    return parsed.map((e) => String(e ?? "").trim());
+  } catch {
+    return [];
   }
 }
 

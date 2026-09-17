@@ -364,6 +364,14 @@ export const mcqAdminApi = {
   // that scope so the UI can offer "classify next batch".
   classifyDifficulty: (body: { ids: number[] } | { all: true; filters?: { moduleId?: number; subjectId?: number; topicId?: number } }) =>
     request<{ classified: number; remaining: number; results: Array<{ id: number; difficulty: 'easy' | 'moderate' | 'hard' }> }>('/admin/mcqs/classify-difficulty', { method: 'POST', body: JSON.stringify(body) }),
+  // AI-backfills optionExplanations for existing questions that are
+  // missing them (or have an incomplete set), capped at 30 per call
+  // server-side — same {ids} / {all, filters} shape as classifyDifficulty
+  // above, so a bank of 100+ questions is worked through by clicking
+  // "again" until remaining is 0. Skips questions that already have a full
+  // set of per-option explanations rather than overwriting them.
+  generateOptionExplanations: (body: { ids: number[] } | { all: true; filters?: { moduleId?: number; subjectId?: number; topicId?: number } }) =>
+    request<{ generated: number; remaining: number; results: Array<{ id: number; optionExplanations: string[] }> }>('/admin/mcqs/generate-option-explanations', { method: 'POST', body: JSON.stringify(body) }),
   // One-click fix for the "imported 406, module only shows 380" gap — see
   // mcq-import.ts's CommitBody.status comment. Omit moduleId to publish
   // every draft in the whole bank.

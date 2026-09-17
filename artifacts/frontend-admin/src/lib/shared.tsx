@@ -841,6 +841,20 @@ export function AnalysisPanel({ rows, label, filters }: { rows: AdminMcqRow[]; l
     },
     onError: (err: unknown) => toast({ title: 'Could not classify difficulty', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
+  // Backfills per-option explanations for questions in this scope that are
+  // missing them — same batch-capped/click-again shape as classify above
+  // (see /admin/mcqs/generate-option-explanations), so a bank of 100+
+  // questions gets worked through 30 at a time rather than one call trying
+  // to do it all and timing out.
+  const generateOptionExplanations = useMutation({
+    mutationFn: () => mcqAdminApi.generateOptionExplanations({ all: true, filters }),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['admin-mcqs-tree'] });
+      queryClient.invalidateQueries({ queryKey: getListMcqsQueryKey() });
+      toast({ title: `AI generated option explanations for ${res.generated} question${res.generated === 1 ? '' : 's'}`, description: res.remaining > 0 ? `${res.remaining} more left in "${label}" — click again to continue.` : undefined });
+    },
+    onError: (err: unknown) => toast({ title: 'Could not generate option explanations', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
   // Randomly reorders each question's options in this scope (in one shot —
   // it's a local reorder, not an AI call, so unlike classify-difficulty
   // above it isn't batch-capped). Fixes banks where the correct option is
@@ -866,6 +880,7 @@ export function AnalysisPanel({ rows, label, filters }: { rows: AdminMcqRow[]; l
     </div>
     <div className="mt-2 flex flex-wrap gap-2">
       <button type="button" disabled={classify.isPending} onClick={(e) => { e.stopPropagation(); classify.mutate(); }} className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-[#eef7f1] px-2.5 py-1.5 text-[11px] font-bold text-primary disabled:opacity-50" data-testid="button-classify-difficulty" title="Re-runs AI difficulty classification on up to 30 questions in this scope per click">{classify.isPending ? 'Classifying…' : <><Wand2 size={12} /> AI: classify difficulty (up to 30)</>}</button>
+      <button type="button" disabled={generateOptionExplanations.isPending} onClick={(e) => { e.stopPropagation(); generateOptionExplanations.mutate(); }} className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-[#eef7f1] px-2.5 py-1.5 text-[11px] font-bold text-primary disabled:opacity-50" data-testid="button-generate-option-explanations" title="Generates per-option explanations for up to 30 questions in this scope that are missing them, per click — click again for the rest (works for banks of 100+)">{generateOptionExplanations.isPending ? 'Generating…' : <><Wand2 size={12} /> AI: generate option explanations (up to 30)</>}</button>
       <button type="button" disabled={shuffle.isPending} onClick={(e) => { e.stopPropagation(); shuffle.mutate(); }} className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-[#eef7f1] px-2.5 py-1.5 text-[11px] font-bold text-primary disabled:opacity-50" data-testid="button-shuffle-options" title="Randomly reorders every question's options in this scope, so the correct answer isn't always the same letter — the correct option moves with its text, it stays correct wherever it lands">{shuffle.isPending ? 'Shuffling…' : <><Shuffle size={12} /> Shuffle option order (all {a.total})</>}</button>
     </div>
   </div>;
