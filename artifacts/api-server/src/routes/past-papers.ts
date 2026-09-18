@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db, pastPapersTable, mcqsTable, auditLogsTable, usersTable } from "@workspace/db";
 import { requireAdmin, requireAuth, requireActiveMembership, isAdminRole } from "../middlewares/auth";
 import { deleteMcqsEverywhere } from "../lib/mcqCascade";
-import { getStudentTargeting, isTargetVisible } from "../lib/contentVisibility";
+import { getStudentTargeting, isTargetVisible, notifyTargetedStudents } from "../lib/contentVisibility";
 
 const router: IRouter = Router();
 
@@ -85,13 +85,35 @@ router.post("/past-papers", requireAdmin, async (req, res): Promise<void> => {
   const parsed = PaperBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message }); return; }
   const { programTargetKind, yearTargetNumber, ...rest } = parsed.data;
+  const active = parsed.data.active ?? true;
+  const normalizedKind = programTargetKind ? programTargetKind.trim().toUpperCase() : null;
   const [row] = await db.insert(pastPapersTable).values({
     ...rest,
-    active: parsed.data.active ?? true,
-    programTargetKind: programTargetKind ? programTargetKind.trim().toUpperCase() : null,
+    active,
+    programTargetKind: normalizedKind,
     yearTargetNumber: yearTargetNumber ?? null,
   }).returning();
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "PAST_PAPER_CREATED", entity: "past_paper", entityId: row.id });
+
+  // Auto-notify the same audience this paper is actually visible to (see
+  // notifyTargetedStudents in contentVisibility.ts) — same
+  // programTargetKind/yearTargetNumber rule GET /past-papers uses, so a
+  // paper scoped to e.g. MBBS Year 3 only pings MBBS Year 3 students, and
+  // an untargeted paper reaches everyone. Skipped for a paper saved
+  // inactive (admin still working on it) — nothing to notify anyone about
+  // yet since students can't see it either.
+  if (active) {
+    const scopeLabel = `${normalizedKind || "All programs"} · ${yearTargetNumber ? `Year ${yearTargetNumber}` : "All years"}`;
+    const notified = await notifyTargetedStudents(
+      normalizedKind,
+      yearTargetNumber ?? null,
+      "New past paper available",
+      `"${row.title}" has just been added — check it out under Past papers.`,
+      "info",
+    );
+    await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "NOTIFICATION_AUTO_PAST_PAPER", entity: "past_paper", entityId: row.id, metadata: JSON.stringify({ scope: scopeLabel, notified }) });
+  }
+
   res.status(201).json(await paperView(row));
 });
 
@@ -99,6 +121,7 @@ router.patch("/past-papers/:id", requireAdmin, async (req, res): Promise<void> =
   const id = Number(req.params.id);
   const parsed = PaperBody.partial().safeParse(req.body);
   if (!parsed.success || Number.isNaN(id)) { res.status(400).json({ error: "Invalid request" }); return; }
+  const [before] = await db.select().from(pastPapersTable).where(eq(pastPapersTable.id, id));
   const { programTargetKind, yearTargetNumber, ...rest } = parsed.data;
   const [row] = await db.update(pastPapersTable).set({
     ...rest,
@@ -107,6 +130,23 @@ router.patch("/past-papers/:id", requireAdmin, async (req, res): Promise<void> =
   }).where(eq(pastPapersTable.id, id)).returning();
   if (!row) { res.status(404).json({ error: "Past paper not found" }); return; }
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "PAST_PAPER_UPDATED", entity: "past_paper", entityId: row.id });
+
+  // Only fires the auto-notification on the false → true transition (a
+  // paper made visible for the first time after being saved inactive) —
+  // never on every edit, or every title tweak to an already-active paper
+  // would re-spam the same students.
+  if (before && !before.active && row.active) {
+    const scopeLabel = `${row.programTargetKind || "All programs"} · ${row.yearTargetNumber ? `Year ${row.yearTargetNumber}` : "All years"}`;
+    const notified = await notifyTargetedStudents(
+      row.programTargetKind,
+      row.yearTargetNumber,
+      "New past paper available",
+      `"${row.title}" has just been added — check it out under Past papers.`,
+      "info",
+    );
+    await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "NOTIFICATION_AUTO_PAST_PAPER", entity: "past_paper", entityId: row.id, metadata: JSON.stringify({ scope: scopeLabel, notified }) });
+  }
+
   res.json(await paperView(row));
 });
 

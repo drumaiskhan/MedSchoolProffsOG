@@ -1,5 +1,5 @@
-import { and, eq, isNull, or } from "drizzle-orm";
-import { db, usersTable, programsTable, academicYearsTable, modulesTable, blocksTable } from "@workspace/db";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { db, usersTable, programsTable, academicYearsTable, modulesTable, blocksTable, notificationsTable } from "@workspace/db";
 
 export interface StudentTargeting {
   programKind: string | null;
@@ -70,4 +70,51 @@ export function describeModuleTargeting(programTargetKind: string | null, yearTa
   const programLabel = programTargetKind || "All Programs";
   const yearLabel = yearTargetNumber ? `${yearTargetNumber}${["th", "st", "nd", "rd"][yearTargetNumber % 10 > 3 || Math.floor(yearTargetNumber % 100 / 10) === 1 ? 0 : yearTargetNumber % 10]} Year` : "All Years";
   return `${programLabel} + ${yearLabel}`;
+}
+
+/** Notifies every student whose own program/year matches the given
+ * targeting (same null-means-everyone rule as isTargetVisible above) —
+ * used to auto-notify the same audience a piece of content (a past paper,
+ * a published exam) is actually visible to, so "who gets notified" can
+ * never drift out of sync with "who can see it". Mirrors the resolution
+ * logic in POST /admin/notifications/broadcast (medschool.ts) but as a
+ * shared helper so other routes can fire the same kind of targeted
+ * notification without duplicating the student/program/year lookup.
+ * Returns the number of students notified (0 if nobody currently matches
+ * that program/year — not an error, just nobody to reach yet). */
+export async function notifyTargetedStudents(
+  programTargetKind: string | null,
+  yearTargetNumber: number | null,
+  title: string,
+  body: string,
+  type: "info" | "success" | "warning" = "info",
+): Promise<number> {
+  const normalizedKind = programTargetKind ? programTargetKind.trim().toUpperCase() : null;
+
+  // Untargeted content (visible to every program/year) reaches everyone —
+  // use the same userId=NULL "visible to everyone" convention the manual
+  // broadcast uses, instead of inserting one row per student.
+  if (!normalizedKind && !yearTargetNumber) {
+    await db.insert(notificationsTable).values({ userId: null, title, body, type });
+    const [{ count }] = await db.select({ count: sql<number>`count(*)` }).from(usersTable).where(eq(usersTable.role, "student"));
+    return Number(count ?? 0);
+  }
+
+  const students = await db.select({ id: usersTable.id, programId: usersTable.programId, academicYearId: usersTable.academicYearId }).from(usersTable).where(eq(usersTable.role, "student"));
+  const programs = await db.select().from(programsTable);
+  const academicYears = await db.select().from(academicYearsTable);
+  const programKindById = new Map(programs.map((p) => [p.id, p.kind ? p.kind.trim().toUpperCase() : null]));
+  const yearNumberById = new Map(academicYears.map((y) => [y.id, y.yearNumber]));
+
+  const targetIds = students
+    .filter((s) => {
+      const kind = s.programId ? programKindById.get(s.programId) ?? null : null;
+      const year = s.academicYearId ? yearNumberById.get(s.academicYearId) ?? null : null;
+      return (!normalizedKind || kind === normalizedKind) && (!yearTargetNumber || year === yearTargetNumber);
+    })
+    .map((s) => s.id);
+
+  if (!targetIds.length) return 0;
+  await db.insert(notificationsTable).values(targetIds.map((userId) => ({ userId, title, body, type })));
+  return targetIds.length;
 }

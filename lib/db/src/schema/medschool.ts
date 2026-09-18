@@ -392,6 +392,16 @@ export const booksTable = pgTable("med_books", {
   moduleId: integer("module_id"),
   subjectId: integer("subject_id"),
   topicId: integer("topic_id"),
+  // Simple targeting mirroring modulesTable/pastPapersTable's
+  // programTargetKind + yearTargetNumber — the admin "Add book" form now
+  // picks a Degree (MBBS/BDS) + Year directly instead of a Module/Subject/
+  // Topic, same reasoning as pastPapersTable: that tree requires curriculum
+  // structure to already exist, which most admins never set up for books.
+  // Null on either axis means "all programs" / "all years" on that axis,
+  // same convention. moduleId/subjectId/topicId above are kept only for
+  // books created before this picker existed.
+  programTargetKind: text("program_target_kind"),
+  yearTargetNumber: integer("year_target_number"),
   storagePath: text("storage_path").notNull(),
   coverImagePath: text("cover_image_path"),
   active: boolean("active").notNull().default(true),

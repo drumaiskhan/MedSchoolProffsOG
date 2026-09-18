@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db, booksTable, auditLogsTable } from "@workspace/db";
 import { requireAuth, requireAdmin, requireActiveMembership, isAdminRole } from "../middlewares/auth";
 import { resolveFileUrl, reresolveLegacyCloudinaryPath, deleteFromCloudinary, THUMBNAIL_TRANSFORM } from "../lib/storage";
-import { getStudentTargeting, getVisibleModuleIds } from "../lib/contentVisibility";
+import { getStudentTargeting, getVisibleModuleIds, isTargetVisible } from "../lib/contentVisibility";
 
 const router: IRouter = Router();
 
@@ -16,6 +16,8 @@ function serializeBook(row: typeof booksTable.$inferSelect) {
     moduleId: row.moduleId,
     subjectId: row.subjectId,
     topicId: row.topicId,
+    programTargetKind: row.programTargetKind,
+    yearTargetNumber: row.yearTargetNumber,
     // NOTE: fall back to null, never to the raw row.storagePath — that raw
     // value is an internal "cloudinary:image/books/xyz.pdf"-style storage
     // key, not a URL. Leaking it to the client used to make the frontend
@@ -44,7 +46,16 @@ router.get("/books", requireAuth, requireActiveMembership, async (req, res): Pro
   if (isAdmin) { res.json(rows.map(serializeBook)); return; }
   const targeting = await getStudentTargeting(req.user!.id);
   const visibleModuleIds = await getVisibleModuleIds(targeting);
-  const visible = rows.filter((row) => row.moduleId === null || visibleModuleIds.includes(row.moduleId));
+  // New books are targeted directly via Degree/Year (programTargetKind +
+  // yearTargetNumber), same convention as past papers — null on either
+  // axis means "everyone" on that axis. Older books that were instead
+  // scoped to a Module (before this picker existed) keep working off that
+  // module's own visibility.
+  const visible = rows.filter((row) => (
+    row.programTargetKind !== null || row.yearTargetNumber !== null
+      ? isTargetVisible(row.programTargetKind, row.yearTargetNumber, targeting)
+      : row.moduleId === null || visibleModuleIds.includes(row.moduleId)
+  ));
   res.json(visible.map(serializeBook));
 });
 
@@ -60,6 +71,8 @@ const CreateBookBody = z.object({
   moduleId: z.number().int().positive().optional(),
   subjectId: z.number().int().positive().optional(),
   topicId: z.number().int().positive().optional(),
+  programTargetKind: z.string().max(40).nullable().optional(),
+  yearTargetNumber: z.number().int().min(1).max(6).nullable().optional(),
   storagePath: z.string().min(1),
   coverImagePath: z.string().min(1).optional(),
 });
@@ -73,6 +86,8 @@ router.post("/books", requireAdmin, async (req, res): Promise<void> => {
     moduleId: parsed.data.moduleId ?? null,
     subjectId: parsed.data.subjectId ?? null,
     topicId: parsed.data.topicId ?? null,
+    programTargetKind: parsed.data.programTargetKind ? parsed.data.programTargetKind.trim().toUpperCase() : null,
+    yearTargetNumber: parsed.data.yearTargetNumber ?? null,
     storagePath: parsed.data.storagePath,
     coverImagePath: parsed.data.coverImagePath ?? null,
   }).returning();

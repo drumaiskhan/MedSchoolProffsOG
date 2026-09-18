@@ -3,7 +3,7 @@ import { and, count, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, examsTable, examQuestionsTable, examAttemptsTable, examAnswersTable, mcqsTable, usersTable, auditLogsTable } from "@workspace/db";
 import { requireAuth, requireAdmin, requireActiveMembership, isAdminRole } from "../middlewares/auth";
-import { getStudentTargeting } from "../lib/contentVisibility";
+import { getStudentTargeting, notifyTargetedStudents } from "../lib/contentVisibility";
 import { deleteMcqsEverywhere } from "../lib/mcqCascade";
 
 const router: IRouter = Router();
@@ -22,6 +22,24 @@ function examStudentView(exam: typeof examsTable.$inferSelect) {
     maxAttempts: exam.maxAttempts, negativeMarkingEnabled: exam.negativeMarkingEnabled, negativeMarkPerWrong: Number(exam.negativeMarkPerWrong),
     passingPercent: exam.passingPercent ? Number(exam.passingPercent) : null, status: exam.status,
   };
+}
+
+// Auto-notifies the same MBBS/BDS + year audience a published exam is
+// actually visible to (see isEligible above / notifyTargetedStudents in
+// contentVisibility.ts) — fired once, the moment an exam first becomes
+// status="published", from either POST /admin/exams (created directly as
+// published) or PATCH /admin/exams/:id (the more common draft → published
+// flow once questions are attached).
+async function notifyExamPublished(actorId: number, exam: typeof examsTable.$inferSelect): Promise<void> {
+  const scopeLabel = `${exam.programTargetKind || "All programs"} · ${exam.yearTargetNumber ? `Year ${exam.yearTargetNumber}` : "All years"}`;
+  const notified = await notifyTargetedStudents(
+    exam.programTargetKind,
+    exam.yearTargetNumber,
+    "New Pre-Proffs exam available",
+    `"${exam.title}" has just been published — check it out under Pre-Proffs Exams.`,
+    "info",
+  );
+  await db.insert(auditLogsTable).values({ actorId, action: "NOTIFICATION_AUTO_EXAM", entity: "exam", entityId: exam.id, metadata: JSON.stringify({ scope: scopeLabel, notified }) });
 }
 
 // ---------------------------------------------------------------------------
@@ -73,6 +91,15 @@ router.post("/admin/exams", requireAdmin, async (req, res): Promise<void> => {
     showCorrectAnswers: data.showCorrectAnswers ?? true, status: data.status ?? "draft",
   }).returning();
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "EXAM_CREATED", entity: "exam", entityId: exam.id });
+
+  // Only a handful of exams get created directly as "published" (most
+  // start as "draft" while questions are still being added — see the
+  // status default above) — students only ever see status="published"
+  // exams (GET /exams), so this notifies at creation only in that
+  // already-published case; the far more common draft → published
+  // transition is handled in PATCH /admin/exams/:id below instead.
+  if (exam.status === "published") await notifyExamPublished(req.user!.id, exam);
+
   res.status(201).json(exam);
 });
 
@@ -80,6 +107,7 @@ router.patch("/admin/exams/:id", requireAdmin, async (req, res): Promise<void> =
   const id = Number(req.params.id);
   const parsed = ExamBody.partial().safeParse(req.body);
   if (!parsed.success || Number.isNaN(id)) { res.status(400).json({ error: "Invalid request" }); return; }
+  const [before] = await db.select().from(examsTable).where(eq(examsTable.id, id));
   const { programTargetKind, yearTargetNumber, startAt, endAt, negativeMarkPerWrong, passingPercent, ...rest } = parsed.data;
   const [exam] = await db.update(examsTable).set({
     ...rest,
@@ -92,6 +120,12 @@ router.patch("/admin/exams/:id", requireAdmin, async (req, res): Promise<void> =
   }).where(eq(examsTable.id, id)).returning();
   if (!exam) { res.status(404).json({ error: "Exam not found" }); return; }
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "EXAM_UPDATED", entity: "exam", entityId: exam.id });
+
+  // Only the draft/archived → published transition notifies — never a
+  // routine edit to an exam that was already published (re-saving the
+  // duration or a typo fix shouldn't re-ping every student in scope).
+  if (before && before.status !== "published" && exam.status === "published") await notifyExamPublished(req.user!.id, exam);
+
   res.json(exam);
 });
 

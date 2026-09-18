@@ -607,10 +607,10 @@ export const auditApi = {
   list: (limit = 100) => request<AuditLogEntry[]>(`/admin/audit-logs?limit=${limit}`),
 };
 
-export interface AdminBook { id: number; title: string; author: string | null; moduleId: number | null; subjectId: number | null; topicId: number | null; storagePath: string | null; coverImagePath: string | null; active: boolean }
+export interface AdminBook { id: number; title: string; author: string | null; moduleId: number | null; subjectId: number | null; topicId: number | null; programTargetKind: string | null; yearTargetNumber: number | null; storagePath: string | null; coverImagePath: string | null; active: boolean }
 export const booksAdminApi = {
   list: () => request<AdminBook[]>('/admin/books'),
-  create: (body: { title: string; author?: string; moduleId?: number; subjectId?: number; topicId?: number; storagePath: string; coverImagePath?: string }) => request<AdminBook>('/books', { method: 'POST', body: JSON.stringify(body) }),
+  create: (body: { title: string; author?: string; programTargetKind?: string | null; yearTargetNumber?: number | null; storagePath: string; coverImagePath?: string }) => request<AdminBook>('/books', { method: 'POST', body: JSON.stringify(body) }),
   remove: (id: number) => request<{ ok: true }>(`/books/${id}`, { method: 'DELETE' }),
   removePermanent: (id: number) => request<{ ok: true; warning?: string }>(`/admin/books/${id}/permanent`, { method: 'DELETE' }),
   backfillLinks: () => request<{ fixed: number; skipped: number; failed: number }>('/admin/books/backfill-links', { method: 'POST' }),

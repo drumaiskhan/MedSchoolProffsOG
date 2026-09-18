@@ -65,8 +65,9 @@ export const paymentStatusTone = (status: string): 'amber' | 'green' | 'red' | '
 // Small reusable confirm-before-delete dialog, used by every admin list's
 // delete action (task: real confirm modal, not window.confirm).
 
-export function ConfirmDialog({ title, body, confirmLabel = 'Delete', onConfirm, onCancel, pending }: { title: string; body: string; confirmLabel?: string; onConfirm: () => void; onCancel: () => void; pending?: boolean }) {
-  return <div className="fixed inset-0 z-[60] grid place-items-center bg-black/40 p-4 animate-in fade-in duration-200" onClick={onCancel}><div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-2xl animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-200"><h3 className="font-bold">{title}</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">{body}</p><div className="mt-5 flex gap-2"><button onClick={onCancel} className="flex-1 rounded-xl border border-border py-2.5 text-xs font-bold transition-transform active:scale-95" data-testid="button-confirm-cancel">Cancel</button><button onClick={onConfirm} disabled={pending} className="flex-1 rounded-xl bg-destructive py-2.5 text-xs font-extrabold text-destructive-foreground transition-transform active:scale-95 disabled:opacity-50" data-testid="button-confirm-delete">{pending ? 'Deleting…' : confirmLabel}</button></div></div></div>;
+export function ConfirmDialog({ title, body, confirmLabel = 'Delete', pendingLabel, onConfirm, onCancel, pending, tone = 'destructive', testId = 'delete' }: { title: string; body: string; confirmLabel?: string; pendingLabel?: string; onConfirm: () => void; onCancel: () => void; pending?: boolean; tone?: 'destructive' | 'primary'; testId?: string }) {
+  const toneClass = tone === 'primary' ? 'bg-primary text-primary-foreground' : 'bg-destructive text-destructive-foreground';
+  return <div className="fixed inset-0 z-[60] grid place-items-center bg-black/40 p-4 animate-in fade-in duration-200" onClick={onCancel}><div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-2xl animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-200"><h3 className="font-bold">{title}</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">{body}</p><div className="mt-5 flex gap-2"><button onClick={onCancel} className="flex-1 rounded-xl border border-border py-2.5 text-xs font-bold transition-transform active:scale-95" data-testid="button-confirm-cancel">Cancel</button><button onClick={onConfirm} disabled={pending} className={cn('flex-1 rounded-xl py-2.5 text-xs font-extrabold transition-transform active:scale-95 disabled:opacity-50', toneClass)} data-testid={`button-confirm-${testId}`}>{pending ? (pendingLabel ?? 'Deleting…') : confirmLabel}</button></div></div></div>;
 }
 
 // Matches the student app's Logo (see its shared.tsx) — a pulsing
@@ -395,6 +396,7 @@ export function StudentDrawer({ id, onClose }: { id: number; onClose: () => void
   const [rejecting, setRejecting] = useState(false);
   const [rejectMessage, setRejectMessage] = useState('');
   const confirmReject = () => { if (!rejectMessage.trim()) return; updateStatus.mutate({ status: 'REJECTED', message: rejectMessage.trim() }); };
+  const [confirmingActivate, setConfirmingActivate] = useState(false);
   const verifyEmail = useMutation({
     mutationFn: () => studentsAdminApi.verifyEmail(id),
     onSuccess: invalidate,
@@ -419,7 +421,7 @@ export function StudentDrawer({ id, onClose }: { id: number; onClose: () => void
       <div className="grid grid-cols-2 gap-3 text-xs"><div><div className="text-muted-foreground">Phone</div><div className="mt-0.5 font-bold">{s.phone || '—'}</div></div><div><div className="text-muted-foreground">Roll number</div><div className="mt-0.5 font-bold">{s.rollNumber || '—'}</div></div><div><div className="text-muted-foreground">Institution</div><div className="mt-0.5 font-bold">{s.institution || '—'}</div></div><div><div className="text-muted-foreground">Programme</div><div className="mt-0.5 font-bold">{s.program || '—'}</div></div><div><div className="text-muted-foreground">Year / batch</div><div className="mt-0.5 font-bold">{s.academicYear || '—'} · {s.batch || '—'}</div></div><div><div className="text-muted-foreground">Streak</div><div className="mt-0.5 font-bold">{s.currentStreak}d (best {s.longestStreak}d)</div></div><div><div className="text-muted-foreground">Joined</div><div className="mt-0.5 font-bold">{new Date(s.joinedAt).toLocaleDateString()}</div></div><div><div className="text-muted-foreground">Email verified</div>{s.emailVerified ? <div className="mt-0.5 font-bold text-primary">Yes</div> : <button onClick={() => verifyEmail.mutate()} disabled={verifyEmail.isPending} className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-extrabold text-destructive underline disabled:opacity-50" data-testid="button-verify-email">{verifyEmail.isPending ? 'Verifying…' : 'No · verify now'}</button>}</div></div>
       {s.activeMembership && !s.activeMembership.isTrial && <div className="rounded-xl bg-[#eef7f1] p-3 text-xs font-semibold text-primary">Active membership until {new Date(s.activeMembership.expiresAt).toLocaleDateString()}</div>}
       {!s.emailVerified && s.status !== 'ACTIVE' && <div className="rounded-xl border border-[#e5a952]/40 bg-[#fdf6e8] p-3 text-[11px] leading-5 text-[#8a5a12]"><strong>Heads up:</strong> this student's email isn't verified yet, so they can't sign in at all even if you set their status below — the "No · verify now" link above (or "Activate now" here) clears that separately.</div>}
-      <div><div className="mb-2 flex items-center justify-between"><span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Account status</span>{s.status !== 'ACTIVE' && <button onClick={() => updateStatus.mutate({ status: 'ACTIVE', emailVerified: true })} disabled={updateStatus.isPending} className="rounded-lg bg-primary px-2.5 py-1.5 text-[10px] font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-activate-now">{updateStatus.isPending ? 'Activating…' : 'Activate now'}</button>}</div><p className="mb-2 text-[11px] text-muted-foreground">Status controls what the student can access. Moving to Verified, Payment review, or Active also clears the email-verification gate automatically.</p><div className="flex flex-wrap gap-2">{STUDENT_STATUSES.filter((status) => status !== 'DELETED').map((status) => <button key={status} onClick={() => status === 'REJECTED' ? setRejecting(true) : updateStatus.mutate({ status })} disabled={updateStatus.isPending} className={cn('rounded-lg px-2.5 py-1.5 text-[10px] font-bold', s.status === status ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/70')} data-testid={`button-status-${status}`}>{status.replace(/_/g, ' ')}</button>)}</div>
+      <div><div className="mb-2 flex items-center justify-between"><span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Account status</span>{s.status !== 'ACTIVE' && <button onClick={() => setConfirmingActivate(true)} disabled={updateStatus.isPending} className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-[10px] font-extrabold text-primary-foreground shadow-sm transition-transform active:scale-95 disabled:opacity-50" data-testid="button-activate-now"><ShieldCheck size={13} /> {updateStatus.isPending ? 'Activating…' : 'Approve student'}</button>}</div><p className="mb-2 text-[11px] text-muted-foreground">Status controls what the student can access. Moving to Verified, Payment review, or Active also clears the email-verification gate automatically.</p><div className="flex flex-wrap gap-2">{STUDENT_STATUSES.filter((status) => status !== 'DELETED').map((status) => <button key={status} onClick={() => status === 'REJECTED' ? setRejecting(true) : updateStatus.mutate({ status })} disabled={updateStatus.isPending} className={cn('rounded-lg px-2.5 py-1.5 text-[10px] font-bold', s.status === status ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/70')} data-testid={`button-status-${status}`}>{status.replace(/_/g, ' ')}</button>)}</div>
         {rejecting && <div className="mt-3 flex gap-2 border-t border-border pt-3"><input autoFocus value={rejectMessage} onChange={(e) => setRejectMessage(e.target.value)} placeholder="Message for the student (why they're being rejected)" className="h-9 flex-1 rounded-lg border border-border bg-background px-3 text-xs" data-testid="input-reject-student-message" /><button onClick={confirmReject} disabled={!rejectMessage.trim() || updateStatus.isPending} className="rounded-lg bg-destructive px-4 text-xs font-bold text-destructive-foreground disabled:opacity-50" data-testid="button-confirm-reject-student">{updateStatus.isPending ? 'Rejecting…' : 'Confirm reject'}</button><button onClick={() => { setRejecting(false); setRejectMessage(''); }} className="rounded-lg border border-border px-3 text-xs font-bold text-muted-foreground" data-testid="button-cancel-reject-student">Cancel</button></div>}
         {s.status === 'REJECTED' && s.statusMessage && <div className="mt-3 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-[11px] leading-5 text-destructive"><strong>Rejection message sent to student:</strong> {s.statusMessage}</div>}
       </div>
@@ -435,6 +437,7 @@ export function StudentDrawer({ id, onClose }: { id: number; onClose: () => void
       </div>
       <div><div className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">Payment history</div><div className="space-y-2">{s.payments.map((p) => <div key={p.id} className="rounded-lg border border-border p-3 text-xs"><div className="flex items-center justify-between"><span className="font-bold">{p.planName}</span><Badge tone={p.status === 'APPROVED' ? 'green' : p.status === 'REJECTED' ? 'red' : 'amber'}>{p.status}</Badge></div><div className="mt-1 text-muted-foreground">{money(p.amount, p.currency)} · {p.method} · {p.paymentDate}</div>{p.proofPath && <a href={resolveUploadUrl(p.proofPath)!} target="_blank" rel="noreferrer" className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-bold text-primary" data-testid={`link-drawer-proof-${p.id}`}><FileText size={11} /> View payment proof</a>}</div>)}{!s.payments.length && <p className="text-xs text-muted-foreground">No payments yet.</p>}</div></div>
     </div>}
+    {confirmingActivate && s && <ConfirmDialog title="Approve this student?" body={`This activates ${s.name}'s account and marks their email as verified, giving them full access immediately.`} confirmLabel="Approve student" pendingLabel="Approving…" tone="primary" testId="activate-student" onCancel={() => setConfirmingActivate(false)} onConfirm={() => { updateStatus.mutate({ status: 'ACTIVE', emailVerified: true }); setConfirmingActivate(false); }} pending={updateStatus.isPending} />}
   </div></div>;
 }
 
@@ -447,16 +450,18 @@ export function PaymentProofsTab() {
   const [rejectingId, setRejectingId] = useState<number | null>(null);
   const [reason, setReason] = useState('');
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [approvingId, setApprovingId] = useState<number | null>(null);
   const removePaymentPermanent = useMutation({ mutationFn: paymentsAdminApi.removePermanent, onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListPaymentsQueryKey() }); setDeletingId(null); }, onError: (err: unknown) => toast({ title: 'Could not delete payment', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
   const payments = (q.data ?? []).filter((p) => filter === 'all' || p.status === filter);
-  const doApprove = (p: Payment) => approve.mutate({ id: p.id }, { onSuccess: () => queryClient.invalidateQueries({ queryKey: getListPaymentsQueryKey() }) });
+  const doApprove = (p: Payment) => approve.mutate({ id: p.id }, { onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListPaymentsQueryKey() }); setApprovingId(null); } });
+  const approvingPayment = approvingId !== null ? payments.find((p) => p.id === approvingId) : undefined;
   const doReject = (p: Payment) => { if (!reason.trim()) return; reject.mutate({ id: p.id, data: { reason: reason.trim() } }, { onSuccess: () => { queryClient.invalidateQueries({ queryKey: getListPaymentsQueryKey() }); setRejectingId(null); setReason(''); } }); };
   const isImage = (url: string) => /\.(png|jpe?g|webp)$/i.test(url);
 
-  return <div><div className="mb-4 flex justify-end"><div className="flex rounded-xl border border-border bg-card p-1">{FILTERS.map((f) => <button key={f.key} onClick={() => setFilter(f.key)} className={cn('rounded-lg px-3 py-1.5 text-[11px] font-bold capitalize', filter === f.key && 'bg-muted text-primary')} data-testid={`button-payment-filter-${f.label}`}>{f.label}</button>)}</div></div>{q.isLoading ? <SkeletonPage /> : <div className="space-y-3">{payments.map((p) => <div key={p.id} className="rounded-2xl border border-border bg-card p-5" data-testid={`card-payment-review-${p.id}`}><div className="flex flex-col gap-4 md:flex-row md:items-start"><div className="grid size-11 shrink-0 place-items-center rounded-xl bg-[#fff0cb] text-[#94651c]"><ReceiptText size={19} /></div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="text-sm font-bold">{p.studentName}</span><Badge tone={paymentStatusTone(p.status)}>{paymentStatusLabel(p.status)}</Badge></div><div className="mt-1 text-xs text-muted-foreground">{p.institution} · {p.program} · {p.planName}</div><div className="mt-2 font-mono-app text-[10px] text-muted-foreground">{p.method} · {p.reference} · {p.paymentDate}</div></div><div className="flex items-center gap-4"><div className="text-right"><div className="font-display text-2xl">{money(p.amount, p.currency)}</div><div className="text-[10px] text-muted-foreground">Submitted {p.submittedAt.slice(0, 10)}</div></div><div className="flex gap-2">{p.status === 'PAYMENT_PENDING_REVIEW' && <><button onClick={() => setRejectingId(rejectingId === p.id ? null : p.id)} className="grid size-9 place-items-center rounded-xl border border-border text-[#a34c3e] hover:bg-[#fff1ed]" data-testid={`button-reject-payment-${p.id}`}><X size={16} /></button><button onClick={() => doApprove(p)} className="grid size-9 place-items-center rounded-xl bg-primary text-primary-foreground hover:opacity-90" data-testid={`button-approve-payment-${p.id}`}><Check size={16} /></button></>}<button onClick={() => setDeletingId(p.id)} className="grid size-9 place-items-center rounded-xl border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-payment-${p.id}`}><Trash2 size={16} /></button></div></div></div>
+  return <div><div className="mb-4 flex justify-end"><div className="flex rounded-xl border border-border bg-card p-1">{FILTERS.map((f) => <button key={f.key} onClick={() => setFilter(f.key)} className={cn('rounded-lg px-3 py-1.5 text-[11px] font-bold capitalize', filter === f.key && 'bg-muted text-primary')} data-testid={`button-payment-filter-${f.label}`}>{f.label}</button>)}</div></div>{q.isLoading ? <SkeletonPage /> : <div className="space-y-3">{payments.map((p) => <div key={p.id} className="rounded-2xl border border-border bg-card p-5" data-testid={`card-payment-review-${p.id}`}><div className="flex flex-col gap-4 md:flex-row md:items-start"><div className="grid size-11 shrink-0 place-items-center rounded-xl bg-[#fff0cb] text-[#94651c]"><ReceiptText size={19} /></div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="text-sm font-bold">{p.studentName}</span><Badge tone={paymentStatusTone(p.status)}>{paymentStatusLabel(p.status)}</Badge></div><div className="mt-1 text-xs text-muted-foreground">{p.institution} · {p.program} · {p.planName}</div><div className="mt-2 font-mono-app text-[10px] text-muted-foreground">{p.method} · {p.reference} · {p.paymentDate}</div></div><div className="flex items-center gap-4"><div className="text-right"><div className="font-display text-2xl">{money(p.amount, p.currency)}</div><div className="text-[10px] text-muted-foreground">Submitted {p.submittedAt.slice(0, 10)}</div></div><div className="flex gap-2">{p.status === 'PAYMENT_PENDING_REVIEW' && <><button onClick={() => setRejectingId(rejectingId === p.id ? null : p.id)} className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-[11px] font-bold text-[#a34c3e] transition-transform hover:bg-[#fff1ed] active:scale-95" data-testid={`button-reject-payment-${p.id}`}><X size={14} /> Reject</button><button onClick={() => setApprovingId(p.id)} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-[11px] font-extrabold text-primary-foreground shadow-sm transition-transform hover:opacity-90 active:scale-95" data-testid={`button-approve-payment-${p.id}`}><CheckCircle2 size={14} /> Approve</button></>}<button onClick={() => setDeletingId(p.id)} className="grid size-9 place-items-center rounded-xl border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-payment-${p.id}`}><Trash2 size={16} /></button></div></div></div>
     {p.proofPath && (() => { const url = resolveUploadUrl(p.proofPath)!; return <div className="mt-4 border-t border-border pt-4">{isImage(p.proofPath!) ? <a href={url} target="_blank" rel="noreferrer" data-testid={`link-proof-${p.id}`}><img src={url} alt="Payment proof" loading="lazy" decoding="async" className="max-h-64 rounded-xl border border-border object-contain" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; const fallback = e.currentTarget.nextElementSibling as HTMLElement | null; if (fallback) fallback.style.display = 'flex'; }} /></a> : <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-xl border border-border bg-muted px-3 py-2 text-xs font-bold" data-testid={`link-proof-${p.id}`}><FileText size={14} /> View payment proof</a>}{isImage(p.proofPath!) && <div style={{ display: 'none' }} className="hidden max-h-64 items-center gap-2 rounded-xl border border-dashed border-border bg-muted px-3 py-4 text-xs font-semibold text-muted-foreground"><FileText size={14} /> Couldn't load the proof image — <a href={url} target="_blank" rel="noreferrer" className="text-primary underline">open it directly</a> instead.</div>}</div>; })()}
     {rejectingId === p.id && <div className="mt-4 flex gap-2 border-t border-border pt-4"><input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason for rejection (shown to student)" className="h-9 flex-1 rounded-lg border border-border bg-background px-3 text-xs" data-testid={`input-reject-reason-${p.id}`} /><button onClick={() => doReject(p)} disabled={!reason.trim()} className="rounded-lg bg-destructive px-4 text-xs font-bold text-destructive-foreground disabled:opacity-50" data-testid={`button-confirm-reject-${p.id}`}>Confirm reject</button></div>}
-  </div>)}{!payments.length && <EmptyState icon={ReceiptText} title="Queue is clear" body="No payment submissions match this filter." />}</div>}{deletingId !== null && <ConfirmDialog title="Permanently delete this payment?" body="This erases the submission for good. If it already activated a membership, that membership itself is not revoked automatically." confirmLabel="Delete forever" onCancel={() => setDeletingId(null)} onConfirm={() => removePaymentPermanent.mutate(deletingId)} pending={removePaymentPermanent.isPending} />}</div>;
+  </div>)}{!payments.length && <EmptyState icon={ReceiptText} title="Queue is clear" body="No payment submissions match this filter." />}</div>}{deletingId !== null && <ConfirmDialog title="Permanently delete this payment?" body="This erases the submission for good. If it already activated a membership, that membership itself is not revoked automatically." confirmLabel="Delete forever" onCancel={() => setDeletingId(null)} onConfirm={() => removePaymentPermanent.mutate(deletingId)} pending={removePaymentPermanent.isPending} />}{approvingPayment && <ConfirmDialog title="Approve this payment?" body={`This confirms ${money(approvingPayment.amount, approvingPayment.currency)} from ${approvingPayment.studentName} for ${approvingPayment.planName} and activates their membership.`} confirmLabel="Approve payment" pendingLabel="Approving…" tone="primary" testId="approve-payment" onCancel={() => setApprovingId(null)} onConfirm={() => doApprove(approvingPayment)} pending={approve.isPending} />}</div>;
 }
 
 export const YEAR_OPTIONS = [1, 2, 3, 4, 5];
@@ -2296,7 +2301,7 @@ export function ExamEditForm({ exam, onSave, onCancel, saving }: { exam: AdminEx
 // "Set paper" flow already uses — no new backend route needed.
 // ---------------------------------------------------------------------------
 
-export type PaperMakerSelection = { count: number; topicIds: number[] | null };
+export type PaperMakerSelection = { count: number; topicIds: number[] | null; topicCounts?: Record<number, number> };
 
 function paperMakerModuleMatches(m: AdminModule, program: string, year: string): boolean {
   const programOk = !program || !m.programTargetKind || m.programTargetKind === program;
@@ -2304,13 +2309,23 @@ function paperMakerModuleMatches(m: AdminModule, program: string, year: string):
   return programOk && yearOk;
 }
 
-export function PaperMakerTopicPicker({ subjectId, selection, onChange }: { subjectId: number; selection: PaperMakerSelection | undefined; onChange: (topicIds: number[] | null) => void }) {
+// Per-topic counts (added alongside the original subject-total + topic
+// filter above): lets an admin type an exact MCQ count for an individual
+// Topic instead of just narrowing which topics the subject total draws
+// from. Whenever any topic has a count > 0 set, generate() draws exactly
+// that many from each such topic and ignores the subject's own count
+// field/topicIds filter entirely for that subject — see PaperMakerPanel's
+// generate() and PaperMakerSubjectRow below.
+export function PaperMakerTopicPicker({ subjectId, rows, selection, onChange, onSetTopicCount }: { subjectId: number; rows: AdminMcqRow[]; selection: PaperMakerSelection | undefined; onChange: (topicIds: number[] | null) => void; onSetTopicCount: (topicId: number, count: number) => void }) {
   const topicsQ = useQuery({ queryKey: ['admin-topics', subjectId], queryFn: () => topicAdminApi.list(subjectId) });
   const topics = topicsQ.data ?? [];
   const activeIds = selection?.topicIds ?? null;
+  const topicCounts = selection?.topicCounts ?? {};
+  const availableByTopic = new Map<number, number>();
+  for (const r of rows) { if (r.topicId !== null) availableByTopic.set(r.topicId, (availableByTopic.get(r.topicId) ?? 0) + 1); }
   if (topicsQ.isLoading) return <InlineLoading label="Loading topics…" />;
   if (!topics.length) return <p className="text-[11px] text-muted-foreground">No topics in this subject yet — the count above pulls from the whole subject.</p>;
-  return <div className="space-y-1.5">
+  return <div className="space-y-2">
     <div className="flex flex-wrap gap-2">
       <button type="button" onClick={() => onChange(null)} className={cn('rounded-full px-2.5 py-1 text-[10px] font-bold', activeIds === null ? 'bg-primary text-primary-foreground' : 'border border-border')} data-testid={`button-papermaker-topics-all-${subjectId}`}>All topics</button>
     </div>
@@ -2322,25 +2337,36 @@ export function PaperMakerTopicPicker({ subjectId, selection, onChange }: { subj
       // of being silently excluded by a stale explicit id list.
       onChange(next.length === topics.length ? null : next);
     }} data-testid={`checkbox-papermaker-topic-${t.id}`} />{t.name} <span className="font-normal opacity-70">({t.questionCount})</span></label>; })}</div>
+    <div className="space-y-1 border-t border-border pt-2">
+      <p className="text-[10px] font-bold text-muted-foreground">Or set an exact MCQ count per topic (overrides the subject total above for this subject):</p>
+      {topics.map((t) => { const avail = availableByTopic.get(t.id) ?? 0; return <div key={t.id} className="flex items-center justify-between gap-2 text-[11px]">
+        <span className="min-w-0 flex-1 truncate">{t.name} <span className="font-normal opacity-70">({avail} available)</span></span>
+        <input type="number" min={0} max={avail} value={topicCounts[t.id] || ''} onChange={(e) => onSetTopicCount(t.id, Math.max(0, Math.min(Number(e.target.value) || 0, avail)))} placeholder="0" className="h-8 w-16 shrink-0 rounded-lg border border-border bg-card px-2 text-xs font-bold" disabled={!avail} data-testid={`input-papermaker-topic-count-${t.id}`} />
+      </div>; })}
+    </div>
   </div>;
 }
 
-export function PaperMakerSubjectRow({ subject, rows, selection, onSetCount, onSetTopicIds }: { subject: AdminSubject; rows: AdminMcqRow[]; selection: PaperMakerSelection | undefined; onSetCount: (count: number) => void; onSetTopicIds: (topicIds: number[] | null) => void }) {
+export function PaperMakerSubjectRow({ subject, rows, selection, onSetCount, onSetTopicIds, onSetTopicCount }: { subject: AdminSubject; rows: AdminMcqRow[]; selection: PaperMakerSelection | undefined; onSetCount: (count: number) => void; onSetTopicIds: (topicIds: number[] | null) => void; onSetTopicCount: (topicId: number, count: number) => void }) {
   const [topicsOpen, setTopicsOpen] = useState(false);
   const topicIds = selection?.topicIds ?? null;
+  const topicCounts = selection?.topicCounts ?? {};
+  const perTopicTotal = Object.values(topicCounts).reduce((sum, n) => sum + (n || 0), 0);
+  const usingPerTopic = perTopicTotal > 0;
   const available = topicIds ? rows.filter((r) => r.topicId !== null && topicIds.includes(r.topicId)).length : rows.length;
-  const count = selection?.count ?? 0;
+  const count = usingPerTopic ? perTopicTotal : (selection?.count ?? 0);
   return <div className="rounded-xl border border-border bg-background p-3" data-testid={`row-papermaker-subject-${subject.id}`}>
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div className="min-w-0 flex-1"><p className="truncate text-xs font-bold">{subject.name}</p><p className="text-[10px] text-muted-foreground">{available} published MCQ{available === 1 ? '' : 's'} available{topicIds ? ' (selected topics)' : ''}</p></div>
       <button type="button" onClick={() => setTopicsOpen((v) => !v)} className="rounded-lg border border-border px-2 py-1 text-[10px] font-bold text-muted-foreground" data-testid={`button-papermaker-toggle-topics-${subject.id}`}>{topicsOpen ? 'Hide topics' : 'Topics'}</button>
-      <input type="number" min={0} max={available} value={count || ''} onChange={(e) => onSetCount(Math.max(0, Math.min(Number(e.target.value) || 0, available)))} placeholder="0" className="h-9 w-20 rounded-lg border border-border bg-card px-2 text-xs font-bold" data-testid={`input-papermaker-count-${subject.id}`} disabled={!available} />
+      <input type="number" min={0} max={available} value={count || ''} onChange={(e) => onSetCount(Math.max(0, Math.min(Number(e.target.value) || 0, available)))} placeholder="0" className="h-9 w-20 rounded-lg border border-border bg-card px-2 text-xs font-bold disabled:opacity-50" data-testid={`input-papermaker-count-${subject.id}`} disabled={!available || usingPerTopic} title={usingPerTopic ? 'Clear the per-topic counts below to set a single subject total instead' : undefined} />
     </div>
-    {topicsOpen && <div className="mt-2 border-t border-border pt-2"><PaperMakerTopicPicker subjectId={subject.id} selection={selection} onChange={onSetTopicIds} /></div>}
+    {usingPerTopic && <p className="mt-1 text-[10px] font-bold text-primary">Using per-topic counts ({perTopicTotal} total) — open Topics to adjust.</p>}
+    {topicsOpen && <div className="mt-2 border-t border-border pt-2"><PaperMakerTopicPicker subjectId={subject.id} rows={rows} selection={selection} onChange={onSetTopicIds} onSetTopicCount={onSetTopicCount} /></div>}
   </div>;
 }
 
-export function PaperMakerModuleGroup({ mod, rowsBySubject, selections, onSetCount, onSetTopicIds }: { mod: AdminModule; rowsBySubject: Map<number, AdminMcqRow[]>; selections: Record<number, PaperMakerSelection>; onSetCount: (subjectId: number, count: number) => void; onSetTopicIds: (subjectId: number, topicIds: number[] | null) => void }) {
+export function PaperMakerModuleGroup({ mod, rowsBySubject, selections, onSetCount, onSetTopicIds, onSetTopicCount }: { mod: AdminModule; rowsBySubject: Map<number, AdminMcqRow[]>; selections: Record<number, PaperMakerSelection>; onSetCount: (subjectId: number, count: number) => void; onSetTopicIds: (subjectId: number, topicIds: number[] | null) => void; onSetTopicCount: (subjectId: number, topicId: number, count: number) => void }) {
   const [open, setOpen] = useState(false);
   const subjectsQ = useQuery({ queryKey: ['admin-subjects', mod.id], queryFn: () => subjectAdminApi.list(mod.id), enabled: open });
   const subjects = (subjectsQ.data ?? []).filter((s) => (rowsBySubject.get(s.id)?.length ?? 0) > 0);
@@ -2354,7 +2380,7 @@ export function PaperMakerModuleGroup({ mod, rowsBySubject, selections, onSetCou
     {open && <div className="space-y-2 border-t border-border p-3">
       {subjectsQ.isLoading && <InlineLoading label="Loading subjects…" />}
       {!subjectsQ.isLoading && !subjects.length && <p className="text-[11px] text-muted-foreground">No published bank questions under this module yet.</p>}
-      {subjects.map((s) => <PaperMakerSubjectRow key={s.id} subject={s} rows={rowsBySubject.get(s.id) ?? []} selection={selections[s.id]} onSetCount={(count) => onSetCount(s.id, count)} onSetTopicIds={(topicIds) => onSetTopicIds(s.id, topicIds)} />)}
+      {subjects.map((s) => <PaperMakerSubjectRow key={s.id} subject={s} rows={rowsBySubject.get(s.id) ?? []} selection={selections[s.id]} onSetCount={(count) => onSetCount(s.id, count)} onSetTopicIds={(topicIds) => onSetTopicIds(s.id, topicIds)} onSetTopicCount={(topicId, count) => onSetTopicCount(s.id, topicId, count)} />)}
     </div>}
   </div>;
 }
@@ -2388,8 +2414,14 @@ export function PaperMakerPanel({ exam }: { exam: AdminExam }) {
   const blocksWithModules = blocks.filter((b) => modulesByBlock.has(b.id));
   const standaloneModules = modulesByBlock.get('other') ?? [];
 
-  const totalRequested = Object.values(selections).reduce((sum, s) => sum + (s.count || 0), 0);
-  const subjectsPicked = Object.values(selections).filter((s) => s.count > 0).length;
+  // Effective count for a subject: its per-topic counts if any are set,
+  // otherwise the subject's own total field — same rule generate() uses.
+  const effectiveSubjectCount = (s: PaperMakerSelection) => {
+    const perTopicTotal = Object.values(s.topicCounts ?? {}).reduce((sum, n) => sum + (n || 0), 0);
+    return perTopicTotal > 0 ? perTopicTotal : (s.count || 0);
+  };
+  const totalRequested = Object.values(selections).reduce((sum, s) => sum + effectiveSubjectCount(s), 0);
+  const subjectsPicked = Object.values(selections).filter((s) => effectiveSubjectCount(s) > 0).length;
 
   const setQuestions = useMutation({
     mutationFn: (mcqIds: number[]) => examsAdminApi.setQuestions(exam.id, mcqIds),
@@ -2405,16 +2437,31 @@ export function PaperMakerPanel({ exam }: { exam: AdminExam }) {
   const generate = () => {
     const picked: number[] = [];
     for (const [subjectIdStr, sel] of Object.entries(selections)) {
+      const pool = rowsBySubject.get(Number(subjectIdStr)) ?? [];
+      const topicCounts = sel.topicCounts ?? {};
+      const perTopicEntries = Object.entries(topicCounts).filter(([, c]) => c > 0);
+      if (perTopicEntries.length) {
+        // Per-topic mode: sample each topic's exact count independently
+        // instead of one random draw across the whole subject, so e.g.
+        // "5 from Cardiology, 3 from Renal" can't accidentally come back
+        // as 8 from Cardiology alone.
+        for (const [topicIdStr, topicCount] of perTopicEntries) {
+          const topicPool = pool.filter((r) => r.topicId === Number(topicIdStr));
+          const shuffled = [...topicPool].sort(() => Math.random() - 0.5);
+          picked.push(...shuffled.slice(0, topicCount).map((r) => r.id));
+        }
+        continue;
+      }
       if (!sel.count) continue;
-      let pool = rowsBySubject.get(Number(subjectIdStr)) ?? [];
-      if (sel.topicIds) pool = pool.filter((r) => r.topicId !== null && sel.topicIds!.includes(r.topicId));
+      let filteredPool = pool;
+      if (sel.topicIds) filteredPool = filteredPool.filter((r) => r.topicId !== null && sel.topicIds!.includes(r.topicId));
       // Fisher-Yates-ish shuffle (sort-by-random is fine at this scale —
       // subject pools are, at most, a few hundred questions) so each
       // generated paper draws a fresh random subset per subject.
-      const shuffled = [...pool].sort(() => Math.random() - 0.5);
+      const shuffled = [...filteredPool].sort(() => Math.random() - 0.5);
       picked.push(...shuffled.slice(0, sel.count).map((r) => r.id));
     }
-    if (!picked.length) { toast({ title: 'Set an MCQ count for at least one subject first', variant: 'destructive' }); return; }
+    if (!picked.length) { toast({ title: 'Set an MCQ count for at least one subject or topic first', variant: 'destructive' }); return; }
     const finalIds = replaceExisting ? picked : [...new Set([...(existingQuestionsQ.data ?? []).map((q) => q.id), ...picked])];
     setQuestions.mutate(finalIds);
   };
@@ -2425,7 +2472,7 @@ export function PaperMakerPanel({ exam }: { exam: AdminExam }) {
       <span className="flex-1 text-xs font-extrabold">Paper maker — build this paper from the MCQ bank</span>
       <ChevronRight size={16} className={cn('shrink-0 text-primary transition-transform', open && 'rotate-90')} />
     </button>
-    {!open && <p className="mt-1 text-[11px] text-muted-foreground">Pick a year + MBBS/BDS, choose how many MCQs to pull per subject, and generate the paper automatically from the existing bank.</p>}
+    {!open && <p className="mt-1 text-[11px] text-muted-foreground">Pick a year + MBBS/BDS, choose how many MCQs to pull per subject (or set an exact count per topic), and generate the paper automatically from the existing bank.</p>}
     {open && <div className="mt-3 space-y-3">
       <div className="grid gap-2 sm:grid-cols-2">
         <label className="text-[11px] font-bold">Program<select value={program} onChange={(e) => setProgram(e.target.value)} className="mt-1 h-9 w-full rounded-lg border border-border bg-card px-2 text-xs" data-testid={`select-papermaker-program-${exam.id}`}><option value="">All Programs</option><option value="MBBS">MBBS</option><option value="BDS">BDS</option></select></label>
@@ -2437,9 +2484,9 @@ export function PaperMakerPanel({ exam }: { exam: AdminExam }) {
         {!blocksWithModules.length && !standaloneModules.length && <p className="text-[11px] text-muted-foreground">No modules match that Program/Year yet.</p>}
         {blocksWithModules.map((b) => <div key={b.id} className="space-y-2">
           <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted-foreground">{b.name}</p>
-          {(modulesByBlock.get(b.id) ?? []).map((m) => <PaperMakerModuleGroup key={m.id} mod={m} rowsBySubject={rowsBySubject} selections={selections} onSetCount={(subjectId, count) => setSelections((prev) => ({ ...prev, [subjectId]: { topicIds: prev[subjectId]?.topicIds ?? null, count } }))} onSetTopicIds={(subjectId, topicIds) => setSelections((prev) => ({ ...prev, [subjectId]: { count: prev[subjectId]?.count ?? 0, topicIds } }))} />)}
+          {(modulesByBlock.get(b.id) ?? []).map((m) => <PaperMakerModuleGroup key={m.id} mod={m} rowsBySubject={rowsBySubject} selections={selections} onSetCount={(subjectId, count) => setSelections((prev) => ({ ...prev, [subjectId]: { topicIds: prev[subjectId]?.topicIds ?? null, topicCounts: prev[subjectId]?.topicCounts, count } }))} onSetTopicIds={(subjectId, topicIds) => setSelections((prev) => ({ ...prev, [subjectId]: { count: prev[subjectId]?.count ?? 0, topicCounts: prev[subjectId]?.topicCounts, topicIds } }))} onSetTopicCount={(subjectId, topicId, count) => setSelections((prev) => ({ ...prev, [subjectId]: { count: prev[subjectId]?.count ?? 0, topicIds: prev[subjectId]?.topicIds ?? null, topicCounts: { ...(prev[subjectId]?.topicCounts ?? {}), [topicId]: count } } }))} />)}
         </div>)}
-        {standaloneModules.map((m) => <PaperMakerModuleGroup key={m.id} mod={m} rowsBySubject={rowsBySubject} selections={selections} onSetCount={(subjectId, count) => setSelections((prev) => ({ ...prev, [subjectId]: { topicIds: prev[subjectId]?.topicIds ?? null, count } }))} onSetTopicIds={(subjectId, topicIds) => setSelections((prev) => ({ ...prev, [subjectId]: { count: prev[subjectId]?.count ?? 0, topicIds } }))} />)}
+        {standaloneModules.map((m) => <PaperMakerModuleGroup key={m.id} mod={m} rowsBySubject={rowsBySubject} selections={selections} onSetCount={(subjectId, count) => setSelections((prev) => ({ ...prev, [subjectId]: { topicIds: prev[subjectId]?.topicIds ?? null, topicCounts: prev[subjectId]?.topicCounts, count } }))} onSetTopicIds={(subjectId, topicIds) => setSelections((prev) => ({ ...prev, [subjectId]: { count: prev[subjectId]?.count ?? 0, topicCounts: prev[subjectId]?.topicCounts, topicIds } }))} onSetTopicCount={(subjectId, topicId, count) => setSelections((prev) => ({ ...prev, [subjectId]: { count: prev[subjectId]?.count ?? 0, topicIds: prev[subjectId]?.topicIds ?? null, topicCounts: { ...(prev[subjectId]?.topicCounts ?? {}), [topicId]: count } } }))} />)}
       </div>}
 
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/30 bg-card px-3 py-2.5">

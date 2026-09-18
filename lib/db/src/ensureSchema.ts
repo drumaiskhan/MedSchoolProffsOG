@@ -323,6 +323,8 @@ CREATE TABLE IF NOT EXISTS med_books (
   module_id INTEGER,
   subject_id INTEGER,
   topic_id INTEGER,
+  program_target_kind TEXT,
+  year_target_number INTEGER,
   storage_path TEXT NOT NULL,
   cover_image_path TEXT,
   active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -714,6 +716,13 @@ ALTER TABLE med_institutions ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT
 -- med_modules/med_blocks already have.
 ALTER TABLE med_past_papers ADD COLUMN IF NOT EXISTS program_target_kind TEXT;
 ALTER TABLE med_past_papers ADD COLUMN IF NOT EXISTS year_target_number INTEGER;
+
+-- Books: same simple program/year targeting as med_past_papers above,
+-- replacing the Module/Subject/Topic picker in the admin "Add book" form
+-- with a direct Degree + Year selector (see schema/medschool.ts's comment
+-- on booksTable).
+ALTER TABLE med_books ADD COLUMN IF NOT EXISTS program_target_kind TEXT;
+ALTER TABLE med_books ADD COLUMN IF NOT EXISTS year_target_number INTEGER;
 
 -- Trial mode: an admin can grant a student temporary access for a set
 -- number of days without a payment, and revoke it early. Reuses the
