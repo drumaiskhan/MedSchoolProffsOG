@@ -830,7 +830,7 @@ export function analyzeMcqRows(rows: AdminMcqRow[]) {
   return { total: rows.length, easy, moderate, hard, explained };
 }
 
-export function AnalysisPanel({ rows, label, filters }: { rows: AdminMcqRow[]; label: string; filters: { moduleId?: number; subjectId?: number; topicId?: number } }) {
+export function AnalysisPanel({ rows, label, filters }: { rows: AdminMcqRow[]; label: string; filters: { moduleId?: number; subjectId?: number; topicId?: number; pastPaperId?: number } }) {
   const a = analyzeMcqRows(rows);
   // AI re-classification calls the model per question. The server still
   // caps each individual HTTP call (see CLASSIFY_BATCH_CAP in
@@ -927,7 +927,7 @@ export function AnalysisPanel({ rows, label, filters }: { rows: AdminMcqRow[]; l
   </div>;
 }
 
-export function AnalysisToggle({ rows, label, filters }: { rows: AdminMcqRow[]; label: string; filters: { moduleId?: number; subjectId?: number; topicId?: number } }) {
+export function AnalysisToggle({ rows, label, filters }: { rows: AdminMcqRow[]; label: string; filters: { moduleId?: number; subjectId?: number; topicId?: number; pastPaperId?: number } }) {
   const [open, setOpen] = useState(false);
   if (!rows.length) return null;
   return <>
@@ -2019,7 +2019,16 @@ export function PastPaperQuestionsList({ pastPaperId }: { pastPaperId: number })
   const rows = (treeQ.data ?? []).filter((m) => m.pastPaperId === pastPaperId);
   if (treeQ.isLoading) return <InlineLoading />;
   if (!rows.length) return <p className="text-[11px] text-muted-foreground">No questions yet — upload some below.</p>;
-  return <div className="max-h-96 space-y-2 overflow-y-auto pr-1">{rows.map((m) => <McqTreeRow key={m.id} mcq={m} />)}</div>;
+  return <div>
+    {/* Same AI tools the main MCQ bank's Module -> Subject -> Topic tree
+        gets (classify difficulty, generate missing per-option explanations
+        — including for the correct option, not just the wrong ones, since
+        "missing" here means any incomplete slot — and shuffle option
+        order), scoped to just this paper's questions via pastPaperId
+        instead of moduleId/subjectId/topicId. */}
+    <div className="mb-2 flex items-center justify-end"><AnalysisToggle rows={rows} label={`this paper's questions`} filters={{ pastPaperId }} /></div>
+    <div className="max-h-96 space-y-2 overflow-y-auto pr-1">{rows.map((m) => <McqTreeRow key={m.id} mcq={m} />)}</div>
+  </div>;
 }
 
 // Compact bulk-import widget scoped to one past paper — parses a file into

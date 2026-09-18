@@ -207,7 +207,12 @@ router.post("/admin/mcqs/generate", requireAdmin, async (req, res): Promise<void
 
 const ClassifyDifficultyBody = z.union([
   z.object({ ids: z.array(z.number().int().positive()).min(1).max(20) }),
-  z.object({ all: z.literal(true), filters: z.object({ moduleId: z.number().int().optional(), subjectId: z.number().int().optional(), topicId: z.number().int().optional() }).optional() }),
+  // pastPaperId lets the Past Papers admin screen run the same "all in this
+  // scope" classification a module/subject/topic tree row gets — a
+  // past-paper MCQ is scoped by its paper, not by curriculum placement (see
+  // mcqsTable.pastPaperId's own comment), so it needs its own filter here
+  // rather than reusing moduleId/subjectId/topicId.
+  z.object({ all: z.literal(true), filters: z.object({ moduleId: z.number().int().optional(), subjectId: z.number().int().optional(), topicId: z.number().int().optional(), pastPaperId: z.number().int().optional() }).optional() }),
 ]);
 // Was 30 — lowered alongside CLASSIFY_CONCURRENCY below (see that comment)
 // so a full batch's worst-case wall-clock time has headroom under
@@ -228,6 +233,7 @@ router.post("/admin/mcqs/classify-difficulty", requireAdmin, async (req, res): P
           parsed.data.filters?.moduleId ? eq(mcqsTable.moduleId, parsed.data.filters.moduleId) : undefined,
           parsed.data.filters?.subjectId ? eq(mcqsTable.subjectId, parsed.data.filters.subjectId) : undefined,
           parsed.data.filters?.topicId ? eq(mcqsTable.topicId, parsed.data.filters.topicId) : undefined,
+          parsed.data.filters?.pastPaperId ? eq(mcqsTable.pastPaperId, parsed.data.filters.pastPaperId) : undefined,
         )).limit(CLASSIFY_BATCH_CAP);
 
   if (!rows.length) { res.json({ classified: 0, remaining: 0, results: [] }); return; }
@@ -242,6 +248,7 @@ router.post("/admin/mcqs/classify-difficulty", requireAdmin, async (req, res): P
       parsed.data.filters?.moduleId ? eq(mcqsTable.moduleId, parsed.data.filters.moduleId) : undefined,
       parsed.data.filters?.subjectId ? eq(mcqsTable.subjectId, parsed.data.filters.subjectId) : undefined,
       parsed.data.filters?.topicId ? eq(mcqsTable.topicId, parsed.data.filters.topicId) : undefined,
+      parsed.data.filters?.pastPaperId ? eq(mcqsTable.pastPaperId, parsed.data.filters.pastPaperId) : undefined,
     ));
     remaining = Math.max(0, Number(totalCount) - rows.length);
   }
@@ -288,7 +295,12 @@ router.post("/admin/mcqs/classify-difficulty", requireAdmin, async (req, res): P
 
 const GenerateOptionExplanationsBody = z.union([
   z.object({ ids: z.array(z.number().int().positive()).min(1).max(10) }),
-  z.object({ all: z.literal(true), filters: z.object({ moduleId: z.number().int().optional(), subjectId: z.number().int().optional(), topicId: z.number().int().optional() }).optional() }),
+  // pastPaperId scopes this to one past paper's questions — same reasoning
+  // as ClassifyDifficultyBody's pastPaperId above: past-paper MCQs aren't
+  // reachable through moduleId/subjectId/topicId, so the Past Papers admin
+  // screen needs its own filter to run this the same way the main MCQ
+  // bank's tree does.
+  z.object({ all: z.literal(true), filters: z.object({ moduleId: z.number().int().optional(), subjectId: z.number().int().optional(), topicId: z.number().int().optional(), pastPaperId: z.number().int().optional() }).optional() }),
 ]);
 // Was 30 — lowered alongside GENERATE_CONCURRENCY below so a full batch
 // fits in one round under generateOptionExplanations' own 12s hard
@@ -304,6 +316,7 @@ router.post("/admin/mcqs/generate-option-explanations", requireAdmin, async (req
     parsed.data.filters?.moduleId ? eq(mcqsTable.moduleId, parsed.data.filters.moduleId) : undefined,
     parsed.data.filters?.subjectId ? eq(mcqsTable.subjectId, parsed.data.filters.subjectId) : undefined,
     parsed.data.filters?.topicId ? eq(mcqsTable.topicId, parsed.data.filters.topicId) : undefined,
+    parsed.data.filters?.pastPaperId ? eq(mcqsTable.pastPaperId, parsed.data.filters.pastPaperId) : undefined,
   );
 
   // Only rows actually missing (or incomplete) per-option explanations —

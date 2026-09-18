@@ -365,7 +365,7 @@ export const mcqAdminApi = {
   // Returns how many are still left in that scope; callers that want the
   // *whole* scope done should call this again while `remaining > 0` (the
   // AnalysisPanel button in shared.tsx does this loop automatically).
-  classifyDifficulty: (body: { ids: number[] } | { all: true; filters?: { moduleId?: number; subjectId?: number; topicId?: number } }) =>
+  classifyDifficulty: (body: { ids: number[] } | { all: true; filters?: { moduleId?: number; subjectId?: number; topicId?: number; pastPaperId?: number } }) =>
     request<{ classified: number; remaining: number; results: Array<{ id: number; difficulty: 'easy' | 'moderate' | 'hard' }> }>('/admin/mcqs/classify-difficulty', { method: 'POST', body: JSON.stringify(body) }),
   // AI-backfills optionExplanations for existing questions that are
   // missing them (or have an incomplete set). Same capped-per-call /
@@ -374,7 +374,7 @@ export const mcqAdminApi = {
   // `remaining > 0` (handled automatically by the AnalysisPanel button in
   // shared.tsx). Skips questions that already have a full set of
   // per-option explanations rather than overwriting them.
-  generateOptionExplanations: (body: { ids: number[] } | { all: true; filters?: { moduleId?: number; subjectId?: number; topicId?: number } }) =>
+  generateOptionExplanations: (body: { ids: number[] } | { all: true; filters?: { moduleId?: number; subjectId?: number; topicId?: number; pastPaperId?: number } }) =>
     request<{ generated: number; remaining: number; results: Array<{ id: number; optionExplanations: string[] }> }>('/admin/mcqs/generate-option-explanations', { method: 'POST', body: JSON.stringify(body) }),
   // One-click fix for the "imported 406, module only shows 380" gap — see
   // mcq-import.ts's CommitBody.status comment. Omit moduleId to publish
@@ -385,7 +385,7 @@ export const mcqAdminApi = {
   // without touching which option is marked correct. Fixes banks (e.g.
   // bulk-imported from an AI generator) where the correct answer is
   // always the same letter.
-  shuffleOptions: (body: { ids: number[] } | { all: true; filters?: { search?: string; moduleId?: number; subjectId?: number; topicId?: number; difficulty?: string } }) =>
+  shuffleOptions: (body: { ids: number[] } | { all: true; filters?: { search?: string; moduleId?: number; subjectId?: number; topicId?: number; difficulty?: string; pastPaperId?: number } }) =>
     request<{ ok: true; shuffled: number; skipped: number }>('/admin/mcqs/shuffle-options', { method: 'POST', body: JSON.stringify(body) }),
 };
 

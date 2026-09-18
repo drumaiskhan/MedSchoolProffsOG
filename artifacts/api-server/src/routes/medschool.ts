@@ -1048,6 +1048,11 @@ const ShuffleOptionsBody = z.object({ ids: z.array(z.number().int().positive()).
       subjectId: z.number().int().positive().optional(),
       topicId: z.number().int().positive().optional(),
       difficulty: z.string().optional(),
+      // Lets the Past Papers admin screen scope this to one paper's
+      // questions the same way AnalysisPanel scopes it to a
+      // module/subject/topic — see mcqsTable.pastPaperId's own comment for
+      // why past-paper MCQs aren't reachable via those three filters alone.
+      pastPaperId: z.number().int().positive().optional(),
     }).optional(),
   }),
 );
@@ -1066,6 +1071,7 @@ router.post("/admin/mcqs/shuffle-options", requireAdmin, async (req, res): Promi
           parsed.data.filters?.subjectId ? eq(mcqsTable.subjectId, parsed.data.filters.subjectId) : undefined,
           parsed.data.filters?.topicId ? eq(mcqsTable.topicId, parsed.data.filters.topicId) : undefined,
           parsed.data.filters?.difficulty ? eq(mcqsTable.difficulty, parsed.data.filters.difficulty) : undefined,
+          parsed.data.filters?.pastPaperId ? eq(mcqsTable.pastPaperId, parsed.data.filters.pastPaperId) : undefined,
         ));
 
   if (!rows.length) { res.json({ ok: true, shuffled: 0, skipped: 0 }); return; }
