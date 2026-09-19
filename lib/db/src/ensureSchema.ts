@@ -551,6 +551,11 @@ CREATE TABLE IF NOT EXISTS med_feedback (
 );
 
 ALTER TABLE med_feedback ADD COLUMN IF NOT EXISTS rating INTEGER;
+-- Admin-curated "show this on the public homepage" flag — see GET
+-- /feedback/featured (public, unauthenticated) and the admin toggle in
+-- AdminFeedback.tsx. Only 5-star entries an admin has explicitly marked
+-- featured=true are ever returned from that endpoint.
+ALTER TABLE med_feedback ADD COLUMN IF NOT EXISTS featured BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE TABLE IF NOT EXISTS med_feedback_replies (
   id SERIAL PRIMARY KEY,

@@ -288,9 +288,13 @@ export interface PastPaper { id: number; title: string; examBoard: string; year:
 export interface NotebookEntry { id: number; userId: number; mcqId: number | null; title: string; content: string; createdAt: string; updatedAt: string }
 export interface SavedSession { id: number; userId: number; name: string; config: Record<string, unknown>; createdAt: string }
 export interface FlaggedMcq { id: number; userId: number; mcqId: number; reason: string; status: 'open' | 'resolved'; createdAt: string; question: string | null; path: string | null; mcqDeleted: boolean }
-export interface FeedbackEntry { id: number; userId: number | null; category: string; message: string; status: 'open' | 'replied' | 'reviewed'; rating: number | null; createdAt: string; user: { name: string; email: string } | null }
+export interface FeedbackEntry { id: number; userId: number | null; category: string; message: string; status: 'open' | 'replied' | 'reviewed'; rating: number | null; featured: boolean; createdAt: string; user: { name: string; email: string } | null }
 export interface FeedbackReply { id: number; feedbackId: number; authorId: number; authorRole: 'admin' | 'student'; message: string; createdAt: string }
 export interface MyFeedbackEntry extends FeedbackEntry { replies: FeedbackReply[] }
+// Public, trimmed-down shape returned by GET /feedback/featured — no
+// userId/email, just what's safe to show a signed-out visitor. See
+// api-server routes/student-tools.ts for what's deliberately left out.
+export interface FeaturedTestimonial { id: number; rating: number; message: string; createdAt: string; name: string }
 export interface Analytics { range: string; totalSessions: number; averageScore: number; questionsAnswered: number; timeSpentMinutes: number; currentStreak: number; longestStreak: number }
 export interface LeaderboardRow { rank: number; userId: number; name: string; sessions: number; questionsAnswered: number; correct: number; points: number; accuracy: number; isYou: boolean }
 export interface PaymentDetails { PAYMENT_INSTRUCTIONS: string; PAYMENT_ACCOUNT_HOLDER: string; PAYMENT_ACCOUNT_NUMBER: string; PAYMENT_BANK_NAME: string; PAYMENT_IFSC_OR_ROUTING: string; PAYMENT_UPI_ID: string; PAYMENT_QR_CODE_PATH: string; PAYMENT_QR_CODE_URL?: string; PAYMENT_RAAST_ID: string; PAYMENT_WALLET_PROVIDER: string; PAYMENT_WALLET_NUMBER: string; PAYMENT_WALLET_ACCOUNT_NAME: string; PAYMENT_BANK_ACCOUNTS: string; PAYMENT_METHODS_CONFIG: string; PAYMENT_LATE_FEE_NOTE: string; PAYMENT_REFUND_POLICY: string; DEFAULT_CURRENCY: string; bankAccounts: BankAccount[]; methods: PaymentMethodConfig[] }
@@ -411,6 +415,9 @@ export const feedbackApi = {
   mine: () => request<MyFeedbackEntry[]>('/feedback/mine'),
   create: (body: { category?: string; message: string; rating?: number }) => request<FeedbackEntry>('/feedback', { method: 'POST', body: JSON.stringify(body) }),
   updateStatus: (id: number, status: 'open' | 'replied' | 'reviewed') => request<FeedbackEntry>(`/feedback/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+  setFeatured: (id: number, featured: boolean) => request<FeedbackEntry>(`/feedback/${id}`, { method: 'PATCH', body: JSON.stringify({ featured }) }),
+  // Public — no auth required, powers the homepage testimonials section.
+  featured: () => request<FeaturedTestimonial[]>('/feedback/featured'),
   reply: (id: number, message: string) => request<FeedbackReply>(`/feedback/${id}/replies`, { method: 'POST', body: JSON.stringify({ message }) }),
 };
 

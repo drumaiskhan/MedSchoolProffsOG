@@ -289,6 +289,47 @@ export function usePageTitle(title: string | null | undefined) {
   }, [title, setPageTitle]);
 }
 
+// SEO: the app is a client-rendered SPA, so index.html ships one shared
+// <title>/description/canonical for every route — without this hook every
+// marketing page (About, Pricing, Contact, FAQ, Home) would show identical
+// <head> content to search engines and to link previews. Public marketing
+// pages call this once on mount to patch those three tags to their own
+// values, and it restores index.html's site-wide defaults on unmount so an
+// in-app route never inherits a marketing page's title after navigating
+// away. Internal app routes (behind login) don't need this — they aren't
+// meant to be indexed.
+export function useDocumentHead({ title, description, path }: { title?: string; description?: string; path?: string }) {
+  useEffect(() => {
+    const prevTitle = document.title;
+    if (title) document.title = title;
+
+    const descTag = document.querySelector('meta[name="description"]');
+    const prevDescription = descTag?.getAttribute('content') ?? null;
+    if (description && descTag) descTag.setAttribute('content', description);
+
+    let canonicalTag = document.querySelector('link[rel="canonical"]');
+    const prevCanonical = canonicalTag?.getAttribute('href') ?? null;
+    const hadCanonical = !!canonicalTag;
+    if (path) {
+      if (!canonicalTag) {
+        canonicalTag = document.createElement('link');
+        canonicalTag.setAttribute('rel', 'canonical');
+        document.head.appendChild(canonicalTag);
+      }
+      canonicalTag.setAttribute('href', `https://medschoolproffs.live${path}`);
+    }
+
+    return () => {
+      document.title = prevTitle;
+      if (descTag && prevDescription != null) descTag.setAttribute('content', prevDescription);
+      if (canonicalTag) {
+        if (prevCanonical != null) canonicalTag.setAttribute('href', prevCanonical);
+        else if (!hadCanonical) canonicalTag.remove();
+      }
+    };
+  }, [title, description, path]);
+}
+
 export function useFocusMode(active: boolean, strict = false) {
   const { setFocusMode, setStrictFocusMode } = useContext(FocusModeContext);
   useEffect(() => {
@@ -803,6 +844,32 @@ export function TeamSection() {
   return <div className="mt-9"><SectionHeader eyebrow="Behind the platform" title="Our Academic Team" />
     {TEAM_CATEGORIES.map((cat) => { const inCat = team.filter((m) => (m.category ?? 'reviewer') === cat); if (!inCat.length) return null; return <div key={cat} className="mb-6 last:mb-0"><div className="mb-3 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{TEAM_CATEGORY_LABELS[cat]}</div><div className="grid gap-4 sm:grid-cols-2">{inCat.map(card)}</div></div>; })}
   </div>;
+}
+
+// Public testimonials strip, fed by admin-curated 5-star feedback (see
+// GET /feedback/featured — unauthenticated, only rows an admin explicitly
+// marked featured). Used on Home's landing page; returns null while
+// loading/empty so it never leaves a half-built section on the page an
+// anonymous visitor lands on first.
+export function Testimonials() {
+  const q = useQuery({ queryKey: ['feedback-featured'], queryFn: feedbackApi.featured, staleTime: 5 * 60 * 1000 });
+  const items = q.data ?? [];
+  if (!q.isLoading && items.length === 0) return null;
+  return <section id="reviews" className="mx-auto max-w-6xl px-5 py-20 md:px-8">
+    <div className="mx-auto max-w-2xl text-center">
+      <div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-primary">Reviews</div>
+      <h2 className="mt-3 font-display text-4xl tracking-[-.03em]">What students are saying</h2>
+    </div>
+    {q.isLoading ? <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+      {[0, 1, 2].map((i) => <div key={i} className="skeleton h-48 rounded-2xl" />)}
+    </div> : <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+      {items.map((t) => <div key={t.id} className="card-lift rounded-2xl border border-border bg-card p-6" data-testid={`card-testimonial-${t.id}`}>
+        <div className="flex items-center gap-0.5">{[1, 2, 3, 4, 5].map((n) => <Star key={n} size={14} className={t.rating >= n ? 'fill-[#e8c34a] text-[#e8c34a]' : 'text-muted-foreground'} />)}</div>
+        <p className="mt-3 text-sm leading-6 text-foreground">"{t.message}"</p>
+        <div className="mt-4 text-xs font-extrabold text-muted-foreground">{t.name}</div>
+      </div>)}
+    </div>}
+  </section>;
 }
 
 export function SocialIcons({ content, dark = false }: { content?: SiteContent; dark?: boolean }) {

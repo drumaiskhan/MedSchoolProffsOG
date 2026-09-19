@@ -684,6 +684,12 @@ export const feedbackTable = pgTable("med_feedback", {
   message: text("message").notNull(),
   status: text("status").notNull().default("open"), // open | replied | reviewed
   rating: integer("rating"), // optional 1-5 star rating, null if not given
+  // Admin-curated flag: true means this entry has been picked to display
+  // as a public testimonial on the marketing site (see GET /feedback/featured,
+  // an unauthenticated endpoint — only feedback explicitly marked here, and
+  // only 5-star entries, are ever exposed publicly; everything else in this
+  // table stays admin/owner-only).
+  featured: boolean("featured").notNull().default(false),
   ...timestamps,
 });
 

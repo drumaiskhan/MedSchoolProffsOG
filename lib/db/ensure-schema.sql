@@ -546,6 +546,10 @@ CREATE TABLE IF NOT EXISTS med_feedback (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Admin-curated "show this on the public homepage" flag — see GET
+-- /feedback/featured (public) and the admin toggle in AdminFeedback.tsx.
+ALTER TABLE med_feedback ADD COLUMN IF NOT EXISTS featured BOOLEAN NOT NULL DEFAULT FALSE;
+
 CREATE TABLE IF NOT EXISTS med_feedback_replies (
   id SERIAL PRIMARY KEY,
   feedback_id INTEGER NOT NULL,

@@ -165,11 +165,47 @@ router.delete("/feedback/:id", requireAdmin, async (req, res): Promise<void> => 
 });
 
 router.patch("/feedback/:id", requireAdmin, async (req, res): Promise<void> => {
-  const parsed = z.object({ status: z.enum(["open", "replied", "reviewed"]) }).safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: "Invalid status" }); return; }
-  const [row] = await db.update(feedbackTable).set({ status: parsed.data.status }).where(eq(feedbackTable.id, Number(req.params.id))).returning();
+  const parsed = z.object({ status: z.enum(["open", "replied", "reviewed"]).optional(), featured: z.boolean().optional() }).refine((v) => v.status !== undefined || v.featured !== undefined, { message: "Nothing to update" }).safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: "Invalid update" }); return; }
+  if (parsed.data.featured) {
+    // Only ever let a 5-star entry be marked featured — this is the
+    // server-side backstop for the public /feedback/featured endpoint
+    // below, which trusts this flag alone to decide what's safe to show
+    // signed-out visitors. The admin UI already only offers the toggle on
+    // 5-star rows, but this keeps a bad/forged PATCH from featuring
+    // anything else.
+    const [existing] = await db.select().from(feedbackTable).where(eq(feedbackTable.id, Number(req.params.id)));
+    if (!existing) { res.status(404).json({ error: "Feedback not found" }); return; }
+    if (existing.rating !== 5) { res.status(400).json({ error: "Only 5-star feedback can be featured" }); return; }
+  }
+  const update: Partial<typeof feedbackTable.$inferInsert> = {};
+  if (parsed.data.status !== undefined) update.status = parsed.data.status;
+  if (parsed.data.featured !== undefined) update.featured = parsed.data.featured;
+  const [row] = await db.update(feedbackTable).set(update).where(eq(feedbackTable.id, Number(req.params.id))).returning();
   if (!row) { res.status(404).json({ error: "Feedback not found" }); return; }
   res.json(row);
+});
+
+// Public, unauthenticated — powers the testimonials section on the
+// marketing homepage. Deliberately narrow: only 5-star rows an admin has
+// explicitly marked featured=true (see the PATCH above), and only the
+// fields that are safe to show a signed-out visitor (no email, no user
+// id — just a first name/initial so it reads as a real review without
+// exposing contact details).
+router.get("/feedback/featured", async (_req, res): Promise<void> => {
+  const rows = await db.select().from(feedbackTable)
+    .where(and(eq(feedbackTable.featured, true), eq(feedbackTable.rating, 5)))
+    .orderBy(desc(feedbackTable.createdAt))
+    .limit(24);
+  const userIds = [...new Set(rows.map((r) => r.userId).filter((id): id is number => id !== null))];
+  const users = userIds.length ? await db.select().from(usersTable) : [];
+  const userMap = new Map(users.filter((u) => userIds.includes(u.id)).map((u) => [u.id, u.name]));
+  res.json(rows.map((row) => {
+    const fullName = row.userId ? userMap.get(row.userId) : null;
+    const [first, ...rest] = (fullName ?? "").trim().split(/\s+/).filter(Boolean);
+    const displayName = first ? `${first}${rest.length ? ` ${rest[rest.length - 1][0].toUpperCase()}.` : ""}` : "A student";
+    return { id: row.id, rating: row.rating, message: row.message, createdAt: row.createdAt, name: displayName };
+  }));
 });
 
 // A student's own feedback history, each with its reply thread — lets them

@@ -16,7 +16,7 @@ import { useGetCurrentUser, getGetCurrentUserQueryKey, useListMembershipPlans } 
 import type { MembershipPlan } from '@workspace/api-client-react';
 import { siteContentApi } from '@/lib/api';
 import { useQuery } from '@tanstack/react-query';
-import { cn, Footer, AnimatedBrandMark } from '@/lib/shared';
+import { cn, Footer, AnimatedBrandMark, Testimonials } from '@/lib/shared';
 
 const WHY_US = [
   { icon: GraduationCap, title: 'Every college, one bank', desc: 'MCQs organised by program, year, subject, and topic — MBBS and BDS, side by side.' },
@@ -71,6 +71,7 @@ export default function Home() {
         <nav className="hidden items-center gap-7 text-xs font-bold text-muted-foreground md:flex">
           <a href="#features" className="hover:text-foreground">Features</a>
           <a href="#pricing" className="hover:text-foreground">Pricing</a>
+          <a href="#reviews" className="hover:text-foreground">Reviews</a>
           <a href="#about" className="hover:text-foreground">About</a>
         </nav>
         <div className="hidden items-center gap-3 md:flex">
@@ -85,6 +86,7 @@ export default function Home() {
         <nav className="flex flex-col gap-1 text-sm font-bold text-foreground">
           <a href="#features" onClick={() => setMenuOpen(false)} className="rounded-lg px-2 py-2.5 hover:bg-muted">Features</a>
           <a href="#pricing" onClick={() => setMenuOpen(false)} className="rounded-lg px-2 py-2.5 hover:bg-muted">Pricing</a>
+          <a href="#reviews" onClick={() => setMenuOpen(false)} className="rounded-lg px-2 py-2.5 hover:bg-muted">Reviews</a>
           <a href="#about" onClick={() => setMenuOpen(false)} className="rounded-lg px-2 py-2.5 hover:bg-muted">About</a>
           <div className="mt-2 flex gap-2 border-t border-border pt-3">
             <Link href="/login" className="flex-1 rounded-xl border border-border py-2.5 text-center text-xs font-extrabold" data-testid="link-nav-login-mobile">Log in</Link>
@@ -137,6 +139,8 @@ export default function Home() {
         </div>)}
       </div>
     </section>
+
+    <Testimonials />
 
     {/* About */}
     <section id="about" className="border-y border-border bg-muted/40">
