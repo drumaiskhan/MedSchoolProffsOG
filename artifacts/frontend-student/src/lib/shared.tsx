@@ -1037,6 +1037,46 @@ export function useFaviconSync() {
   }, [data?.faviconUrl]);
 }
 
+// Wires the admin's SEO Title/Description (Site Content → SEO, in the
+// admin app) and Platform Name into the live document once site content
+// loads: <title>, meta description, og:*/twitter:* tags, and the "name"
+// field on the Organization/WebSite JSON-LD blocks index.html ships as
+// static defaults. Called once from Home (the public landing page) — the
+// same page Google actually indexes and where the sitename/breadcrumb
+// behavior lives, so that's what this patches.
+// One real limitation, same tradeoff useFaviconSync above already makes:
+// this only updates the DOM after the JS bundle runs. Google's own
+// crawler executes JS, so it sees the admin's values — but a scraper that
+// doesn't run JS (some link-preview bots) still reads index.html's
+// hardcoded defaults as shipped at build time. If those need to match
+// too, index.html itself has to be edited directly.
+export function useSeoSync() {
+  const { data } = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get, staleTime: 5 * 60 * 1000 });
+  useEffect(() => {
+    if (!data) return;
+    const setMeta = (selector: string, content: string) => document.querySelector(selector)?.setAttribute('content', content);
+    if (data.SEO_TITLE) {
+      document.title = data.SEO_TITLE;
+      setMeta('meta[property="og:title"]', data.SEO_TITLE);
+      setMeta('meta[name="twitter:title"]', data.SEO_TITLE);
+    }
+    if (data.SEO_DESCRIPTION) {
+      setMeta('meta[name="description"]', data.SEO_DESCRIPTION);
+      setMeta('meta[property="og:description"]', data.SEO_DESCRIPTION);
+      setMeta('meta[name="twitter:description"]', data.SEO_DESCRIPTION);
+    }
+    if (data.PLATFORM_NAME) {
+      setMeta('meta[property="og:site_name"]', data.PLATFORM_NAME);
+      document.querySelectorAll('script[type="application/ld+json"]').forEach((el) => {
+        try {
+          const json = JSON.parse(el.textContent || '');
+          if (json['@type'] === 'Organization' || json['@type'] === 'WebSite') { json.name = data.PLATFORM_NAME; el.textContent = JSON.stringify(json); }
+        } catch { /* not one of ours, or malformed — leave it alone */ }
+      });
+    }
+  }, [data]);
+}
+
 // Applies the admin's saved Design & Branding colors (see lib/theme.ts) as
 // CSS variables on <html>. Shares the same ['site-content'] query as
 // useFaviconSync (react-query dedupes by key, so this doesn't add a second

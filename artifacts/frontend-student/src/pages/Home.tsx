@@ -16,7 +16,7 @@ import { useGetCurrentUser, getGetCurrentUserQueryKey, useListMembershipPlans } 
 import type { MembershipPlan } from '@workspace/api-client-react';
 import { siteContentApi } from '@/lib/api';
 import { useQuery } from '@tanstack/react-query';
-import { cn, Footer, AnimatedBrandMark, Testimonials } from '@/lib/shared';
+import { cn, Footer, AnimatedBrandMark, Testimonials, useSeoSync } from '@/lib/shared';
 
 const WHY_US = [
   { icon: GraduationCap, title: 'Every college, one bank', desc: 'MCQs organised by program, year, subject, and topic — MBBS and BDS, side by side.' },
@@ -45,6 +45,7 @@ function formatPrice(plan: MembershipPlan) {
 
 export default function Home() {
   const [, setLocation] = useLocation();
+  useSeoSync();
   const [menuOpen, setMenuOpen] = useState(false);
   // Lightweight session check — doesn't block the page from rendering for
   // the (much more common) signed-out visitor; if it turns out there IS a

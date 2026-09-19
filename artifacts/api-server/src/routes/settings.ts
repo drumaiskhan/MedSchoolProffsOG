@@ -102,6 +102,16 @@ const EDITABLE_KEYS = [
   "COPYRIGHT_NOTICE",
   "FEATURES_LIST", // JSON string array, e.g. ["30,000+ MCQs","Topic-wise Practice"]
   "QUICK_LINKS", // JSON array of {label,url}
+  // SEO — browser tab title, Google's listing, and link-preview title/
+  // description (og:*/twitter:*), plus the name used in the Organization/
+  // WebSite structured data. Public (see SITE_CONTENT_KEYS in
+  // site-content.ts) — read by useSeoSync in the student app, which patches
+  // index.html's static defaults once the page loads. See that hook's
+  // comment for the one thing this can't do: a non-JS-executing scraper
+  // (some link-preview bots) still sees index.html's baked-in defaults,
+  // since this only updates the live DOM after JS runs.
+  "SEO_TITLE",
+  "SEO_DESCRIPTION",
   // AI provider for "Ask AI to explain" (MCQs + flashcards) and admin
   // explanation generation. Falls back to ANTHROPIC_API_KEY / OPENAI_API_KEY
   // / GEMINI_API_KEY env vars if none of these is set — see lib/aiExplain.ts.

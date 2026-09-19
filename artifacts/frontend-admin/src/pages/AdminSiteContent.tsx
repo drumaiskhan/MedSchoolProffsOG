@@ -118,6 +118,15 @@ function AdminSiteContent() {
 
       <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">About</h3><label className="mt-4 block text-xs font-bold">Platform description<textarea value={values.PLATFORM_DESCRIPTION || ''} onChange={(e) => set('PLATFORM_DESCRIPTION', e.target.value)} className="mt-2 min-h-20 w-full rounded-xl border border-border bg-background p-3 text-xs" data-testid="input-platform-description" /></label></div>
 
+      <div className="rounded-2xl border border-border bg-card p-6">
+        <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold">Search &amp; social (SEO)</h3><span className="text-[10px] text-muted-foreground">Homepage title, Google listing, and link previews</span></div>
+        <div className="mt-4 space-y-3">
+          <label className="block text-xs font-bold">Page title<input value={values.SEO_TITLE || ''} onChange={(e) => set('SEO_TITLE', e.target.value)} placeholder="MedschoolProffs — MCQ Bank & Exam Prep for MBBS & BDS Students" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-seo-title" /><span className="mt-1 block text-[10px] font-normal text-muted-foreground">Shown as the browser tab title and as the blue link in Google search results. Leave blank to keep the site's built-in default.</span></label>
+          <label className="block text-xs font-bold">Meta description<textarea value={values.SEO_DESCRIPTION || ''} onChange={(e) => set('SEO_DESCRIPTION', e.target.value)} maxLength={300} className="mt-2 min-h-20 w-full rounded-xl border border-border bg-background p-3 text-xs" data-testid="input-seo-description" /><span className="mt-1 block text-[10px] font-normal text-muted-foreground">The snippet under the title in Google, and the description on WhatsApp/Facebook/Twitter link previews. Aim for one or two sentences (roughly 150–160 characters shows best in search).</span></label>
+          <p className="text-[10px] text-muted-foreground">The site name shown in search results and link previews comes from <strong>Platform name</strong> in Settings → General, not from here.</p>
+        </div>
+      </div>
+
       <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">Social links</h3><div className="mt-4 grid gap-3 sm:grid-cols-2">
         <label className="text-xs font-bold">Facebook<input value={values.SOCIAL_FACEBOOK || ''} onChange={(e) => set('SOCIAL_FACEBOOK', e.target.value)} placeholder="https://facebook.com/…" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-social-facebook" /></label>
         <label className="text-xs font-bold">YouTube<input value={values.SOCIAL_YOUTUBE || ''} onChange={(e) => set('SOCIAL_YOUTUBE', e.target.value)} placeholder="https://youtube.com/…" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-social-youtube" /></label>

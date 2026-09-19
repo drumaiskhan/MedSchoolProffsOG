@@ -207,6 +207,7 @@ export const TEAM_CATEGORY_LABELS: Record<TeamCategory, string> = { reviewer: 'R
 export interface TeamMember { id: number; name: string; role: string; category: TeamCategory; bio: string; achievementBadge: string; photoPath: string | null; linkedinUrl: string; instagramUrl: string; email: string; active: boolean; displayOrder: number }
 export interface SiteContent {
   PLATFORM_NAME: string; PLATFORM_TAGLINE: string; PLATFORM_DESCRIPTION: string;
+  SEO_TITLE: string; SEO_DESCRIPTION: string;
   SOCIAL_FACEBOOK: string; SOCIAL_YOUTUBE: string; SOCIAL_LINKEDIN: string; SOCIAL_INSTAGRAM: string;
   CONTACT_EMAIL: string; CONTACT_LOCATION: string; SUPPORT_HOURS: string; COPYRIGHT_NOTICE: string;
   features: string[]; quickLinks: Array<{ label: string; url: string }>; team: TeamMember[];

@@ -12,6 +12,11 @@ const SITE_CONTENT_KEYS = [
   "PLATFORM_NAME",
   "PLATFORM_TAGLINE",
   "PLATFORM_DESCRIPTION",
+  // SEO — see the matching comment in settings.ts's EDITABLE_KEYS. Public
+  // on purpose: this is exactly what needs to reach signed-out visitors
+  // and search engines.
+  "SEO_TITLE",
+  "SEO_DESCRIPTION",
   "SOCIAL_FACEBOOK",
   "SOCIAL_YOUTUBE",
   "SOCIAL_LINKEDIN",
