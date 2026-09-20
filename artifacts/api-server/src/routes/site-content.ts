@@ -5,6 +5,7 @@ import { db, teamMembersTable, auditLogsTable } from "@workspace/db";
 import { requireAdmin, isAdminRole } from "../middlewares/auth";
 import { getAllSettings, THEME_KEYS, DEFAULT_THEME } from "../lib/settings";
 import { resolveFileUrl } from "../lib/storage";
+import { getTrialConfig, publicTrialView } from "../lib/trial";
 
 const router: IRouter = Router();
 
@@ -52,6 +53,9 @@ const SITE_CONTENT_KEYS = [
   // still enforced server-side in requireActiveMembership.
   "GLOBAL_TRIAL_PROGRAM",
   "GLOBAL_TRIAL_YEAR",
+  "GLOBAL_TRIAL_YEARS",
+  "GLOBAL_TRIAL_FEATURES",
+  "GLOBAL_TRIAL_ENDS_AT",
   // Bug fix: admin's Settings > General page has always had an
   // "Announcement banner (blank to hide)" field, but this key was never
   // added to the public bundle the student app actually fetches — so
@@ -97,7 +101,11 @@ router.get("/site-content", async (req, res): Promise<void> => {
 
   const faviconUrl = resolveFileUrl(content.SITE_FAVICON_PATH) ?? null;
   const dashboardHeroImageUrl = resolveFileUrl(content.DASHBOARD_HERO_IMAGE_PATH) ?? null;
-  res.json({ ...content, features, quickLinks, team: team.map(teamView), faviconUrl, dashboardHeroImageUrl });
+  // Resolved trial view (defaults applied, end date honoured) — what the
+  // student app should actually read; the flat GLOBAL_TRIAL_* strings above
+  // are only the raw saved values. Enforcement is server-side either way.
+  const trial = publicTrialView(await getTrialConfig());
+  res.json({ ...content, features, quickLinks, team: team.map(teamView), faviconUrl, dashboardHeroImageUrl, trial });
 });
 
 // ---------------------------------------------------------------------------

@@ -13,7 +13,7 @@ import {
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
   GraduationCap, CalendarDays, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
   RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Wand2, Layers, BarChart3, ToggleLeft,
-  Download, Database, Loader2, GripVertical, Shuffle
+  Download, Database, Loader2, GripVertical, Shuffle, Percent
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { applyThemeVars, DEFAULT_THEME, readableForegroundHsl } from '@/lib/theme';
@@ -115,13 +115,13 @@ export const adminGroups: Array<{ label: string; items: NavItem[] }> = [
     ['/admin', 'Admin overview', LayoutDashboard], ['/admin/students', 'Students', Users],
   ] },
   { label: 'Payments', items: [
-    ['/admin/plans', 'Subscription plans', CreditCard], ['/admin/payments', 'Payments & collection', ReceiptText],
+    ['/admin/plans', 'Subscription plans', CreditCard], ['/admin/coupons', 'Coupon codes', Percent], ['/admin/payments', 'Payments & collection', ReceiptText],
   ] },
   { label: 'Curriculum', items: [
     ['/admin/academic-structure', 'Colleges & courses', FolderOpen], ['/admin/content', 'Academic content', Library], ['/admin/subjects', 'Subjects', BookOpen], ['/admin/topics', 'Topics', CircleHelp],
   ] },
   { label: 'Question banks', items: [
-    ['/admin/mcqs', 'MCQ bank', CircleHelp], ['/admin/flashcards', 'Flashcards', Zap], ['/admin/books', 'Books library', BookOpen], ['/admin/past-papers', 'Past papers', FileStack], ['/admin/exams', 'Pre-Proffs Exams', ClipboardCheck],
+    ['/admin/mcqs', 'MCQ bank', CircleHelp], ['/admin/flashcards', 'Flashcards', Zap], ['/admin/books', 'Books library', BookOpen], ['/admin/book-purchases', 'Book purchases', ReceiptText], ['/admin/past-papers', 'Past papers', FileStack], ['/admin/exams', 'Pre-Proffs Exams', ClipboardCheck],
   ] },
   { label: 'Site & team', items: [
     ['/admin/team', 'Academic team', Users], ['/admin/site-content', 'Site content', Landmark],
@@ -134,19 +134,70 @@ export const adminGroups: Array<{ label: string; items: NavItem[] }> = [
   ] },
 ];
 
+// Per-group accent for the sidebar's icon tiles — a little colour so the
+// groups are recognisable at a glance instead of one uniform column of icons.
+const GROUP_TONE: Record<string, string> = {
+  Overview: 'bg-[#2dd9c4]/15 text-[#2dd9c4]',
+  Payments: 'bg-[#e5a952]/15 text-[#e5a952]',
+  Curriculum: 'bg-[#7cb7ff]/15 text-[#7cb7ff]',
+  'Question banks': 'bg-[#b79cff]/15 text-[#b79cff]',
+  'Site & team': 'bg-[#ff9d8a]/15 text-[#ff9d8a]',
+  Activity: 'bg-[#8be0a4]/15 text-[#8be0a4]',
+  Workspace: 'bg-[#cfd8dc]/15 text-[#cfd8dc]',
+};
+
+// Header title + section eyebrow for the current route, taken from the same
+// nav list the sidebar renders so the two can never disagree (the header
+// used to show the raw URL path, e.g. "admin / ai visualizer logs").
+function currentPageInfo(location: string): { title: string; group: string } {
+  for (const group of adminGroups) {
+    for (const [href, label] of group.items) if (href === location) return { title: label, group: group.label };
+  }
+  if (location === '/admin/payment-details') return { title: 'Payments & collection', group: 'Payments' };
+  if (location === '/notifications') return { title: 'Notifications', group: 'Account' };
+  if (location === '/profile') return { title: 'Your profile', group: 'Account' };
+  return { title: location.slice(1).split('/').filter((p) => p !== 'admin').map((part) => part.replaceAll('-', ' ')).join(' / ') || 'Overview', group: 'Admin' };
+}
+
 export function SideNav({ user, onClose }: { user: User; onClose: () => void }) {
   const [location] = useLocation();
   const groups = adminGroups;
   const notifQ = useListNotifications();
   const unreadCount = (notifQ.data ?? []).filter((n) => !n.read).length;
+  // Same public bundle the student app reads — lets an admin see at a glance
+  // that a free trial is live (it's easy to forget one is switched on).
+  const siteQ = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get });
+  const trial = siteQ.data?.trial;
   const logout = useMutation({ mutationFn: authApi.logout, onSuccess: () => { queryClient.clear(); window.location.href = '/login'; } });
-  return <aside className="admin-sidebar fixed inset-y-0 left-0 z-40 flex w-[256px] flex-col overflow-y-auto bg-sidebar px-4 py-5 text-sidebar-foreground shadow-xl md:sticky md:top-0 md:h-[100dvh] md:shadow-none">
-    <div className="mb-8 flex items-center justify-between px-2"><Logo dark /><button className="rounded-lg p-2 text-sidebar-foreground/60 hover:bg-sidebar-accent md:hidden" onClick={onClose} data-testid="button-close-menu"><X size={18} /></button></div>
-    <nav className="space-y-5">
-      {groups.map((group) => <div key={group.label}><div className="mb-1.5 px-3.5 font-mono-app text-[9px] font-bold uppercase tracking-[.14em] text-sidebar-foreground/40">{group.label}</div><div className="space-y-1">{group.items.map(([href, label, Icon]) => <Link key={href} href={href} onClick={onClose} className={cn('group flex items-center gap-3 rounded-xl px-3.5 py-3 text-[13px] font-semibold transition-colors', location === href ? 'bg-white text-sidebar shadow-sm' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground')} data-testid={`link-nav-${label.toLowerCase().replaceAll(' ', '-')}`}><Icon size={18} strokeWidth={location === href ? 2.2 : 1.8} /><span>{label}</span>{label === 'Notifications' && unreadCount > 0 && <span className="ml-auto grid size-5 place-items-center rounded-full bg-[#e5a952] text-[10px] font-bold text-[#183844]">{unreadCount > 9 ? '9+' : unreadCount}</span>}</Link>)}</div></div>)}
+  return <aside className="admin-sidebar fixed inset-y-0 left-0 z-40 flex w-[264px] flex-col overflow-y-auto bg-sidebar px-3.5 py-5 text-sidebar-foreground shadow-xl md:sticky md:top-0 md:h-[100dvh] md:shadow-none">
+    <div className="mb-5 flex items-center justify-between px-2"><Logo dark /><button className="rounded-lg p-2 text-sidebar-foreground/60 hover:bg-sidebar-accent md:hidden" onClick={onClose} aria-label="Close menu" data-testid="button-close-menu"><X size={18} /></button></div>
+    {trial?.active && <Link href="/admin/settings?tab=access" onClick={onClose} className="mb-4 flex items-center gap-2.5 rounded-xl border border-[#e5a952]/40 bg-[#e5a952]/10 px-3 py-2.5 text-[11px] font-bold text-[#f2c777] transition-colors hover:bg-[#e5a952]/20" data-testid="chip-admin-trial-live">
+      <span className="relative flex size-2"><span className="absolute inline-flex size-full animate-ping rounded-full bg-[#e5a952] opacity-70" /><span className="relative inline-flex size-2 rounded-full bg-[#e5a952]" /></span>
+      <span className="min-w-0 flex-1"><span className="block">Free trial is live</span><span className="block truncate text-[10px] font-medium text-[#f2c777]/70">{trial.features.length} feature{trial.features.length === 1 ? '' : 's'}{trial.program ? ` · ${trial.program}` : ''}{trial.years.length ? ` · Yr ${trial.years.join(', ')}` : ''}</span></span>
+      <ChevronRight size={13} />
+    </Link>}
+    <nav className="space-y-6" aria-label="Admin navigation">
+      {groups.map((group) => <div key={group.label}>
+        <div className="mb-2 px-3 font-mono-app text-[9px] font-bold uppercase tracking-[.16em] text-sidebar-foreground/40">{group.label}</div>
+        <div className="space-y-0.5">{group.items.map(([href, label, Icon]) => {
+          const active = location === href || (href === '/admin/payments' && location === '/admin/payment-details');
+          return <Link key={href} href={href} onClick={onClose} aria-current={active ? 'page' : undefined}
+            className={cn('group relative flex items-center gap-3 rounded-xl px-2.5 py-2 text-[13px] font-semibold transition-all', active ? 'bg-sidebar-accent text-sidebar-accent-foreground shadow-sm' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground')}
+            data-testid={`link-nav-${label.toLowerCase().replaceAll(' ', '-')}`}>
+            {active && <span className="absolute -left-3.5 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-sidebar-primary" />}
+            <span className={cn('grid size-8 shrink-0 place-items-center rounded-lg transition-colors', active ? 'bg-sidebar-primary text-sidebar-primary-foreground' : GROUP_TONE[group.label] ?? 'bg-white/5')}><Icon size={16} strokeWidth={active ? 2.3 : 1.9} /></span>
+            <span className="min-w-0 flex-1 truncate">{label}</span>
+            {label === 'Notifications' && unreadCount > 0 && <span className="grid size-5 place-items-center rounded-full bg-[#e5a952] text-[10px] font-bold text-[#183844]">{unreadCount > 9 ? '9+' : unreadCount}</span>}
+          </Link>;
+        })}</div>
+      </div>)}
     </nav>
-    <div className="mt-auto pt-5">
-      <div className="flex items-center gap-3 rounded-xl px-2.5 py-2.5"><div className="grid size-9 shrink-0 place-items-center rounded-full bg-sidebar-primary text-xs font-extrabold text-sidebar-primary-foreground">{initials(user.name)}</div><div className="min-w-0 flex-1"><div className="truncate text-xs font-bold text-sidebar-foreground">{user.name}</div><div className="truncate text-[10px] text-sidebar-foreground/45">Academic team</div></div><button onClick={() => logout.mutate()} disabled={logout.isPending} className="text-sidebar-foreground/50 hover:text-sidebar-foreground disabled:opacity-50" data-testid="button-signout" title="Sign out"><LogOut size={15} /></button></div>
+    <div className="mt-auto pt-6">
+      <div className="flex items-center gap-3 rounded-xl border border-sidebar-border/70 bg-sidebar-accent/40 px-3 py-2.5">
+        <div className="grid size-9 shrink-0 place-items-center rounded-full bg-sidebar-primary text-xs font-extrabold text-sidebar-primary-foreground">{initials(user.name)}</div>
+        <div className="min-w-0 flex-1"><div className="truncate text-xs font-bold text-sidebar-foreground">{user.name}</div><div className="truncate text-[10px] text-sidebar-foreground/50">Administrator</div></div>
+        <button onClick={() => logout.mutate()} disabled={logout.isPending} className="grid size-8 place-items-center rounded-lg text-sidebar-foreground/60 transition-colors hover:bg-white/10 hover:text-sidebar-foreground disabled:opacity-50" data-testid="button-signout" title="Sign out" aria-label="Sign out"><LogOut size={15} /></button>
+      </div>
     </div>
   </aside>;
 }
@@ -246,8 +297,8 @@ export function Shell({ children }: { children: ReactNode }) {
   // be. Same fix: the branded loader instead of a blank-looking page.
   if (!user || user.role !== 'admin') return <BrandedLoadingScreen />;
 
-  const title = location.slice(1).split('/').map((part) => part.replaceAll('-', ' ')).join(' / ') || 'Overview';
-  return <div className="admin-shell flex min-h-[100dvh] bg-background"><div className={cn(menuOpen ? 'block' : 'hidden', 'fixed inset-0 z-30 bg-[#102c37]/40 md:hidden')} onClick={() => setMenuOpen(false)} />{(menuOpen || !isMobile) && <SideNav user={user} onClose={() => setMenuOpen(false)} />}<main className="admin-main min-w-0 flex-1"><header className="admin-header sticky top-0 z-20 flex h-[72px] items-center justify-between border-b border-border/70 bg-background/90 px-5 backdrop-blur-md md:px-10"><div className="flex items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} data-testid="button-open-menu"><Menu size={20} /></button><div><div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-muted-foreground">MedschoolProffs / Admin</div><h1 className="mt-1 text-[17px] font-bold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="flex items-center gap-2"><button onClick={() => setSearchOpen(true)} className="hidden h-9 w-[220px] items-center gap-2 rounded-lg border border-border bg-card px-3 text-left text-[11px] text-muted-foreground shadow-sm hover:border-primary/50 sm:flex md:w-[320px]" data-testid="button-open-admin-search"><Search size={14} /><span className="truncate">Search students, MCQs, everything...</span><span className="ml-auto rounded border border-border px-1 text-[9px]">⌘K</span></button><button onClick={() => setSearchOpen(true)} className="grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted sm:hidden" data-testid="button-open-admin-search-mobile"><Search size={16} /></button><span className="hidden items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-[10px] font-semibold text-muted-foreground sm:inline-flex"><span className="size-1.5 rounded-full bg-primary" />Workspace live</span><Link href="/notifications" className="relative grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted" data-testid="link-notifications"><Bell size={17} /></Link><Link href="/profile" className="ml-1 grid size-9 place-items-center rounded-full bg-[#d7eee4] text-xs font-extrabold text-[#164b4b]" data-testid="link-header-profile">{initials(user.name)}</Link></div></header><div className="admin-content page-enter px-5 py-7 md:px-10 md:py-9">{children}</div></main><AdminGlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} /></div>;
+  const { title, group: pageGroup } = currentPageInfo(location);
+  return <div className="admin-shell flex min-h-[100dvh] bg-background"><div className={cn(menuOpen ? 'block' : 'hidden', 'fixed inset-0 z-30 bg-[#102c37]/40 md:hidden')} onClick={() => setMenuOpen(false)} />{(menuOpen || !isMobile) && <SideNav user={user} onClose={() => setMenuOpen(false)} />}<main className="admin-main min-w-0 flex-1"><header className="admin-header sticky top-0 z-20 flex h-[72px] items-center justify-between border-b border-border/70 bg-background/90 px-5 backdrop-blur-md md:px-10"><div className="flex items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} data-testid="button-open-menu"><Menu size={20} /></button><div><div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-muted-foreground">Admin · {pageGroup}</div><h1 className="mt-1 text-[18px] font-extrabold tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="flex items-center gap-2"><button onClick={() => setSearchOpen(true)} className="hidden h-9 w-[220px] items-center gap-2 rounded-lg border border-border bg-card px-3 text-left text-[11px] text-muted-foreground shadow-sm hover:border-primary/50 sm:flex md:w-[320px]" data-testid="button-open-admin-search"><Search size={14} /><span className="truncate">Search students, MCQs, everything...</span><span className="ml-auto rounded border border-border px-1 text-[9px]">⌘K</span></button><button onClick={() => setSearchOpen(true)} className="grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted sm:hidden" data-testid="button-open-admin-search-mobile"><Search size={16} /></button><Link href="/admin/settings" className="grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" title="Platform settings" aria-label="Platform settings" data-testid="link-header-settings"><Settings size={16} /></Link><Link href="/notifications" className="relative grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted" data-testid="link-notifications"><Bell size={17} /></Link><Link href="/profile" className="ml-1 grid size-9 place-items-center rounded-full bg-[#d7eee4] text-xs font-extrabold text-[#164b4b]" data-testid="link-header-profile">{initials(user.name)}</Link></div></header><div className="admin-content page-enter px-5 py-7 md:px-10 md:py-9">{children}</div></main><AdminGlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} /></div>;
 }
 
 export function BrandedLoadingScreen() {
@@ -280,7 +331,7 @@ export function InlineLoading({ label = 'Loading…', size = 13 }: { label?: str
 
 export function SkeletonPage() { return <div className="space-y-5"><div className="flex items-center gap-2 text-primary"><BrandSpinner size={22} /><span className="text-[11px] font-bold uppercase tracking-[.1em]">Loading</span></div><div className="skeleton h-8 w-56 rounded-lg" /><div className="grid gap-4 md:grid-cols-3"><div className="skeleton h-32 rounded-2xl" /><div className="skeleton h-32 rounded-2xl" /><div className="skeleton h-32 rounded-2xl" /></div><div className="skeleton h-72 rounded-2xl" /></div>; }
 
-export function EmptyState({ icon: Icon = FolderOpen, title, body, action }: { icon?: typeof FolderOpen; title: string; body: string; action?: ReactNode }) { return <div className="grid min-h-[260px] place-items-center rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center"><div><div className="mx-auto mb-4 grid size-12 place-items-center rounded-2xl bg-muted text-primary"><Icon size={22} /></div><h3 className="font-bold">{title}</h3><p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted-foreground">{body}</p>{action && <div className="mt-5">{action}</div>}</div></div>; }
+export function EmptyState({ icon: Icon = FolderOpen, title, body, action }: { icon?: typeof FolderOpen; title: string; body: string; action?: ReactNode }) { return <div className="grid min-h-[260px] place-items-center rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center"><div><div className="mx-auto mb-4 grid size-14 place-items-center rounded-2xl bg-gradient-to-br from-primary/15 to-primary/5 text-primary ring-1 ring-primary/15"><Icon size={24} /></div><h3 className="text-[15px] font-extrabold">{title}</h3><p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted-foreground">{body}</p>{action && <div className="mt-5">{action}</div>}</div></div>; }
 
 export function ErrorState({ retry }: { retry?: () => void }) { return <div className="rounded-2xl border border-[#efc7bc] bg-[#fff5f0] p-6 text-sm text-[#9e4c39]"><div className="flex items-center gap-2 font-bold"><CircleHelp size={17} /> We couldn't load this view.</div><p className="mt-2 text-[#a96a5b]">Check your connection, then try again.</p>{retry && <button onClick={retry} className="mt-4 rounded-lg bg-[#a9533f] px-3 py-2 text-xs font-bold text-white" data-testid="button-retry">Try again</button>}</div>; }
 
@@ -321,7 +372,7 @@ export function SuggestedPathHint({ path }: { path?: { block: string | null; mod
 
 export function Progress({ value, color = 'bg-primary' }: { value: number; color?: string }) { return <div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className={cn('h-full rounded-full transition-all', color)} style={{ width: `${Math.min(100, Math.max(0, value))}%` }} /></div>; }
 
-export function SectionHeader({ eyebrow, title, action }: { eyebrow?: string; title: string; action?: ReactNode }) { return <div className="mb-5 flex items-end justify-between gap-4"><div>{eyebrow && <div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-primary">{eyebrow}</div>}<h2 className="mt-1 text-[22px] font-extrabold tracking-[-.04em]">{title}</h2></div>{action}</div>; }
+export function SectionHeader({ eyebrow, title, action }: { eyebrow?: string; title: string; action?: ReactNode }) { return <div className="mb-5 flex flex-wrap items-end justify-between gap-x-4 gap-y-2"><div className="flex items-stretch gap-3"><span className="w-1 shrink-0 rounded-full bg-gradient-to-b from-primary to-primary/30" /><div>{eyebrow && <div className="font-mono-app text-[10px] font-bold uppercase tracking-[.16em] text-primary">{eyebrow}</div>}<h2 className="mt-0.5 text-[22px] font-extrabold leading-tight tracking-[-.03em]">{title}</h2></div></div>{action}</div>; }
 
 export function Stat({ label, value }: { label: string; value: string | number }) { return <div className="rounded-xl bg-card/70 p-3 text-center"><div className="font-display text-2xl">{value}</div><div className="mt-0.5 text-[10px] text-muted-foreground">{label}</div></div>; }
 
@@ -382,6 +433,35 @@ export function buildMcqImportSeries(entries: AuditLogEntry[]): Array<{ date: st
   return days;
 }
 
+// Device limit for one student: how many devices they may be signed in on at
+// once (their own override, else the platform default from Settings →
+// Security), the devices currently signed in, and a way to sign any of them
+// out — which is also how a student who hit the limit gets unstuck.
+function StudentDevicesSection({ studentId }: { studentId: number }) {
+  const q = useQuery({ queryKey: ['student-devices', studentId], queryFn: () => studentsAdminApi.devices(studentId) });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['student-devices', studentId] });
+  const fail = (title: string) => (err: unknown) => toast({ title, description: err instanceof ApiRequestError ? err.message : 'Something went wrong — check your connection and try again.', variant: 'destructive' });
+  const [draft, setDraft] = useState<string | null>(null);
+  const setLimit = useMutation({ mutationFn: (v: number | null) => studentsAdminApi.setDeviceLimit(studentId, v), onSuccess: () => { setDraft(null); refresh(); }, onError: fail('Could not change device limit') });
+  const revokeOne = useMutation({ mutationFn: (sessionId: number) => studentsAdminApi.revokeDevice(studentId, sessionId), onSuccess: refresh, onError: fail('Could not sign the device out') });
+  const revokeAll = useMutation({ mutationFn: () => studentsAdminApi.revokeAllDevices(studentId), onSuccess: () => { setConfirmAll(false); refresh(); }, onError: fail('Could not reset devices') });
+  const [confirmAll, setConfirmAll] = useState(false);
+  const d = q.data;
+  const shown = draft ?? (d ? String(d.override ?? d.defaultLimit) : '');
+  const parsed = /^\d+$/.test(shown.trim()) ? Number(shown.trim()) : NaN;
+  const valid = Number.isInteger(parsed) && parsed >= 0 && parsed <= 50;
+  const limitText = !d ? '' : d.limit === 0 ? 'unlimited' : String(d.limit);
+  return <div><div className="mb-2 flex items-center justify-between"><span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Devices</span>{d && <span className="text-[11px] font-semibold text-muted-foreground" data-testid="text-device-usage">{d.devices.length} signed in · limit {limitText}</span>}</div>
+    {!d ? <InlineLoading /> : <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2"><input type="number" min={0} max={50} value={shown} onChange={(e) => setDraft(e.target.value)} className="w-16 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-bold" data-testid="input-device-limit" /><span className="text-[11px] text-muted-foreground">devices at once (0 = unlimited)</span><button onClick={() => setLimit.mutate(parsed)} disabled={!valid || setLimit.isPending || draft === null} className="ml-auto rounded-lg bg-primary px-2.5 py-1.5 text-[10px] font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-save-device-limit">{setLimit.isPending ? 'Saving…' : 'Save limit'}</button></div>
+      <p className="text-[11px] leading-5 text-muted-foreground">{d.override === null ? <>Using the platform default ({d.defaultLimit === 0 ? 'unlimited' : d.defaultLimit}). Saving here gives this student their own limit.</> : <>This student has their own limit. <button onClick={() => setLimit.mutate(null)} disabled={setLimit.isPending} className="font-bold text-primary underline" data-testid="button-device-limit-default">Use the platform default ({d.defaultLimit === 0 ? 'unlimited' : d.defaultLimit}) instead</button>.</>} Lowering the limit never signs anyone out; it only blocks new sign-ins until they're under it.</p>
+      <div className="space-y-2">{d.devices.map((dev) => <div key={dev.id} className="flex items-center gap-3 rounded-lg border border-border p-3 text-xs" data-testid={`row-device-${dev.id}`}><Smartphone size={15} className="shrink-0 text-muted-foreground" /><div className="min-w-0 flex-1"><div className="truncate font-bold">{dev.label}</div><div className="mt-0.5 text-[10px] text-muted-foreground">Signed in {new Date(dev.signedInAt).toLocaleDateString()} · last active {new Date(dev.lastSeenAt).toLocaleString()}{dev.ip ? ` · ${dev.ip}` : ''}</div></div><button onClick={() => revokeOne.mutate(dev.id)} disabled={revokeOne.isPending} className="shrink-0 rounded-lg bg-muted px-2.5 py-1.5 text-[10px] font-extrabold hover:bg-muted/70 disabled:opacity-50" data-testid={`button-revoke-device-${dev.id}`}>Sign out</button></div>)}{!d.devices.length && <p className="text-xs text-muted-foreground">Not signed in on any device.</p>}</div>
+      {d.devices.length > 0 && <button onClick={() => setConfirmAll(true)} className="text-[11px] font-extrabold text-destructive underline" data-testid="button-reset-devices">Sign out of all devices</button>}
+    </div>}
+    {confirmAll && <ConfirmDialog title="Sign this student out everywhere?" body="Every device they're signed in on is logged out immediately and its slot is freed, so they can sign in again on up to their limit." confirmLabel="Sign out everywhere" pendingLabel="Signing out…" onCancel={() => setConfirmAll(false)} onConfirm={() => revokeAll.mutate()} pending={revokeAll.isPending} testId="reset-devices" />}
+  </div>;
+}
+
 export function StudentDrawer({ id, onClose }: { id: number; onClose: () => void }) {
   const detail = useQuery({ queryKey: ['student-detail', id], queryFn: () => studentsAdminApi.detail(id) });
   const invalidate = () => { queryClient.invalidateQueries({ queryKey: ['student-detail', id] }); queryClient.invalidateQueries({ queryKey: getListStudentsQueryKey() }); };
@@ -435,6 +515,7 @@ export function StudentDrawer({ id, onClose }: { id: number; onClose: () => void
           ? <div className="flex items-center justify-between rounded-xl bg-[#dceaf1] p-3 text-xs font-semibold text-[#2c6a8f]"><span>Trial active until {new Date(s.activeMembership.expiresAt).toLocaleDateString()}</span><button onClick={() => endTrial.mutate()} disabled={endTrial.isPending} className="rounded-lg bg-white/70 px-2.5 py-1.5 text-[10px] font-extrabold text-[#2c6a8f] disabled:opacity-50" data-testid="button-end-trial">{endTrial.isPending ? 'Ending…' : 'End trial'}</button></div>
           : <div className="flex items-center gap-2"><input type="number" min={1} max={365} value={trialDays} onChange={(e) => setTrialDays(Math.max(1, Math.min(365, Number(e.target.value) || 1)))} className="w-16 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-bold" data-testid="input-trial-days" /><span className="text-[11px] text-muted-foreground">days</span><button onClick={() => startTrial.mutate(trialDays)} disabled={startTrial.isPending} className="ml-auto rounded-lg bg-primary px-2.5 py-1.5 text-[10px] font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-start-trial">{startTrial.isPending ? 'Starting…' : 'Start trial'}</button></div>}
       </div>
+      <StudentDevicesSection studentId={id} />
       <div><div className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">Payment history</div><div className="space-y-2">{s.payments.map((p) => <div key={p.id} className="rounded-lg border border-border p-3 text-xs"><div className="flex items-center justify-between"><span className="font-bold">{p.planName}</span><Badge tone={p.status === 'APPROVED' ? 'green' : p.status === 'REJECTED' ? 'red' : 'amber'}>{p.status}</Badge></div><div className="mt-1 text-muted-foreground">{money(p.amount, p.currency)} · {p.method} · {p.paymentDate}</div>{p.proofPath && <a href={resolveUploadUrl(p.proofPath)!} target="_blank" rel="noreferrer" className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-bold text-primary" data-testid={`link-drawer-proof-${p.id}`}><FileText size={11} /> View payment proof</a>}</div>)}{!s.payments.length && <p className="text-xs text-muted-foreground">No payments yet.</p>}</div></div>
     </div>}
     {confirmingActivate && s && <ConfirmDialog title="Approve this student?" body={`This activates ${s.name}'s account and marks their email as verified, giving them full access immediately.`} confirmLabel="Approve student" pendingLabel="Approving…" tone="primary" testId="activate-student" onCancel={() => setConfirmingActivate(false)} onConfirm={() => { updateStatus.mutate({ status: 'ACTIVE', emailVerified: true }); setConfirmingActivate(false); }} pending={updateStatus.isPending} />}

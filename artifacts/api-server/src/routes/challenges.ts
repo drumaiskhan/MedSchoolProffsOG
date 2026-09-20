@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { and, desc, eq, ilike, inArray, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, usersTable, mcqsTable, modulesTable, programsTable, academicYearsTable, challengesTable, challengeAttemptsTable, notificationsTable } from "@workspace/db";
-import { requireAuth, requireActiveMembership } from "../middlewares/auth";
+import { requireAuth, requireMembershipFor } from "../middlewares/auth";
 import { sendEmail, challengeInviteEmailHtml, challengeResultEmailHtml } from "../lib/email";
 import { getPublicAppUrl } from "../lib/publicAppUrl";
 import { getStudentTargeting, type StudentTargeting } from "../lib/contentVisibility";
@@ -33,7 +33,7 @@ function sameClassYear(a: StudentTargeting, b: StudentTargeting): boolean {
 // restricted to students in the same program (MBBS/BDS) and academic year.
 // ---------------------------------------------------------------------------
 
-router.get("/students/find", requireAuth, requireActiveMembership, async (req, res): Promise<void> => {
+router.get("/students/find", requireAuth, requireMembershipFor("challenges"), async (req, res): Promise<void> => {
   const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
   if (q.length < 2) {
     res.json([]);
@@ -82,7 +82,7 @@ const CreateChallengeBody = z.object({
   totalQuestions: z.number().int().min(5).max(30).default(10),
 });
 
-router.post("/challenges", requireAuth, requireActiveMembership, async (req, res): Promise<void> => {
+router.post("/challenges", requireAuth, requireMembershipFor("challenges"), async (req, res): Promise<void> => {
   const parsed = CreateChallengeBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid challenge details" }); return; }
   const data = parsed.data;
@@ -253,7 +253,7 @@ const SubmitChallengeBody = z.object({
   durationSeconds: z.number().int().min(0).optional(),
 });
 
-router.post("/challenges/:id/submit", requireAuth, requireActiveMembership, async (req, res): Promise<void> => {
+router.post("/challenges/:id/submit", requireAuth, requireMembershipFor("challenges"), async (req, res): Promise<void> => {
   const id = Number(req.params.id);
   const parsed = SubmitChallengeBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid submission" }); return; }

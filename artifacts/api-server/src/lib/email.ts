@@ -10,9 +10,25 @@ import { getSetting } from "./settings";
  * way to configure this for a deployment that never touches the admin UI
  * at all (e.g. self-hosted with secrets injected by the platform).
  */
+/** One Brevo account. Slot 1 is the original BREVO_API_KEY; 2..N are extra
+ * accounts (each free Brevo plan has its own daily sending quota, so a few
+ * accounts = a few times the headroom, and one bad key doesn't stop mail). */
+export interface BrevoSlot {
+  slot: number;
+  apiKey: string;
+  /** Sender to use with this account — blank means the global "From" email.
+   * Brevo only accepts senders verified on the sending account itself. */
+  senderEmail?: string;
+}
+
+export const BREVO_MAX_SLOTS = 5;
+
 interface EmailConfig {
   provider: "brevo" | "custom" | "smtp";
-  brevoApiKey?: string;
+  brevoSlots?: BrevoSlot[];
+  /** "failover" (default): always start with slot 1, move on only when a
+   * send fails. "round_robin": spread sends across the slots in turn. */
+  brevoStrategy?: "failover" | "round_robin";
   customApiUrl?: string;
   customApiKey?: string;
   customApiKeyHeader?: string;
@@ -33,8 +49,18 @@ async function resolveEmailConfig(): Promise<EmailConfig | null> {
   // 1. Whatever the admin picked at Admin -> Settings -> Email, if it has
   // the fields it needs to actually work.
   if (dbProvider === "brevo") {
-    const brevoApiKey = await getSetting("BREVO_API_KEY", null);
-    if (brevoApiKey) return { provider: "brevo", brevoApiKey, senderEmail, senderName };
+    const brevoSlots: BrevoSlot[] = [];
+    for (let slot = 1; slot <= BREVO_MAX_SLOTS; slot++) {
+      const suffix = slot === 1 ? "" : `_${slot}`;
+      const apiKey = (await getSetting(`BREVO_API_KEY${suffix}`, null))?.trim();
+      if (!apiKey) continue;
+      const slotSender = slot === 1 ? undefined : (await getSetting(`BREVO_SENDER_EMAIL${suffix}`, null))?.trim() || undefined;
+      brevoSlots.push({ slot, apiKey, senderEmail: slotSender });
+    }
+    if (brevoSlots.length) {
+      const strategy = (await getSetting("BREVO_SLOT_STRATEGY", null)) === "round_robin" ? "round_robin" : "failover";
+      return { provider: "brevo", brevoSlots, brevoStrategy: strategy, senderEmail, senderName };
+    }
   } else if (dbProvider === "custom") {
     const customApiUrl = await getSetting("CUSTOM_EMAIL_API_URL", null);
     if (customApiUrl) {
@@ -61,7 +87,12 @@ async function resolveEmailConfig(): Promise<EmailConfig | null> {
   // existed, so a deployment that only ever used env vars keeps working
   // unchanged.
   if (process.env.BREVO_API_KEY) {
-    return { provider: "brevo", brevoApiKey: process.env.BREVO_API_KEY, senderEmail: process.env.BREVO_SENDER_EMAIL || senderEmail, senderName };
+    const brevoSlots: BrevoSlot[] = [{ slot: 1, apiKey: process.env.BREVO_API_KEY }];
+    for (let slot = 2; slot <= BREVO_MAX_SLOTS; slot++) {
+      const apiKey = process.env[`BREVO_API_KEY_${slot}`]?.trim();
+      if (apiKey) brevoSlots.push({ slot, apiKey });
+    }
+    return { provider: "brevo", brevoSlots, brevoStrategy: process.env.BREVO_SLOT_STRATEGY === "round_robin" ? "round_robin" : "failover", senderEmail: process.env.BREVO_SENDER_EMAIL || senderEmail, senderName };
   }
   if (process.env.CUSTOM_EMAIL_API_URL) {
     return {
@@ -105,16 +136,44 @@ export async function sendEmail(to: string, subject: string, html: string): Prom
   console.log(`\n----- DEV EMAIL -----\nTo: ${to}\nSubject: ${subject}\n${html}\n----------------------\n`);
 }
 
-async function sendViaBrevo(to: string, subject: string, html: string, config: EmailConfig): Promise<void> {
+let brevoRoundRobinCursor = 0;
+
+async function sendViaBrevoSlot(to: string, subject: string, html: string, config: EmailConfig, slot: BrevoSlot): Promise<void> {
   const res = await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json", "api-key": config.brevoApiKey as string },
-    body: JSON.stringify({ sender: { email: config.senderEmail, name: config.senderName }, to: [{ email: to }], subject, htmlContent: html }),
+    headers: { "content-type": "application/json", accept: "application/json", "api-key": slot.apiKey },
+    body: JSON.stringify({ sender: { email: slot.senderEmail || config.senderEmail, name: config.senderName }, to: [{ email: to }], subject, htmlContent: html }),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`Brevo send failed (${res.status}): ${body.slice(0, 500)}`);
+    throw new Error(`Brevo slot ${slot.slot} send failed (${res.status}): ${body.slice(0, 500)}`);
   }
+}
+
+/**
+ * Sends through the configured Brevo accounts. In "failover" mode slot 1 is
+ * always tried first and the next slot is only used when a send fails (bad
+ * key, daily quota reached, Brevo outage); in "round_robin" mode sends are
+ * spread across the slots in turn, with the rest still there as fallbacks
+ * for that one message. Only throws when every configured slot failed, and
+ * then lists why each one did — so "which key is broken" is in the log.
+ */
+async function sendViaBrevo(to: string, subject: string, html: string, config: EmailConfig): Promise<void> {
+  const slots = config.brevoSlots ?? [];
+  if (!slots.length) throw new Error("Brevo has no API key configured.");
+  const start = config.brevoStrategy === "round_robin" ? brevoRoundRobinCursor++ % slots.length : 0;
+  const ordered = [...slots.slice(start), ...slots.slice(0, start)];
+  const failures: string[] = [];
+  for (const slot of ordered) {
+    try {
+      await sendViaBrevoSlot(to, subject, html, config, slot);
+      if (failures.length) logger.warn({ usedSlot: slot.slot, failures }, "Brevo send succeeded on a fallback slot");
+      return;
+    } catch (err) {
+      failures.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+  throw new Error(failures.join(" | "));
 }
 
 /**
@@ -164,10 +223,20 @@ async function sendViaSmtp(to: string, subject: string, html: string, config: Em
  * sendEmail() above, this one call site wants to know exactly what went
  * wrong, not silently fall back to dev-log mode.
  */
-export async function sendTestEmail(to: string): Promise<void> {
+export async function sendTestEmail(to: string, slot?: number): Promise<void> {
   const config = await resolveEmailConfig();
   if (!config) throw new Error("No email provider is configured yet.");
-  if (config.provider === "brevo") return sendViaBrevo(to, "MedschoolProffs test email", testEmailHtml(), config);
+  if (config.provider === "brevo") {
+    // A specific slot is tested on its own, with no failover — the point of
+    // testing one key is to learn whether THAT key works, not whether some
+    // other slot could cover for it.
+    if (slot !== undefined) {
+      const target = config.brevoSlots?.find((s) => s.slot === slot);
+      if (!target) throw new Error(`Brevo slot ${slot} has no API key saved yet — save your settings first.`);
+      return sendViaBrevoSlot(to, "MedschoolProffs test email", testEmailHtml(), config, target);
+    }
+    return sendViaBrevo(to, "MedschoolProffs test email", testEmailHtml(), config);
+  }
   if (config.provider === "custom") return sendViaCustomApi(to, "MedschoolProffs test email", testEmailHtml(), config);
   return sendViaSmtp(to, "MedschoolProffs test email", testEmailHtml(), config);
 }

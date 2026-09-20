@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { and, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, practiceAttemptsTable, practiceAnswersTable, mcqsTable, usersTable } from "@workspace/db";
-import { requireAuth, requireActiveMembership } from "../middlewares/auth";
+import { requireAuth, requireMembershipFor } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
@@ -41,7 +41,7 @@ const SubmitSessionBody = z.object({
   durationSeconds: z.number().int().min(0).optional(),
 });
 
-router.post("/practice-sessions", requireAuth, requireActiveMembership, async (req, res): Promise<void> => {
+router.post("/practice-sessions", requireAuth, requireMembershipFor(["mcqs", "past_papers"]), async (req, res): Promise<void> => {
   const parsed = SubmitSessionBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message }); return; }
   const data = parsed.data;
@@ -225,6 +225,12 @@ router.get("/leaderboard", requireAuth, async (req, res): Promise<void> => {
     rank: index + 1,
     userId: row.userId,
     name: studentMap.get(row.userId)?.name ?? "Student",
+    // Same field the payment/profile views already surface a student's
+    // college under (usersTable.institution — see userView/paymentView in
+    // routes/medschool.ts) — added here so the leaderboard can show which
+    // college each player is from, without a separate institutionsTable
+    // join or a new column.
+    institution: studentMap.get(row.userId)?.institution ?? null,
     sessions: Number(row.sessions),
     questionsAnswered: row.total,
     correct: row.correct,

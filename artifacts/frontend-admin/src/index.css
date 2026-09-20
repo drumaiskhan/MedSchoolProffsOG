@@ -63,6 +63,7 @@
 button { transition: transform .16s ease, box-shadow .16s ease, filter .16s ease, opacity .16s ease; }
 button:hover:not(:disabled) { filter: brightness(1.035); }
 button:active:not(:disabled) { transform: scale(.98); }
+button:disabled { cursor: not-allowed; }
 button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid hsl(var(--primary) / .55); outline-offset: 2px; }
 /* Responsive safety net: prevent any flex row (button groups, card headers,
    form rows) from forcing horizontal scroll on narrow phones — corners of
@@ -74,3 +75,46 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 @keyframes shimmer { to { background-position: -200% 0; } }
 @keyframes brandWaveDraw { 0% { stroke-dashoffset: 190; opacity: .55; } 55% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: -190; opacity: .55; } }
 @keyframes brandSpin { 0%, 100% { opacity: .75; } 50% { opacity: 1; } }
+
+/* Admin polish (modernisation pass): every table, scrollbar and focus ring in
+   the admin app picks these up without each page opting in. Scoped to
+   .admin-shell so the sign-in pages are untouched. */
+@layer components {
+  .admin-shell table tbody tr { transition: background-color .15s ease; }
+  .admin-shell table tbody tr:hover { background-color: hsl(var(--muted) / .55); }
+  .admin-shell table thead th { font-weight: 800; letter-spacing: .1em; }
+  .admin-shell :where(button, a, [role="tab"], [role="switch"]):focus-visible { outline: 2px solid hsl(var(--primary) / .55); outline-offset: 2px; border-radius: 10px; }
+  .admin-shell * { scrollbar-width: thin; scrollbar-color: hsl(var(--border)) transparent; }
+  .admin-shell ::-webkit-scrollbar { width: 8px; height: 8px; }
+  .admin-shell ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 999px; }
+  .admin-shell ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / .5); }
+
+  /* Round of button polish: every filled action button in the admin shell
+     (bg-primary, bg-destructive, and the sidebar's active nav pill) gets a
+     resting shadow — not just on hover — so primary actions read as
+     raised, clickable surfaces at a glance instead of only on interaction.
+     Purely additive; nothing here changes layout, colour, or existing
+     hover/active states, so pages that already set their own shadow keep
+     it untouched (box-shadow doesn't stack, the more specific/last rule
+     applied simply wins). */
+  .admin-shell button.bg-primary:not(:disabled),
+  .admin-shell button.bg-destructive:not(:disabled) { box-shadow: var(--shadow-2xs); }
+  .admin-shell button.bg-primary:not(:disabled):hover,
+  .admin-shell button.bg-destructive:not(:disabled):hover { box-shadow: var(--shadow-sm); }
+
+  /* Icon-only square/round buttons (the ubiquitous `grid size-N
+     place-items-center rounded-* border` pattern used for edit/delete/
+     settings/notification icons throughout the admin) get a visible tinted
+     hover background even where a page forgot to add its own hover: class,
+     so every icon button in the app feels equally responsive. Anything
+     with its own explicit hover:bg-* already wins by specificity/order. */
+  .admin-shell button.grid.place-items-center:not(:disabled):hover { background-color: hsl(var(--muted) / .7); }
+
+  /* Segmented controls / filter-pill rows (payment status filters, MCQ
+     difficulty picker, institution tabs, etc.) — a hairline ring on the
+     active pill so the current selection is unmistakable even on the
+     brand's low-contrast tan/olive palette. */
+  .admin-shell button[aria-pressed="true"],
+  .admin-shell button[aria-current="page"],
+  .admin-shell button[aria-checked="true"] { box-shadow: 0 0 0 1px hsl(var(--primary) / .18); }
+}

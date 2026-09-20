@@ -4,6 +4,7 @@ import {
   integer,
   numeric,
   pgTable,
+  primaryKey,
   serial,
   text,
   timestamp,
@@ -107,6 +108,10 @@ export const usersTable = pgTable(
     lockedUntil: timestamp("locked_until", { withTimezone: true }),
     passwordChangedAt: timestamp("password_changed_at", { withTimezone: true }).notNull().defaultNow(),
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+    // Per-account cap on simultaneously signed-in devices. NULL = follow the
+    // platform default (DEFAULT_MAX_DEVICES setting, 2 out of the box);
+    // 0 = unlimited; N = at most N. Set by an admin from the student drawer.
+    maxDevices: integer("max_devices"),
     currentStreak: integer("current_streak").notNull().default(0),
     longestStreak: integer("longest_streak").notNull().default(0),
     lastPracticeDate: date("last_practice_date", { mode: "string" }),
@@ -116,6 +121,25 @@ export const usersTable = pgTable(
     ...timestamps,
   },
   (table) => ({ emailIdx: uniqueIndex("med_users_email_idx").on(table.email) }),
+);
+
+// One row per signed-in device/browser. The JWT carries `sid` (token_id); the
+// auth middleware only accepts a token whose row is still active, which is
+// what makes the device limit enforceable and lets an admin sign a device out.
+export const userSessionsTable = pgTable(
+  "med_user_sessions",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id").notNull(),
+    tokenId: text("token_id").notNull(),
+    deviceLabel: text("device_label").notNull().default("Unknown device"),
+    ip: text("ip"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => ({ tokenIdx: uniqueIndex("med_user_sessions_token_idx").on(table.tokenId) }),
 );
 
 export const emailVerificationTokensTable = pgTable("med_email_verification_tokens", {
@@ -196,6 +220,63 @@ export const paymentsTable = pgTable("med_payments", {
   reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
   gatewayProvider: text("gateway_provider"),
   gatewayReference: text("gateway_reference"),
+  // Set when a med_coupons code was applied at submission time (see
+  // lib/coupons.ts's validateCoupon(), used by both POST /auth/register and
+  // POST /payments) — couponCode for admin visibility on the payment record,
+  // discountAmount is how much was knocked off the plan's list price to
+  // produce `amount` above. Both null when no coupon was used.
+  couponCode: text("coupon_code"),
+  discountAmount: numeric("discount_amount", { precision: 12, scale: 2 }),
+  ...timestamps,
+});
+
+// Membership-plan discount codes (client request: "coupon codes", scoped to
+// plans only — never to books, which have no purchase flow of their own).
+// Since there's no live payment gateway here — payment is a manual proof
+// upload the admin reviews (see POST /payments and /payments/:id/approve) —
+// applying a coupon just discounts the `amount` the student is told to pay
+// and records the code on their med_payments row; it's still on the admin
+// to notice a mismatched proof-of-payment during review, same as any other
+// manual payment discrepancy today.
+export const couponsTable = pgTable("med_coupons", {
+  id: serial("id").primaryKey(),
+  // Always stored/compared uppercase (see lib/coupons.ts) so lookups are
+  // case-insensitive without needing a functional index.
+  code: text("code").notNull(),
+  discountType: text("discount_type").notNull(), // 'percent' | 'fixed'
+  discountValue: numeric("discount_value", { precision: 12, scale: 2 }).notNull(),
+  active: boolean("active").notNull().default(true),
+  maxUses: integer("max_uses"), // null = unlimited
+  usedCount: integer("used_count").notNull().default(0),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  ...timestamps,
+}, (table) => ({ codeIdx: uniqueIndex("med_coupons_code_idx").on(table.code) }));
+
+// Per-book purchases (client decision, superseding the earlier "any active
+// membership unlocks paid books" approach): a paid book now requires its
+// OWN approved purchase, reviewed by an admin independently of the
+// membership-payment queue (med_payments) above. Deliberately mirrors
+// paymentsTable's proof-review shape (method/reference/proof/status/
+// reviewedBy) rather than reusing that table directly — a book purchase
+// has no plan/duration and isn't a subscription, so bolting it onto
+// paymentsTable would mean nullable plan fields everywhere that don't
+// apply here. See routes/books.ts for the submit/approve/reject routes.
+export const bookPurchasesTable = pgTable("med_book_purchases", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  bookId: integer("book_id").notNull(),
+  bookTitle: text("book_title").notNull(), // snapshotted at purchase time, same reason med_payments snapshots plan_name
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  currency: text("currency").notNull(),
+  method: text("method").notNull(),
+  reference: text("reference").notNull(),
+  paymentDate: date("payment_date", { mode: "string" }).notNull(),
+  proofPath: text("proof_path"),
+  proofMimeType: text("proof_mime_type"),
+  status: text("status").notNull().default("PAYMENT_PENDING_REVIEW"), // PAYMENT_PENDING_REVIEW | approved | rejected
+  rejectionReason: text("rejection_reason"),
+  reviewedBy: integer("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
   ...timestamps,
 });
 
@@ -407,6 +488,17 @@ export const booksTable = pgTable("med_books", {
   active: boolean("active").notNull().default(true),
   archived: boolean("archived").notNull().default(false),
   displayOrder: integer("display_order").notNull().default(0),
+  // Free/paid split: a free book (isFree=true) is visible to any logged-in
+  // student regardless of membership status — it deliberately bypasses
+  // requireActiveMembership in books.ts. A paid book (isFree=false, the
+  // default) is unchanged from the original behavior: gated behind ANY
+  // active membership, same as every other study-tools resource. There is
+  // deliberately no separate per-book purchase — price below is shown to
+  // students as informational context on a locked paid book, never itself
+  // a paywall.
+  isFree: boolean("is_free").notNull().default(false),
+  price: numeric("price", { precision: 12, scale: 2 }),
+  currency: text("currency"),
   ...timestamps,
 });
 
@@ -644,6 +736,34 @@ export const notebookEntriesTable = pgTable("med_notebook_entries", {
   ...timestamps,
 });
 
+// A student's own highlights inside the secure book reader. Text highlights
+// are stored as a word range (start/end index into that page's word list from
+// GET /books/:id/pages/:n/words — the reader never receives the words' text,
+// only their boxes), area highlights as a normalised rectangle. `fileKey`
+// fingerprints the book file the indices were made against, so replacing the
+// PDF can't paint highlights over the wrong words.
+export const bookHighlightsTable = pgTable("med_book_highlights", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  bookId: integer("book_id").notNull(),
+  fileKey: text("file_key").notNull(),
+  page: integer("page").notNull(),
+  kind: text("kind").notNull().default("words"), // words | area
+  startWord: integer("start_word"),
+  endWord: integer("end_word"),
+  rect: text("rect"), // JSON {x,y,w,h} in 0..1 page coordinates, area highlights only
+  color: text("color").notNull().default("yellow"),
+  note: text("note"),
+  ...timestamps,
+});
+
+export const bookReadingProgressTable = pgTable("med_book_reading_progress", {
+  userId: integer("user_id").notNull(),
+  bookId: integer("book_id").notNull(),
+  page: integer("page").notNull().default(1),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({ pk: primaryKey({ columns: [t.userId, t.bookId] }) }));
+
 export const savedSessionsTable = pgTable("med_saved_sessions", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull(),
@@ -777,4 +897,6 @@ export type Program = typeof programsTable.$inferSelect;
 export type AcademicYear = typeof academicYearsTable.$inferSelect;
 export type Batch = typeof batchesTable.$inferSelect;
 export type Book = typeof booksTable.$inferSelect;
+export type Coupon = typeof couponsTable.$inferSelect;
+export type BookPurchase = typeof bookPurchasesTable.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;

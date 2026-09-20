@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, mcqsTable, flashcardsTable, topicsTable, subjectsTable, modulesTable, auditLogsTable } from "@workspace/db";
-import { requireAdmin, requireAuth, requireActiveMembership } from "../middlewares/auth";
+import { requireAdmin, requireAuth, requireMembershipFor } from "../middlewares/auth";
 import { generateExplanation, generateFlashcardExplanation, generateFlashcardSet, generateMcqSet, classifyDifficulty, generateOptionExplanations, AiNotConfiguredError } from "../lib/aiExplain";
 import { getAllSettings } from "../lib/settings";
 
@@ -373,7 +373,7 @@ router.post("/admin/mcqs/generate-option-explanations", requireAdmin, async (req
 // stored, doesn't touch explanationStatus)
 // ---------------------------------------------------------------------------
 
-router.post("/mcqs/:id/ask-ai", requireAuth, requireActiveMembership, async (req, res): Promise<void> => {
+router.post("/mcqs/:id/ask-ai", requireAuth, requireMembershipFor("ai_explain"), async (req, res): Promise<void> => {
   // Defense in depth: Practice.tsx already hides the button when
   // AI_EXPLAIN_ENABLED is off, but that's just UI — a direct API call (or
   // a stale page still open in a tab) should be refused too, not just
@@ -393,7 +393,7 @@ router.post("/mcqs/:id/ask-ai", requireAuth, requireActiveMembership, async (req
   }
 });
 
-router.post("/flashcards/:id/ask-ai", requireAuth, requireActiveMembership, async (req, res): Promise<void> => {
+router.post("/flashcards/:id/ask-ai", requireAuth, requireMembershipFor("ai_explain"), async (req, res): Promise<void> => {
   // Same defense-in-depth check as POST /mcqs/:id/ask-ai above.
   const settings = await getAllSettings();
   if (settings.AI_EXPLAIN_ENABLED === "false") { res.status(403).json({ error: "Ask AI to explain is turned off right now." }); return; }

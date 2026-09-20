@@ -32,7 +32,7 @@ import { toast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
-import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, type MyFeedbackEntry, analyticsApi, type ProgressTrend, mcqImportApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blocksApi, type Block, examsAdminApi, examsApi, explanationsApi, booksApi, type AdminBookStudent, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type StudentDetail, type SiteContent, type TeamMember, TEAM_CATEGORIES, TEAM_CATEGORY_LABELS, type AdminModule, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type PaymentDetails, type PaymentMethodConfig, aiVisualizerApi, type VisualizationSpec, LeaderboardRow } from '@/lib/api';
+import { authApi, couponsApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, type MyFeedbackEntry, analyticsApi, type ProgressTrend, mcqImportApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blocksApi, type Block, examsAdminApi, examsApi, explanationsApi, booksApi, type AdminBookStudent, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type StudentDetail, type SiteContent, type TeamMember, TEAM_CATEGORIES, TEAM_CATEGORY_LABELS, type AdminModule, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type PaymentDetails, type PaymentMethodConfig, aiVisualizerApi, type VisualizationSpec, LeaderboardRow } from '@/lib/api';
 import { VisualizationRenderer, isStepBased } from '@/components/visualizer/VisualizationRenderer';
 import { StepControls } from '@/components/visualizer/StepControls';
 import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
@@ -52,7 +52,7 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // invalidateQueries after a save) already set their own options, which
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
-import { AuthLayout, IconField, PasswordStrength, cn, money, BrandSpinner, PaymentDestinationCard, trialScopeLabel } from '@/lib/shared';
+import { AuthLayout, IconField, PasswordStrength, cn, money, BrandSpinner, PaymentDestinationCard, trialScopeLabel, trialFeatureSummary } from '@/lib/shared';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 function Register() {
@@ -60,6 +60,10 @@ function Register() {
   const [programKind, setProgramKind] = useState<'MBBS' | 'BDS' | ''>('');
   const [yearNumber, setYearNumber] = useState('');
   const [planId, setPlanId] = useState<number | null>(null);
+  const [couponInput, setCouponInput] = useState('');
+  const [couponResult, setCouponResult] = useState<{ code: string; discountedAmount: number; discountAmount: number } | null>(null);
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [couponChecking, setCouponChecking] = useState(false);
   const [proof, setProof] = useState<{ storagePath: string; fileName: string; previewUrl: string | null } | null>(null);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -87,8 +91,8 @@ function Register() {
   // availability *before* they commit to picking a plan and uploading
   // payment proof, not just after logging in.
   const siteQ = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get });
-  const trialOn = siteQ.data?.GLOBAL_TRIAL_MODE === 'true';
-  const trialScope = trialScopeLabel(siteQ.data?.GLOBAL_TRIAL_PROGRAM, siteQ.data?.GLOBAL_TRIAL_YEAR);
+  const trialOn = !!siteQ.data?.trial?.active;
+  const trialScope = trialScopeLabel(siteQ.data?.trial?.program, siteQ.data?.trial?.years);
 
   const register = useMutation({
     mutationFn: authApi.register,
@@ -114,11 +118,25 @@ function Register() {
 
   const selectedPlan = (plans.data || []).find((p) => p.id === planId) || null;
   const bestValueId = (plans.data || []).length > 1 ? [...(plans.data || [])].sort((a, b) => (a.price / a.duration) - (b.price / b.duration))[0].id : null;
+
+  const applyCoupon = async () => {
+    if (!planId || !couponInput.trim()) return;
+    setCouponChecking(true); setCouponError(null);
+    try {
+      const result = await couponsApi.validate(couponInput.trim(), planId);
+      setCouponResult({ code: couponInput.trim().toUpperCase(), discountedAmount: result.discountedAmount, discountAmount: result.discountAmount });
+    } catch (err) {
+      setCouponResult(null);
+      setCouponError(err instanceof ApiRequestError ? err.message : 'Could not check that code right now.');
+    } finally {
+      setCouponChecking(false);
+    }
+  };
   const pd = paymentDetails.data;
 
   return <AuthLayout register><div className="w-full"><div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-primary">Create your account</div><h1 className="mt-3 font-display text-4xl tracking-[-.04em]">Join MedschoolProffs.</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">The complete MCQ bank for MBBS &amp; BDS students — built for daily practice and learning, not exam pressure.</p>
 
-    {trialOn && <div className="mt-4 flex items-start gap-2 rounded-xl border border-[#e5a952] bg-[#fff9ee] p-3 text-xs font-semibold text-[#8a5a12]" data-testid="banner-register-trial-mode"><Sparkles size={14} className="mt-0.5 shrink-0" /><span>Trial mode is on{trialScope ? <> for <strong>{trialScope}</strong> students</> : ''} — you'll get full access to every feature free, right after you verify your email, no need to wait on payment review while it's active.</span></div>}
+    {trialOn && <div className="mt-4 flex items-start gap-2 rounded-xl border border-[#e5a952] bg-[#fff9ee] p-3 text-xs font-semibold text-[#8a5a12]" data-testid="banner-register-trial-mode"><Sparkles size={14} className="mt-0.5 shrink-0" /><span>Trial mode is on{trialScope ? <> for <strong>{trialScope}</strong> students</> : ''} — you'll get {siteQ.data?.trial ? trialFeatureSummary(siteQ.data.trial.features) : 'free access'} free, right after you verify your email, no need to wait on payment review while it's active.</span></div>}
 
     <form onSubmit={(e) => {
       e.preventDefault(); setError(null);
@@ -133,6 +151,7 @@ function Register() {
       register.mutate({
         name: String(f.get('name')), email, password: String(f.get('password')),
         phone: String(f.get('phone')), institutionId: Number(institutionId), programKind, yearNumber: Number(yearNumber), planId, proofPath: proof.storagePath,
+        couponCode: couponResult?.code,
       });
     }} className="mt-7 space-y-3.5">
       <label className="block text-xs font-bold">Full name<div className="mt-2"><IconField icon={UserIcon} required name="name" placeholder="Your name" data-testid="input-register-name" /></div></label>
@@ -169,6 +188,9 @@ function Register() {
         <div className="flex items-center gap-2"><div className={cn('grid size-8 place-items-center rounded-lg', planId === plan.id ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground')}><CreditCard size={15} /></div>{planId === plan.id && <CheckCircle2 size={16} className="text-primary" />}</div>
         <div className="mt-3 text-sm font-extrabold">{plan.name}</div><div className="mt-1 flex items-center gap-2">{plan.originalPrice != null && plan.originalPrice > plan.price && <span className="text-xs text-muted-foreground line-through">{money(plan.originalPrice, plan.currency)}</span>}<span className="font-display text-2xl">{money(plan.price, plan.currency)}</span></div><div className="mt-1 text-[11px] text-muted-foreground">{plan.duration} {plan.durationUnit} access</div>
       </button>)}{!plans.data?.length && <p className="text-xs text-muted-foreground sm:col-span-2">{plans.isLoading ? 'Loading plans…' : 'No membership plans are available yet — ask an admin to add one.'}</p>}</div></div>
+      {selectedPlan && <div className="flex items-center gap-2"><input value={couponInput} onChange={(e) => { setCouponInput(e.target.value); setCouponResult(null); setCouponError(null); }} placeholder="Coupon code (optional)" className="h-10 flex-1 rounded-xl border border-border bg-card px-3 text-xs outline-none focus:ring-2 focus:ring-primary/20" data-testid="input-register-coupon" /><button type="button" onClick={applyCoupon} disabled={!couponInput.trim() || couponChecking} className="h-10 shrink-0 rounded-xl border border-border px-4 text-xs font-bold hover:bg-muted disabled:opacity-50" data-testid="button-apply-coupon">{couponChecking ? 'Checking…' : 'Apply'}</button></div>}
+      {couponError && <p className="text-[11px] font-bold text-destructive" data-testid="text-coupon-error">{couponError}</p>}
+      {couponResult && <p className="text-[11px] font-bold text-primary" data-testid="text-coupon-applied">Coupon applied — new price {selectedPlan ? money(couponResult.discountedAmount, selectedPlan.currency) : couponResult.discountedAmount}</p>}
       {programKind && yearNumber && <p className="text-[11px] text-muted-foreground">You'll see content for <span className="font-bold text-primary">{programKind} · {yearNumber}{yearNumber === '1' ? 'st' : yearNumber === '2' ? 'nd' : yearNumber === '3' ? 'rd' : 'th'} Year</span> — set by your college admin.</p>}
 
       {pd && <PaymentDestinationCard pd={pd} />}
@@ -178,7 +200,7 @@ function Register() {
         {uploading ? <p className="text-xs font-semibold text-muted-foreground">Uploading…</p> : proof ? <>{proof.previewUrl ? <img src={proof.previewUrl} alt="Payment proof preview" className="max-h-28 rounded-lg border border-border object-contain" /> : <FileText size={22} className="text-primary" />}<p className="text-xs font-bold text-primary">{proof.fileName}</p><span className="text-[10px] text-muted-foreground">Click to replace</span></> : <><UploadCloud size={22} className="text-muted-foreground" /><p className="text-xs font-semibold">Drag your payment screenshot here, or click to browse</p><span className="text-[10px] text-muted-foreground">PNG, JPEG, WEBP, or PDF</span></>}
       </label></div>
 
-      {selectedPlan && <div className="flex items-center gap-2 rounded-xl bg-[#eef7f1] p-3 text-xs font-semibold text-primary"><CheckCircle2 size={14} /> Paying {money(selectedPlan.price, selectedPlan.currency)} for {selectedPlan.name} — your order goes to the admin for approval</div>}
+      {selectedPlan && <div className="flex items-center gap-2 rounded-xl bg-[#eef7f1] p-3 text-xs font-semibold text-primary"><CheckCircle2 size={14} /> Paying {money(couponResult ? couponResult.discountedAmount : selectedPlan.price, selectedPlan.currency)} for {selectedPlan.name} — your order goes to the admin for approval</div>}
       {error && <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-xs font-semibold text-destructive" data-testid="text-register-error">{error}</div>}
       <button disabled={register.isPending || uploading} className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-xs font-extrabold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:shadow-sm" data-testid="button-register-submit">{register.isPending && <BrandSpinner size={14} />}{register.isPending ? 'Creating your account…' : 'Create account & submit payment'}</button>
     </form>

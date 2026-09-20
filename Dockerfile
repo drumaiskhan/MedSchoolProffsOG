@@ -60,6 +60,11 @@ ENV NODE_ENV=production
 # Copy only the compiled API server
 COPY --from=build /repo/artifacts/api-server/dist ./dist
 
+# Watermark font for the secure book reader (lib/bookReader.ts looks for
+# ../assets/fonts/DejaVuSans.ttf relative to dist/). A slim image has no system
+# fonts, so without this the watermark would silently vanish.
+COPY --from=build /repo/artifacts/api-server/assets ./assets
+
 # ---------------------------------------------------------------------------
 # Runtime dependencies
 # ---------------------------------------------------------------------------
@@ -67,7 +72,10 @@ COPY --from=build /repo/artifacts/api-server/dist ./dist
 # esbuild externalizes a fixed list of packages that it cannot safely bundle
 # (see artifacts/api-server/build.mjs).
 #
-# nodemailer is required by the bundled output at runtime, so install it here.
+# nodemailer, pdfjs-dist and @napi-rs/canvas are required by the bundled output
+# at runtime (the last two power the secure paid-book reader; keep these
+# versions in step with artifacts/api-server/package.json — two copies of
+# @napi-rs/canvas break rendering), so install them here.
 #
 # We deliberately do NOT copy:
 #
@@ -84,7 +92,7 @@ COPY --from=build /repo/artifacts/api-server/dist ./dist
 # actually required by the compiled server.
 
 RUN echo '{"name":"medschoolproffs-api-runtime","private":true,"type":"module"}' > package.json \
-    && npm install --omit=dev nodemailer@^6.9.15
+    && npm install --omit=dev nodemailer@^6.9.15 pdfjs-dist@4.10.38 @napi-rs/canvas@0.1.100
 
 # ---------------------------------------------------------------------------
 # API port

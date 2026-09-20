@@ -4,7 +4,9 @@ import { auditLogsTable, db } from "@workspace/db";
 import { getAllSettings, setSetting, THEME_KEYS, DEFAULT_THEME } from "../lib/settings";
 import { requireAdmin } from "../middlewares/auth";
 import { resolveFileUrl, testCloudinaryConnection, setCachedCloudinaryCloudName } from "../lib/storage";
-import { sendTestEmail } from "../lib/email";
+import { sendTestEmail, BREVO_MAX_SLOTS } from "../lib/email";
+import { TRIAL_FEATURE_OPTIONS } from "../lib/trial";
+import { parseDeviceLimit, MAX_DEVICES_CEILING } from "../lib/deviceSessions";
 
 const router: IRouter = Router();
 
@@ -12,6 +14,10 @@ const router: IRouter = Router();
 // live in real environment variables, never in this table.
 const EDITABLE_KEYS = [
   "ADMIN_SIGNUP_CODE",
+  // Default cap on simultaneously signed-in devices per student account
+  // (whole number, 0 = unlimited; blank = 2). Per-student overrides live on
+  // med_users.max_devices — see lib/deviceSessions.ts.
+  "DEFAULT_MAX_DEVICES",
   "SUPPORT_EMAIL",
   // WhatsApp number students can message for support — digits only (with
   // country code, no +/spaces), used to build a wa.me link on the student
@@ -43,9 +49,9 @@ const EDITABLE_KEYS = [
   // General Trial Mode — unlike REGISTRATION_ENABLED/AI_VISUALIZER_ENABLED
   // above (which default to ON, "false" is the opt-out), this defaults to
   // OFF: only the exact string "true" enables it (see
-  // requireActiveMembership in middlewares/auth.ts). While on, every
-  // signed-in student gets full access to every membership-gated route
-  // regardless of their own membership/payment status — no individual
+  // requireMembershipFor in middlewares/auth.ts, lib/trial.ts). While on,
+  // signed-in students get access to the membership-gated features the
+  // trial covers, regardless of their own membership/payment status — no individual
   // med_memberships rows are created or changed, so switching it back off
   // instantly restores normal per-student gating with nothing to clean up.
   // Distinct from the existing per-student POST /students/:id/trial grant,
@@ -59,11 +65,20 @@ const EDITABLE_KEYS = [
   // already use for programTargetKind/yearTargetNumber (see
   // lib/contentVisibility.ts). A student with no program/year set on
   // their profile only matches when both are left unrestricted. Read
-  // together with GLOBAL_TRIAL_MODE by requireActiveMembership
+  // together with GLOBAL_TRIAL_MODE by lib/trial.ts
   // (middlewares/auth.ts) — leaving both blank preserves the previous
   // "every student" behavior exactly.
   "GLOBAL_TRIAL_PROGRAM", // "" | "MBBS" | "BDS"
-  "GLOBAL_TRIAL_YEAR", // "" | "1".."5"
+  // Comma-separated academic years the trial covers ("1,2,3"; empty = every
+  // year). Supersedes the old single-year GLOBAL_TRIAL_YEAR below, which is
+  // kept only as a read-fallback in lib/trial.ts for sites that saved one.
+  "GLOBAL_TRIAL_YEARS",
+  "GLOBAL_TRIAL_YEAR", // legacy single year — no longer written by the admin UI
+  // JSON array of the feature keys the trial unlocks (see
+  // TRIAL_FEATURE_OPTIONS in lib/trial.ts). Blank = the default set.
+  "GLOBAL_TRIAL_FEATURES",
+  // Optional "YYYY-MM-DD" — the trial switches itself off after that day.
+  "GLOBAL_TRIAL_ENDS_AT",
   // Optional decorative photo for the student Dashboard's greeting card
   // (see frontend-student's Dashboard component) — falls back to a plain
   // decorative pattern when unset.
@@ -188,6 +203,21 @@ const EDITABLE_KEYS = [
   "MAIL_FROM",
   "MAIL_FROM_NAME",
   "BREVO_API_KEY",
+  // Extra Brevo accounts (slots 2-5) — each free Brevo plan has its own
+  // daily quota, so more slots = more headroom, and a dead key just falls
+  // through to the next one. Slot 1 is BREVO_API_KEY above and always uses
+  // MAIL_FROM; slots 2-5 may each carry their own verified sender (Brevo only
+  // sends from addresses verified on the sending account). See
+  // BrevoSlot / sendViaBrevo in lib/email.ts.
+  "BREVO_API_KEY_2",
+  "BREVO_SENDER_EMAIL_2",
+  "BREVO_API_KEY_3",
+  "BREVO_SENDER_EMAIL_3",
+  "BREVO_API_KEY_4",
+  "BREVO_SENDER_EMAIL_4",
+  "BREVO_API_KEY_5",
+  "BREVO_SENDER_EMAIL_5",
+  "BREVO_SLOT_STRATEGY", // "failover" (default) | "round_robin"
   "SMTP_HOST",
   "SMTP_PORT",
   "SMTP_USER",
@@ -243,11 +273,23 @@ function withResolvedMedia(view: Record<string, string>): Record<string, string>
   return { ...view, SITE_FAVICON_URL: resolveFileUrl(view.SITE_FAVICON_PATH) ?? "", PAYMENT_QR_CODE_URL: resolveFileUrl(view.PAYMENT_QR_CODE_PATH) ?? "", DASHBOARD_HERO_IMAGE_URL: resolveFileUrl(view.DASHBOARD_HERO_IMAGE_PATH) ?? "" };
 }
 
+// Not editable settings — read-only extras the admin page needs alongside
+// the saved values. TRIAL_FEATURE_OPTIONS is the single source of truth for
+// which features a General Trial can unlock (lib/trial.ts), sent down as JSON
+// so the settings page renders exactly the toggles the server enforces
+// instead of keeping its own copy of the list.
+function withAdminExtras(view: Record<string, string>): Record<string, string> {
+  return { ...view, TRIAL_FEATURE_OPTIONS: JSON.stringify(TRIAL_FEATURE_OPTIONS), BREVO_MAX_SLOTS: String(BREVO_MAX_SLOTS) };
+}
+
 // Secrets — never sent back down in full once saved. The admin UI shows a
 // masked preview per key and only sends a new value in the PATCH body when
 // the admin is actually changing it (see the blank-value skip in the PATCH
 // handler below).
-const SECRET_KEYS = ["AI_API_KEY", "AI_API_KEY_2", "AI_API_KEY_3", "AI_API_KEY_4", "AI_API_KEY_5", "AI_API_KEY_6", "CLOUDINARY_API_SECRET", "CLOUDINARY_API_SECRET_2", "BREVO_API_KEY", "SMTP_PASS", "CUSTOM_EMAIL_API_KEY"] as const;
+// Sent in place of a secret's value to clear it. Must match CLEAR_SECRET in
+// frontend-admin/src/pages/AdminSettings.tsx.
+const CLEAR_SECRET = "__CLEAR__";
+const SECRET_KEYS = ["BREVO_API_KEY_2", "BREVO_API_KEY_3", "BREVO_API_KEY_4", "BREVO_API_KEY_5", "AI_API_KEY", "AI_API_KEY_2", "AI_API_KEY_3", "AI_API_KEY_4", "AI_API_KEY_5", "AI_API_KEY_6", "CLOUDINARY_API_SECRET", "CLOUDINARY_API_SECRET_2", "BREVO_API_KEY", "SMTP_PASS", "CUSTOM_EMAIL_API_KEY"] as const;
 function withSecretsMasked(view: Record<string, string>): Record<string, string> {
   const masked: Record<string, string> = {};
   const rest = { ...view };
@@ -309,13 +351,13 @@ router.get("/admin/settings", requireAdmin, async (_req, res): Promise<void> => 
   // not "sending actually works" (use POST /admin/settings/test-email for
   // that, same distinction as CLOUDINARY_CONFIGURED above).
   const emailConfigured = !!(
-    (view.EMAIL_PROVIDER === "brevo" && view.BREVO_API_KEY) ||
+    (view.EMAIL_PROVIDER === "brevo" && (view.BREVO_API_KEY || view.BREVO_API_KEY_2 || view.BREVO_API_KEY_3 || view.BREVO_API_KEY_4 || view.BREVO_API_KEY_5)) ||
     (view.EMAIL_PROVIDER === "smtp" && view.SMTP_HOST && view.SMTP_PORT && view.SMTP_USER && view.SMTP_PASS) ||
     (view.EMAIL_PROVIDER === "custom" && view.CUSTOM_EMAIL_API_URL) ||
     process.env.BREVO_API_KEY || process.env.CUSTOM_EMAIL_API_URL ||
     (process.env.SMTP_HOST && process.env.SMTP_PORT && process.env.SMTP_USER && process.env.SMTP_PASS)
   );
-  res.json({ ...withSecretsMasked(withResolvedMedia(withThemeDefaults(view))), CLOUDINARY_CONFIGURED: String(cloudinaryConfigured), CLOUDINARY_BACKUP_CONFIGURED: String(cloudinaryBackupConfigured), EMAIL_CONFIGURED: String(emailConfigured) });
+  res.json({ ...withAdminExtras(withSecretsMasked(withResolvedMedia(withThemeDefaults(view)))), CLOUDINARY_CONFIGURED: String(cloudinaryConfigured), CLOUDINARY_BACKUP_CONFIGURED: String(cloudinaryBackupConfigured), EMAIL_CONFIGURED: String(emailConfigured) });
 });
 
 const SettingsBody = z.object(Object.fromEntries(EDITABLE_KEYS.map((key) => [key, z.string().max(4000).optional()])) as Record<(typeof EDITABLE_KEYS)[number], z.ZodOptional<z.ZodString>>);
@@ -323,11 +365,21 @@ const SettingsBody = z.object(Object.fromEntries(EDITABLE_KEYS.map((key) => [key
 router.patch("/admin/settings", requireAdmin, async (req, res): Promise<void> => {
   const parsed = SettingsBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message }); return; }
+  const deviceLimit = parsed.data.DEFAULT_MAX_DEVICES;
+  if (deviceLimit !== undefined && deviceLimit.trim() !== "" && parseDeviceLimit(deviceLimit) === null) {
+    res.status(400).json({ error: `Default device limit must be a whole number from 0 (unlimited) to ${MAX_DEVICES_CEILING}.` });
+    return;
+  }
   for (const [key, value] of Object.entries(parsed.data)) {
     if (value === undefined) continue;
     // Secret fields come back masked from GET — an empty string here means
     // "the admin didn't touch this field," not "clear the key."
-    if ((SECRET_KEYS as readonly string[]).includes(key) && value === "") continue;
+    if ((SECRET_KEYS as readonly string[]).includes(key)) {
+      if (value === "") continue;
+      // Explicit "delete this saved secret" (e.g. removing a backup Brevo
+      // account) — blank can't mean that, it already means "unchanged".
+      if (value === CLEAR_SECRET) { await setSetting(key, ""); continue; }
+    }
     await setSetting(key, value);
     // Root-cause fix (round 3, items 2/6/8): push a new cloud name into
     // storage.ts's synchronous resolveFileUrl() cache immediately, instead
@@ -339,7 +391,7 @@ router.patch("/admin/settings", requireAdmin, async (req, res): Promise<void> =>
   }
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "SETTINGS_UPDATED", entity: "platform_settings", metadata: JSON.stringify(Object.keys(parsed.data)) });
   const settings = await getAllSettings();
-  res.json(withSecretsMasked(withResolvedMedia(withThemeDefaults(Object.fromEntries(EDITABLE_KEYS.map((key) => [key, settings[key] ?? ""]))))));
+  res.json(withAdminExtras(withSecretsMasked(withResolvedMedia(withThemeDefaults(Object.fromEntries(EDITABLE_KEYS.map((key) => [key, settings[key] ?? ""])))))));
 });
 
 router.post("/admin/settings/rotate-admin-code", requireAdmin, async (req, res): Promise<void> => {
@@ -373,10 +425,12 @@ router.post("/admin/settings/test-storage", requireAdmin, async (_req, res): Pro
 // wrong SMTP creds, unreachable custom endpoint) instead of a generic
 // failure.
 router.post("/admin/settings/test-email", requireAdmin, async (req, res): Promise<void> => {
-  const parsed = z.object({ to: z.string().email() }).safeParse(req.body);
+  const parsed = z.object({ to: z.string().email(), slot: z.number().int().min(1).max(BREVO_MAX_SLOTS).optional() }).safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "A valid email address is required" }); return; }
   try {
-    await sendTestEmail(parsed.data.to);
+    // `slot` (Brevo only) tests one specific account with no failover; leave
+    // it out to test the whole setup exactly as real emails are sent.
+    await sendTestEmail(parsed.data.to, parsed.data.slot);
     res.json({ ok: true });
   } catch (err) {
     // 200, not an error status — same reasoning as POST /test-storage:

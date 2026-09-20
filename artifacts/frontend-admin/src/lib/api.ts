@@ -88,8 +88,11 @@ export interface AuthUser {
 
 export interface PlatformSettings {
   [key: string]: string;
-  ADMIN_SIGNUP_CODE: string; SUPPORT_EMAIL: string; SUPPORT_WHATSAPP: string; PLATFORM_NAME: string; PLATFORM_TAGLINE: string;
-  DEFAULT_CURRENCY: string; PAYMENT_INSTRUCTIONS: string; ANNOUNCEMENT_BANNER: string; REGISTRATION_ENABLED: string; AI_VISUALIZER_ENABLED: string; AI_EXPLAIN_ENABLED: string; GLOBAL_TRIAL_MODE: string; GLOBAL_TRIAL_PROGRAM: string; GLOBAL_TRIAL_YEAR: string;
+  ADMIN_SIGNUP_CODE: string; SUPPORT_WHATSAPP: string; PLATFORM_NAME: string; PLATFORM_TAGLINE: string;
+  DEFAULT_CURRENCY: string; PAYMENT_INSTRUCTIONS: string; ANNOUNCEMENT_BANNER: string; REGISTRATION_ENABLED: string; AI_VISUALIZER_ENABLED: string; AI_EXPLAIN_ENABLED: string; GLOBAL_TRIAL_MODE: string; GLOBAL_TRIAL_PROGRAM: string; GLOBAL_TRIAL_YEAR: string; GLOBAL_TRIAL_YEARS: string; GLOBAL_TRIAL_FEATURES: string; GLOBAL_TRIAL_ENDS_AT: string;
+  // Read-only extras the server adds to GET/PATCH /admin/settings — JSON
+  // (TrialFeatureOption[]) and a number, both as strings like everything else here.
+  TRIAL_FEATURE_OPTIONS: string; BREVO_MAX_SLOTS: string;
   PAYMENT_ACCOUNT_HOLDER: string; PAYMENT_ACCOUNT_NUMBER: string; PAYMENT_BANK_NAME: string; PAYMENT_IFSC_OR_ROUTING: string; PAYMENT_UPI_ID: string; PAYMENT_QR_CODE_PATH: string;
   PAYMENT_RAAST_ID: string; PAYMENT_WALLET_PROVIDER: string; PAYMENT_WALLET_NUMBER: string; PAYMENT_WALLET_ACCOUNT_NAME: string;
   PAYMENT_BANK_ACCOUNTS: string; PAYMENT_METHODS_CONFIG: string; PAYMENT_LATE_FEE_NOTE: string; PAYMENT_REFUND_POLICY: string;
@@ -101,6 +104,7 @@ export interface PlatformSettings {
   CLOUDINARY_CONFIGURED: string;
   EMAIL_PROVIDER: string; MAIL_FROM: string; MAIL_FROM_NAME: string;
   BREVO_API_KEY: string; BREVO_API_KEY_SET: string; BREVO_API_KEY_MASKED: string;
+  BREVO_SLOT_STRATEGY: string;
   SMTP_HOST: string; SMTP_PORT: string; SMTP_USER: string; SMTP_PASS: string; SMTP_PASS_SET: string; SMTP_PASS_MASKED: string;
   CUSTOM_EMAIL_API_URL: string; CUSTOM_EMAIL_API_KEY: string; CUSTOM_EMAIL_API_KEY_SET: string; CUSTOM_EMAIL_API_KEY_MASKED: string;
   CUSTOM_EMAIL_API_KEY_HEADER: string; CUSTOM_EMAIL_API_KEY_PREFIX: string;
@@ -122,6 +126,9 @@ export interface StudentDetail {
   payments: PaymentRow[]; activeMembership: { expiresAt: string; isTrial: boolean } | null;
 }
 export interface PaymentRow { id: number; studentName: string; institution: string; program: string; academicYear: string; batch: string; rollNumber: string; planName: string; amount: number; currency: string; method: string; reference: string; paymentDate: string; proofPath: string | null; status: string; submittedAt: string }
+export interface StudentDevice { id: number; label: string; ip: string | null; signedInAt: string; lastSeenAt: string }
+// limit = what applies now (0 = unlimited); override = this student's own setting (null = follows the platform default).
+export interface StudentDevices { limit: number; override: number | null; defaultLimit: number; devices: StudentDevice[] }
 export const STUDENT_STATUSES = ['UNVERIFIED', 'VERIFIED', 'PAYMENT_PENDING_REVIEW', 'ACTIVE', 'EXPIRED', 'SUSPENDED', 'REJECTED', 'DELETED'] as const;
 
 export interface McqImportProfile { id: number; name: string; questionPattern: string; optionPattern: string; answerPattern: string; explanationPattern: string; hintPattern?: string | null; referencePattern?: string | null; isDefault: boolean }
@@ -205,7 +212,11 @@ export const TEAM_CATEGORIES = ['ownership', 'reviewer', 'question_setter'] as c
 export type TeamCategory = typeof TEAM_CATEGORIES[number];
 export const TEAM_CATEGORY_LABELS: Record<TeamCategory, string> = { reviewer: 'Reviewers', question_setter: 'Question setters', ownership: 'Ownership' };
 export interface TeamMember { id: number; name: string; role: string; category: TeamCategory; bio: string; achievementBadge: string; photoPath: string | null; linkedinUrl: string; instagramUrl: string; email: string; active: boolean; displayOrder: number }
+export interface TrialFeatureOption { key: string; label: string; description: string; defaultOn: boolean }
+export interface TrialStatus { active: boolean; program: string; years: number[]; features: string[]; endsAt: string | null }
 export interface SiteContent {
+  // Resolved General Trial Mode state (defaults applied, end date honoured).
+  trial?: TrialStatus;
   PLATFORM_NAME: string; PLATFORM_TAGLINE: string; PLATFORM_DESCRIPTION: string;
   SEO_TITLE: string; SEO_DESCRIPTION: string;
   SOCIAL_FACEBOOK: string; SOCIAL_YOUTUBE: string; SOCIAL_LINKEDIN: string; SOCIAL_INSTAGRAM: string;
@@ -319,6 +330,10 @@ export const studentsAdminApi = {
   verifyEmail: (id: number) => request<{ ok: true; status: string; emailVerified: boolean }>(`/students/${id}/verify-email`, { method: 'POST' }),
   startTrial: (id: number, durationDays: number) => request<{ ok: true; expiresAt: string }>(`/students/${id}/trial`, { method: 'POST', body: JSON.stringify({ durationDays }) }),
   endTrial: (id: number) => request<{ ok: true }>(`/students/${id}/trial`, { method: 'DELETE' }),
+  devices: (id: number) => request<StudentDevices>(`/students/${id}/devices`),
+  setDeviceLimit: (id: number, maxDevices: number | null) => request<{ ok: true; limit: number; override: number | null }>(`/students/${id}/device-limit`, { method: 'PATCH', body: JSON.stringify({ maxDevices }) }),
+  revokeDevice: (id: number, sessionId: number) => request<{ ok: true }>(`/students/${id}/devices/${sessionId}`, { method: 'DELETE' }),
+  revokeAllDevices: (id: number) => request<{ ok: true; revoked: number }>(`/students/${id}/devices`, { method: 'DELETE' }),
   remove: (id: number) => request<{ ok: true }>(`/students/${id}`, { method: 'DELETE' }),
   removePermanent: (id: number) => request<{ ok: true }>(`/students/${id}/permanent`, { method: 'DELETE' }),
 };
@@ -601,17 +616,34 @@ export const settingsApi = {
   update: (body: Partial<PlatformSettings>) => request<PlatformSettings>('/admin/settings', { method: 'PATCH', body: JSON.stringify(body) }),
   rotateAdminCode: () => request<{ ADMIN_SIGNUP_CODE: string }>('/admin/settings/rotate-admin-code', { method: 'POST' }),
   testStorage: () => request<{ cloudinary: { ok: boolean; error?: string }; cloudinaryBackup: { ok: boolean; error?: string } }>('/admin/settings/test-storage', { method: 'POST' }),
-  testEmail: (to: string) => request<{ ok: boolean; error?: string }>('/admin/settings/test-email', { method: 'POST', body: JSON.stringify({ to }) }),
+  // `slot` (Brevo only) tests one account on its own with no failover.
+  testEmail: (to: string, slot?: number) => request<{ ok: boolean; error?: string }>('/admin/settings/test-email', { method: 'POST', body: JSON.stringify(slot ? { to, slot } : { to }) }),
 };
 
 export const auditApi = {
   list: (limit = 100) => request<AuditLogEntry[]>(`/admin/audit-logs?limit=${limit}`),
 };
 
-export interface AdminBook { id: number; title: string; author: string | null; moduleId: number | null; subjectId: number | null; topicId: number | null; programTargetKind: string | null; yearTargetNumber: number | null; storagePath: string | null; coverImagePath: string | null; active: boolean }
+export interface AdminBook { id: number; title: string; author: string | null; moduleId: number | null; subjectId: number | null; topicId: number | null; programTargetKind: string | null; yearTargetNumber: number | null; storagePath: string | null; coverImagePath: string | null; active: boolean; isFree: boolean; price: number | null; currency: string | null }
+export interface AdminCoupon { id: number; code: string; discountType: 'percent' | 'fixed'; discountValue: number; active: boolean; maxUses: number | null; usedCount: number; expiresAt: string | null; createdAt: string }
+export const couponsAdminApi = {
+  list: () => request<AdminCoupon[]>('/coupons'),
+  create: (body: { code: string; discountType: 'percent' | 'fixed'; discountValue: number; maxUses?: number | null; expiresAt?: string | null }) => request<AdminCoupon>('/coupons', { method: 'POST', body: JSON.stringify(body) }),
+  update: (id: number, body: { active?: boolean; discountValue?: number; maxUses?: number | null; expiresAt?: string | null }) => request<AdminCoupon>(`/coupons/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  remove: (id: number) => request<{ ok: true }>(`/coupons/${id}`, { method: 'DELETE' }),
+};
+
+export interface AdminBookPurchase { id: number; bookId: number; bookTitle: string; amount: number; currency: string; method: string; reference: string; paymentDate: string; proofPath: string | null; status: 'PAYMENT_PENDING_REVIEW' | 'approved' | 'rejected'; rejectionReason: string | null; submittedAt: string; reviewedAt: string | null; user?: { name: string; email: string } }
+export const bookPurchasesAdminApi = {
+  list: () => request<AdminBookPurchase[]>('/admin/book-purchases'),
+  approve: (id: number) => request<AdminBookPurchase>(`/admin/book-purchases/${id}/approve`, { method: 'POST' }),
+  reject: (id: number, reason?: string) => request<AdminBookPurchase>(`/admin/book-purchases/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
+};
+
 export const booksAdminApi = {
   list: () => request<AdminBook[]>('/admin/books'),
-  create: (body: { title: string; author?: string; programTargetKind?: string | null; yearTargetNumber?: number | null; storagePath: string; coverImagePath?: string }) => request<AdminBook>('/books', { method: 'POST', body: JSON.stringify(body) }),
+  create: (body: { title: string; author?: string; programTargetKind?: string | null; yearTargetNumber?: number | null; storagePath: string; coverImagePath?: string; isFree?: boolean; price?: number | null; currency?: string | null }) => request<AdminBook>('/books', { method: 'POST', body: JSON.stringify(body) }),
+  update: (id: number, body: { title?: string; author?: string | null; programTargetKind?: string | null; yearTargetNumber?: number | null; isFree?: boolean; price?: number | null; currency?: string | null }) => request<AdminBook>(`/books/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   remove: (id: number) => request<{ ok: true }>(`/books/${id}`, { method: 'DELETE' }),
   removePermanent: (id: number) => request<{ ok: true; warning?: string }>(`/admin/books/${id}/permanent`, { method: 'DELETE' }),
   backfillLinks: () => request<{ fixed: number; skipped: number; failed: number }>('/admin/books/backfill-links', { method: 'POST' }),

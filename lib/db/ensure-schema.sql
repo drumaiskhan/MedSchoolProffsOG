@@ -181,6 +181,8 @@ CREATE TABLE IF NOT EXISTS med_payments (
   reviewed_at TIMESTAMPTZ,
   gateway_provider TEXT,
   gateway_reference TEXT,
+  coupon_code TEXT,
+  discount_amount NUMERIC(12, 2),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -333,6 +335,47 @@ CREATE TABLE IF NOT EXISTS med_books (
   active BOOLEAN NOT NULL DEFAULT TRUE,
   archived BOOLEAN NOT NULL DEFAULT FALSE,
   display_order INTEGER NOT NULL DEFAULT 0,
+  is_free BOOLEAN NOT NULL DEFAULT FALSE,
+  price NUMERIC(12, 2),
+  currency TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Membership-plan coupon codes (plans only, not books — see the matching
+-- comment in ensureSchema.ts, which is what actually runs at boot).
+CREATE TABLE IF NOT EXISTS med_coupons (
+  id SERIAL PRIMARY KEY,
+  code TEXT NOT NULL,
+  discount_type TEXT NOT NULL,
+  discount_value NUMERIC(12, 2) NOT NULL,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  max_uses INTEGER,
+  used_count INTEGER NOT NULL DEFAULT 0,
+  expires_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS med_coupons_code_idx ON med_coupons (code);
+
+-- Per-book purchases — see the matching comment in ensureSchema.ts, which
+-- is what actually runs at boot.
+CREATE TABLE IF NOT EXISTS med_book_purchases (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  book_id INTEGER NOT NULL,
+  book_title TEXT NOT NULL,
+  amount NUMERIC(12, 2) NOT NULL,
+  currency TEXT NOT NULL,
+  method TEXT NOT NULL,
+  reference TEXT NOT NULL,
+  payment_date DATE NOT NULL,
+  proof_path TEXT,
+  proof_mime_type TEXT,
+  status TEXT NOT NULL DEFAULT 'PAYMENT_PENDING_REVIEW',
+  rejection_reason TEXT,
+  reviewed_by INTEGER,
+  reviewed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -502,6 +545,31 @@ CREATE TABLE IF NOT EXISTS med_notebook_entries (
   content TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS med_book_highlights (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  book_id INTEGER NOT NULL,
+  file_key TEXT NOT NULL,
+  page INTEGER NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'words',
+  start_word INTEGER,
+  end_word INTEGER,
+  rect TEXT,
+  color TEXT NOT NULL DEFAULT 'yellow',
+  note TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS med_book_highlights_user_book_idx ON med_book_highlights (user_id, book_id);
+
+CREATE TABLE IF NOT EXISTS med_book_reading_progress (
+  user_id INTEGER NOT NULL,
+  book_id INTEGER NOT NULL,
+  page INTEGER NOT NULL DEFAULT 1,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, book_id)
 );
 
 CREATE TABLE IF NOT EXISTS med_saved_sessions (
@@ -695,5 +763,25 @@ ALTER TABLE med_challenges ADD COLUMN IF NOT EXISTS block_id INTEGER;
 -- stored here so it can be shown back in the admin UI and emailed to the
 -- student. See routes/medschool.ts.
 ALTER TABLE med_users ADD COLUMN IF NOT EXISTS status_message TEXT;
+
+-- Device limit: per-account cap (NULL = platform default, 0 = unlimited) and
+-- one row per signed-in device. See api-server/src/lib/deviceSessions.ts.
+ALTER TABLE med_users ADD COLUMN IF NOT EXISTS max_devices INTEGER;
+
+CREATE TABLE IF NOT EXISTS med_user_sessions (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  token_id TEXT NOT NULL,
+  device_label TEXT NOT NULL DEFAULT 'Unknown device',
+  ip TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS med_user_sessions_token_idx
+  ON med_user_sessions (token_id);
+CREATE INDEX IF NOT EXISTS med_user_sessions_user_idx
+  ON med_user_sessions (user_id);
 
 COMMIT;

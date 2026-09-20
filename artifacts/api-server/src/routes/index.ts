@@ -9,6 +9,8 @@ import uploadsRouter from "./uploads";
 import pastPapersRouter from "./past-papers";
 import studentToolsRouter from "./student-tools";
 import analyticsRouter from "./analytics";
+import studentProgressRouter from "./student-progress";
+import bookReaderRouter from "./book-reader";
 import mcqImportRouter from "./mcq-import";
 import flashcardImportRouter from "./flashcard-import";
 import mcqBackupRouter from "./mcq-backup";
@@ -20,6 +22,7 @@ import booksRouter from "./books";
 import aiVisualizerRouter from "./ai-visualizer";
 import adminSearchRouter from "./admin-search";
 import challengesRouter from "./challenges";
+import couponsRouter from "./coupons";
 
 const router: IRouter = Router();
 
@@ -32,6 +35,8 @@ router.use(uploadsRouter);
 router.use(pastPapersRouter);
 router.use(studentToolsRouter);
 router.use(analyticsRouter);
+router.use(studentProgressRouter);
+router.use(bookReaderRouter);
 router.use(mcqImportRouter);
 router.use(flashcardImportRouter);
 router.use(mcqBackupRouter);
@@ -43,6 +48,7 @@ router.use(booksRouter);
 router.use(aiVisualizerRouter);
 router.use(adminSearchRouter);
 router.use(challengesRouter);
+router.use(couponsRouter);
 router.use(medschoolRouter);
 
 export default router;

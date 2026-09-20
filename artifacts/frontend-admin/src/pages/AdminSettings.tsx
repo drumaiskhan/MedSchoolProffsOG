@@ -1,53 +1,63 @@
-// Auto-extracted route page — code-split via React.lazy() in App.tsx.
-import { type ReactNode, type ComponentProps, useState, useEffect } from 'react';
-import { QueryClient, QueryClientProvider, useMutation, useQuery } from '@tanstack/react-query';
-import { Link, Route, Switch, useLocation, useSearch, useParams, Router as WouterRouter } from 'wouter';
+// Platform settings — code-split via React.lazy() in App.tsx.
+//
+// Rebuilt for the admin-panel modernisation pass: a left rail of sections
+// (horizontal pills on mobile), icon-led cards, real switches instead of
+// checkboxes, one sticky "unsaved changes" bar instead of a Save button at
+// the bottom of every tab, and every setting in exactly one place — the
+// Design & branding cards that used to live on Site content, and the
+// Platform description that sat next to them, now live here; the dead
+// "Support email" field (nothing ever read it — the footer uses Contact
+// email on Site content) is gone.
+import { useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { Link, useSearch } from 'wouter';
 import {
-  ArrowLeft, ArrowRight, BookOpen, Check, CheckCircle2, ChevronRight, ChevronUp, ChevronDown,
-  CircleHelp, Clock3, CreditCard, FileText, Flame, FolderOpen,
-  LayoutDashboard, Library, LockKeyhole, LogOut, Menu, MoreHorizontal, Pencil, Plus,
-  ReceiptText, Search, Settings, ShieldCheck, Sparkles, Stethoscope, Target, Trash2,
-  TrendingUp, Users, X, Zap, Bell, SlidersHorizontal, FileStack, NotebookPen, Bookmark,
-  Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
-  GraduationCap, CalendarDays, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
-  RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Wand2, Activity, Layers, BarChart3, GraduationCap, ToggleLeft,
-  Download, Database, Loader2
+  Bell, Cloud, ClipboardCheck, Copy, FileStack, FolderOpen, Gift, Globe, KeyRound, Library, Mail, Megaphone, Palette, Plus,
+  Repeat, Send, Server, Settings, ShieldCheck, Shuffle, Sparkles, Stethoscope, Swords, Target, ToggleRight, Trash2, UploadCloud, Users, Wand2, Wifi, X, Zap, GraduationCap,
 } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { applyThemeVars, DEFAULT_THEME, readableForegroundHsl } from '@/lib/theme';
-import {
-  getListMembershipPlansQueryKey, getListPaymentsQueryKey, getListMcqsQueryKey, getListModulesQueryKey, getListStudentsQueryKey, getListNotificationsQueryKey, getGetCurrentUserQueryKey, getListFlashcardsQueryKey,
-  useApprovePayment, useCreateMembershipPlan, useCreateMcq, useCreateModule, useGetAdminDashboard, getGetAdminDashboardQueryKey,
-  useGetCurrentUser, useGetStudentDashboard, useListFlashcards, useListMembershipPlans,
-  useListMcqs, useListModules, useListNotifications, useListPayments, useListResources,
-  useListStudents, useListSubjects, useListTopics, useRejectPayment,
-  useSubmitPayment, useUpdateMembershipPlan,
-} from '@workspace/api-client-react';
-import type {
-  AdminDashboard, Flashcard, Mcq, MembershipPlan, Module, Notification, Payment, Resource,
-  Student, Subject, Topic, User
-} from '@workspace/api-client-react';
-import { ErrorBoundary } from '@/components/error-boundary';
-import { Toaster } from '@/components/ui/toaster';
+import { readableForegroundHsl, DEFAULT_THEME } from '@/lib/theme';
 import { toast } from '@/hooks/use-toast';
-import { useIsMobile } from '@/hooks/use-mobile';
-import { TooltipProvider } from '@/components/ui/tooltip';
-import NotFound from '@/pages/not-found';
-import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, analyticsApi, mcqImportApi, flashcardImportApi, mcqBackupApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, subjectAdminApi, topicAdminApi, flashcardsAdminApi, flashcardsAiApi, booksAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blockAdminApi, examsAdminApi, examsApi, explanationsApi, auditApi, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type FlashcardCandidate, type StudentDetail, type SiteContent, type TeamMember, TEAM_CATEGORIES, TEAM_CATEGORY_LABELS, type TeamCategory, type AdminModule, type AdminBlock, type AdminSubject, type AdminTopic, type AdminFlashcard, type GeneratedFlashcard, type AdminMcqRow, type AdminBook, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type BankAccount, type PaymentMethodConfig, aiVisualizerAdminApi, type AiVisualizerLogEntry, type AuditLogEntry } from '@/lib/api';
-
-// Round 3, item 10 (performance) — same over-fetching fix as the student
-// app (see its App.tsx for the full rationale): `new QueryClient()` with no
-// options refetched on every mount and every window refocus. Admin
-// mutations already call invalidateQueries on the specific keys they
-// change, so edits still show up immediately — this only avoids redundant
-// background refetches of data nothing has touched.
-import { Badge, SectionHeader, cn, AdminAccountSection, FaviconUploader, NotificationBroadcastPanel } from '@/lib/shared';
+import { settingsApi, ApiRequestError, type TrialFeatureOption } from '@/lib/api';
+import { AdminAccountSection, AdminImageUpload, ColorField, FaviconUploader, NotificationBroadcastPanel, SectionHeader } from '@/lib/shared';
+import { Button, Callout, Chip, Field, OptionCard, Panel, SaveBar, SecretInput, SelectInput, StatusPill, SubSection, TextArea, TextInput, ToggleRow } from '@/lib/admin-ui';
 import { queryClient } from '@/lib/query-client';
+import { cn } from '@/lib/utils';
+
+type TabId = 'general' | 'branding' | 'access' | 'ai' | 'email' | 'storage' | 'security' | 'notifications';
+
+// Sent in place of a secret's value to mean "delete the saved key" — a blank
+// value already means "leave it alone" (the GET never returns secrets), so
+// removing one needs its own signal. Must match CLEAR_SECRET in
+// api-server/src/routes/settings.ts.
+const CLEAR_SECRET = '__CLEAR__';
+
+const ordinal = (n: number) => `${n}${n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'} Year`;
+
+// Icons for the trial's feature toggles, keyed by the server's feature keys
+// (TRIAL_FEATURE_OPTIONS in api-server/src/lib/trial.ts). A key the server
+// adds later still renders — it just gets the generic icon.
+const FEATURE_ICON: Record<string, typeof Target> = {
+  mcqs: Target, past_papers: FileStack, exams: ClipboardCheck, flashcards: Zap, resources: FolderOpen,
+  ai_explain: Sparkles, ai_visualizer: Wand2, challenges: Swords, books: Library,
+};
+
+const PRACTICE_ESSENTIALS = ['mcqs', 'past_papers', 'exams'];
+
+const AI_PROVIDERS: Array<[string, string]> = [['anthropic', 'Anthropic (Claude)'], ['openai', 'OpenAI'], ['gemini', 'Google Gemini'], ['custom', 'Custom (OpenAI-compatible)']];
+
+function parseJson<T>(raw: string | undefined, fallback: T): T {
+  try { return raw ? (JSON.parse(raw) as T) : fallback; } catch { return fallback; }
+}
+
+function parseYears(raw: string | undefined): number[] {
+  return Array.from(new Set((raw || '').split(',').map((p) => Number(p.trim())).filter((n) => Number.isInteger(n) && n >= 1 && n <= 6))).sort((a, b) => a - b);
+}
 
 function AdminSettings() {
   const settingsQuery = useQuery({ queryKey: ['admin-settings'], queryFn: settingsApi.get });
   const [form, setForm] = useState<Record<string, string> | null>(null);
   const values = form ?? settingsQuery.data ?? {};
+  const dirty = form !== null;
   const save = useMutation({
     mutationFn: settingsApi.update,
     onSuccess: (data) => { setForm(null); queryClient.setQueryData(['admin-settings'], data); queryClient.invalidateQueries({ queryKey: ['site-content'] }); },
@@ -58,21 +68,27 @@ function AdminSettings() {
     mutationFn: settingsApi.testStorage,
     onError: (err: unknown) => toast({ title: 'Could not run the test', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
+
+  // Email test results are kept per target ("all" = the whole setup exactly
+  // as real mail is sent, or a Brevo slot number = that one key on its own).
   const [testEmailTo, setTestEmailTo] = useState('');
+  const [emailTests, setEmailTests] = useState<Record<string, { ok: boolean; error?: string }>>({});
   const testEmail = useMutation({
-    mutationFn: settingsApi.testEmail,
+    mutationFn: (vars: { to: string; slot?: number }) => settingsApi.testEmail(vars.to, vars.slot),
+    onSuccess: (data, vars) => setEmailTests((prev) => ({ ...prev, [String(vars.slot ?? 'all')]: data })),
     onError: (err: unknown) => toast({ title: 'Could not run the test', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
-  const set = (key: string, value: string) => setForm({ ...values, [key]: value });
-  const [tab, setTab] = useState<'general' | 'features' | 'branding' | 'ai' | 'email' | 'storage' | 'security' | 'notifications'>('general');
+  const testingTarget = testEmail.isPending ? String(testEmail.variables?.slot ?? 'all') : null;
 
-  // Bug fix: ANNOUNCEMENT_BANNER used to be a single plain-text setting —
-  // now it's a JSON array of strings (same pattern as FEATURES_LIST /
-  // QUICK_LINKS on the Site content page) so an admin can queue up more
-  // than one announcement, which the student app scrolls through in
-  // sequence. The try/catch fallback below means a site that still has the
-  // old plain-text value saved shows it as a single existing entry instead
-  // of silently losing it the first time this page loads.
+  const set = (key: string, value: string) => setForm({ ...values, [key]: value });
+  const patch = (changes: Record<string, string>) => setForm({ ...values, ...changes });
+
+  const search = useSearch();
+  const requestedTab = new URLSearchParams(search).get('tab');
+  const [tab, setTab] = useState<TabId>(() => (requestedTab === 'features' ? 'access' : (['general', 'branding', 'access', 'ai', 'email', 'storage', 'security', 'notifications'] as string[]).includes(requestedTab ?? '') ? (requestedTab as TabId) : 'general'));
+
+  // ANNOUNCEMENT_BANNER is a JSON array of strings (a site with the old
+  // plain-text value shows it as one existing entry instead of losing it).
   let announcements: string[] = [];
   try {
     const parsed = JSON.parse(values.ANNOUNCEMENT_BANNER || '[]');
@@ -82,212 +98,422 @@ function AdminSettings() {
   }
   const [newAnnouncement, setNewAnnouncement] = useState('');
   const setAnnouncements = (list: string[]) => set('ANNOUNCEMENT_BANNER', JSON.stringify(list));
+
   const storageIssue = values.CLOUDINARY_CONFIGURED !== 'true';
   const emailIssue = values.EMAIL_CONFIGURED !== 'true';
 
-  const TABS: Array<{ id: typeof tab; label: string; icon: typeof Sparkles; badge?: boolean }> = [
-    { id: 'general', label: 'General', icon: Settings },
-    { id: 'features', label: 'Features', icon: ToggleLeft },
-    { id: 'branding', label: 'Branding', icon: ImageOff },
-    { id: 'ai', label: 'AI', icon: Sparkles },
-    { id: 'email', label: 'Email', icon: Mail, badge: emailIssue },
-    { id: 'storage', label: 'Storage', icon: UploadCloud, badge: storageIssue },
-    { id: 'security', label: 'Security & access', icon: ShieldCheck },
-    { id: 'notifications', label: 'Notifications', icon: Bell },
+  const TABS: Array<{ id: TabId; label: string; blurb: string; icon: typeof Settings; badge?: boolean }> = [
+    { id: 'general', label: 'General', blurb: 'Name, tagline, announcements', icon: Settings },
+    { id: 'branding', label: 'Branding', blurb: 'Colours, favicon, dashboard photo', icon: Palette },
+    { id: 'access', label: 'Access & trial', blurb: 'Registration, trial mode, switches', icon: ToggleRight },
+    { id: 'ai', label: 'AI', blurb: 'Providers and explanations', icon: Sparkles },
+    { id: 'email', label: 'Email', blurb: 'Brevo accounts, SMTP, test sends', icon: Mail, badge: emailIssue },
+    { id: 'storage', label: 'Storage', blurb: 'Cloudinary uploads', icon: UploadCloud, badge: storageIssue },
+    { id: 'security', label: 'Security', blurb: 'Invite code and your login', icon: ShieldCheck },
+    { id: 'notifications', label: 'Broadcast', blurb: 'Message your students', icon: Bell },
   ];
 
-  return <div className="max-w-3xl"><SectionHeader eyebrow="Workspace" title="Platform settings" action={<span className="text-[10px] text-muted-foreground">Changes apply to every student instantly</span>} />
-    <div className="mb-5 flex flex-wrap gap-1.5 rounded-2xl border border-border bg-card p-1.5">{TABS.map((t) => <button key={t.id} onClick={() => setTab(t.id)} className={cn('relative inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-colors', tab === t.id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')} data-testid={`tab-settings-${t.id}`}><t.icon size={13} /> {t.label}{t.badge && <span className="absolute -right-1 -top-1 size-2 rounded-full bg-[#e5a952]" />}</button>)}</div>
+  // ---- Branding -----------------------------------------------------------
+  const theme = {
+    primary: values.THEME_PRIMARY || DEFAULT_THEME.THEME_PRIMARY,
+    secondary: values.THEME_SECONDARY || DEFAULT_THEME.THEME_SECONDARY,
+    accent: values.THEME_ACCENT || DEFAULT_THEME.THEME_ACCENT,
+    background: values.THEME_BACKGROUND || DEFAULT_THEME.THEME_BACKGROUND,
+    card: values.THEME_CARD || DEFAULT_THEME.THEME_CARD,
+    text: values.THEME_TEXT || DEFAULT_THEME.THEME_TEXT,
+    mode: values.THEME_MODE || DEFAULT_THEME.THEME_MODE,
+  };
 
-    <div className="space-y-4">
-      {tab === 'general' && <>
-        <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">Platform profile</h3><p className="mt-1 text-xs text-muted-foreground">The details students see across their study desk.</p><div className="mt-5 grid gap-4 sm:grid-cols-2">
-          <label className="text-xs font-bold">Platform name<input value={values.PLATFORM_NAME || ''} onChange={(e) => set('PLATFORM_NAME', e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-platform-name" /></label>
-          <label className="text-xs font-bold">Support email<input value={values.SUPPORT_EMAIL || ''} onChange={(e) => set('SUPPORT_EMAIL', e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-support-email" /></label>
-          <label className="text-xs font-bold">WhatsApp support number<input value={values.SUPPORT_WHATSAPP || ''} onChange={(e) => set('SUPPORT_WHATSAPP', e.target.value.replace(/[^\d+]/g, ''))} placeholder="e.g. 923001234567" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-support-whatsapp" /><span className="mt-1 block text-[10px] font-normal text-muted-foreground">Country code + number, digits only. Students get a "Chat on WhatsApp" button that opens this number.</span></label>
-          <label className="text-xs font-bold sm:col-span-2">Tagline<input value={values.PLATFORM_TAGLINE || ''} onChange={(e) => set('PLATFORM_TAGLINE', e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-platform-tagline" /></label>
-        </div></div>
+  // ---- General trial mode -------------------------------------------------
+  const trialOn = values.GLOBAL_TRIAL_MODE === 'true';
+  const featureOptions = parseJson<TrialFeatureOption[]>(values.TRIAL_FEATURE_OPTIONS, []);
+  const defaultFeatureKeys = featureOptions.filter((o) => o.defaultOn).map((o) => o.key);
+  const savedFeatures = parseJson<unknown>(values.GLOBAL_TRIAL_FEATURES, null);
+  // Blank / unparseable = the server's default set, exactly as lib/trial.ts resolves it.
+  const trialFeatures: string[] = Array.isArray(savedFeatures) ? savedFeatures.filter((k): k is string => typeof k === 'string') : defaultFeatureKeys;
+  // GLOBAL_TRIAL_YEAR is the pre-multi-year single value; if that's all that's saved, show it as the selection.
+  const trialYears = parseYears(values.GLOBAL_TRIAL_YEARS || values.GLOBAL_TRIAL_YEAR);
+  const setTrialYears = (years: number[]) => patch({ GLOBAL_TRIAL_YEARS: years.join(','), GLOBAL_TRIAL_YEAR: '' });
+  const toggleTrialYear = (year: number) => setTrialYears(trialYears.includes(year) ? trialYears.filter((y) => y !== year) : [...trialYears, year].sort((a, b) => a - b));
+  const setTrialFeatures = (keys: string[]) => set('GLOBAL_TRIAL_FEATURES', JSON.stringify(keys));
+  const toggleTrialFeature = (key: string) => setTrialFeatures(trialFeatures.includes(key) ? trialFeatures.filter((k) => k !== key) : [...trialFeatures, key]);
+  const trialEndsAt = values.GLOBAL_TRIAL_ENDS_AT || '';
+  // Mirrors lib/trial.ts: a bare date runs through the end of that day (UTC).
+  const trialExpired = !!trialEndsAt && Date.parse(`${trialEndsAt}T23:59:59.999Z`) < Date.now();
+  const trialWho = [values.GLOBAL_TRIAL_PROGRAM, trialYears.length ? trialYears.map(ordinal).join(', ').replace(/ Year/g, '') + ' Year' : ''].filter(Boolean).join(' · ');
+  const trialWhat = featureOptions.filter((o) => trialFeatures.includes(o.key)).map((o) => o.label);
 
-        <div className="rounded-2xl border border-border bg-card p-6">
-          <h3 className="font-bold">Announcement banner</h3>
-          <p className="mt-1 text-xs text-muted-foreground">Scrolls across the top of the student app so it's never cut off on mobile. Add more than one and they'll scroll through together, separated by a dot. Remove them all to hide the banner.</p>
-          {announcements.length > 0 && <div className="mt-4 space-y-2">
-            {announcements.map((a, i) => <div key={i} className="flex items-center gap-2">
-              <input value={a} onChange={(e) => setAnnouncements(announcements.map((x, idx) => idx === i ? e.target.value : x))} className="h-9 flex-1 rounded-lg border border-border bg-background px-3 text-xs" data-testid={`input-announcement-${i}`} />
-              <button type="button" onClick={() => setAnnouncements(announcements.filter((_, idx) => idx !== i))} className="text-muted-foreground hover:text-destructive" aria-label="Remove announcement" data-testid={`button-remove-announcement-${i}`}><Trash2 size={14} /></button>
-            </div>)}
-          </div>}
-          <div className="mt-3 flex gap-2">
-            <input value={newAnnouncement} onChange={(e) => setNewAnnouncement(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && newAnnouncement.trim()) { e.preventDefault(); setAnnouncements([...announcements, newAnnouncement.trim()]); setNewAnnouncement(''); } }} placeholder="e.g. New batch enrollment opens Monday" className="h-9 flex-1 rounded-lg border border-border bg-background px-3 text-xs" data-testid="input-new-announcement" />
-            <button type="button" onClick={() => { if (newAnnouncement.trim()) { setAnnouncements([...announcements, newAnnouncement.trim()]); setNewAnnouncement(''); } }} className="rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground" data-testid="button-add-announcement">Add</button>
-          </div>
+  // ---- Email --------------------------------------------------------------
+  const brevoMax = Number(values.BREVO_MAX_SLOTS) || 5;
+  const slotKey = (n: number) => (n === 1 ? 'BREVO_API_KEY' : `BREVO_API_KEY_${n}`);
+  const slotSenderKey = (n: number) => `BREVO_SENDER_EMAIL_${n}`;
+  const slotSaved = (n: number) => values[`${slotKey(n)}_SET`] === 'true' && values[slotKey(n)] !== CLEAR_SECRET;
+  const slotFilled = (n: number) => slotSaved(n) || (!!values[slotKey(n)] && values[slotKey(n)] !== CLEAR_SECRET);
+  const [slotsRequested, setSlotsRequested] = useState(1);
+  const highestFilled = Array.from({ length: brevoMax }, (_, i) => i + 1).filter(slotFilled).pop() ?? 1;
+  const shownSlots = Math.min(brevoMax, Math.max(1, highestFilled, slotsRequested));
+  const filledSlotCount = Array.from({ length: brevoMax }, (_, i) => i + 1).filter(slotFilled).length;
+  const emailProvider = values.EMAIL_PROVIDER || '';
+
+  const inputRow = 'grid gap-4 sm:grid-cols-2';
+
+  return <div className="mx-auto max-w-6xl">
+    <SectionHeader eyebrow="Workspace" title="Platform settings" action={<span className="hidden text-[11px] text-muted-foreground sm:inline">Saved changes apply to every student instantly</span>} />
+
+    <div className="grid gap-6 lg:grid-cols-[236px_minmax(0,1fr)]">
+      {/* Section rail — vertical on desktop, scrolling pills on mobile */}
+      <nav aria-label="Settings sections" className="lg:sticky lg:top-[92px] lg:self-start">
+        <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 lg:mx-0 lg:flex-col lg:overflow-visible lg:px-0 lg:pb-0">
+          {TABS.map((t) => <button key={t.id} type="button" onClick={() => setTab(t.id)} aria-current={tab === t.id ? 'page' : undefined}
+            className={cn('group relative flex shrink-0 items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-all lg:w-full', tab === t.id ? 'border-primary/40 bg-card shadow-sm' : 'border-transparent hover:bg-card/70')} data-testid={`tab-settings-${t.id}`}>
+            <span className={cn('grid size-9 shrink-0 place-items-center rounded-lg transition-colors', tab === t.id ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground group-hover:text-foreground')}><t.icon size={16} /></span>
+            <span className="min-w-0"><span className="block text-xs font-extrabold">{t.label}</span><span className="mt-0.5 hidden truncate text-[10px] text-muted-foreground lg:block">{t.blurb}</span></span>
+            {t.badge && <span className="absolute right-2.5 top-2.5 size-2 rounded-full bg-[#e5a952]" title="Needs attention" />}
+          </button>)}
         </div>
-      </>}
+      </nav>
 
-      {/* Split out from General — this is every site-wide on/off switch in
-          one place, instead of scattered one-per-card wherever a feature
-          happened to land when it was built (Registration and AI Visualizer
-          were both dropped into General before this). New feature toggles
-          belong here going forward. */}
-      {tab === 'features' && <>
-        <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">Registration</h3><div className="mt-5 grid gap-4 sm:grid-cols-2">
-          <label className="flex items-center justify-between text-xs font-bold">Open student registration<input type="checkbox" checked={values.REGISTRATION_ENABLED !== 'false'} onChange={(e) => set('REGISTRATION_ENABLED', e.target.checked ? 'true' : 'false')} className="size-4 accent-[#287058]" data-testid="checkbox-registration-enabled" /></label>
-        </div><p className="mt-3 text-[11px] text-muted-foreground">Payment methods, bank accounts, and collection details have moved to <Link href="/admin/payments" className="font-bold text-primary">Payments &amp; collection</Link>.</p></div>
-        <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">AI Visualizer</h3><div className="mt-5 grid gap-4 sm:grid-cols-2">
-          <label className="flex items-center justify-between text-xs font-bold">Show in student sidebar<input type="checkbox" checked={values.AI_VISUALIZER_ENABLED !== 'false'} onChange={(e) => set('AI_VISUALIZER_ENABLED', e.target.checked ? 'true' : 'false')} className="size-4 accent-[#287058]" data-testid="checkbox-ai-visualizer-enabled" /></label>
-        </div><p className="mt-3 text-[11px] text-muted-foreground">Off removes the "AI Visualizer" link from every student's sidebar and blocks the page directly; on brings it right back — no need to save anything else.</p></div>
-        <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">Ask AI to explain</h3><div className="mt-5 grid gap-4 sm:grid-cols-2">
-          <label className="flex items-center justify-between text-xs font-bold">Show "Ask AI to explain differently" button<input type="checkbox" checked={values.AI_EXPLAIN_ENABLED !== 'false'} onChange={(e) => set('AI_EXPLAIN_ENABLED', e.target.checked ? 'true' : 'false')} className="size-4 accent-[#287058]" data-testid="checkbox-ai-explain-enabled" /></label>
-        </div><p className="mt-3 text-[11px] text-muted-foreground">Off removes the button everywhere students see it — MCQs, flashcards, and past papers (past papers are practiced through the same MCQ screen) — and blocks it directly if someone still has it open in a tab; on brings it right back. Doesn't touch admin-side AI generation (bulk explanations, AI-generated MCQs/flashcards) or auto-explain-on-import, configured below.</p></div>
-        <div className={cn('rounded-2xl border p-6', values.GLOBAL_TRIAL_MODE === 'true' ? 'border-[#e5a952] bg-[#fff9ee]' : 'border-border bg-card')}><h3 className="font-bold">General trial mode</h3><div className="mt-5 grid gap-4 sm:grid-cols-2">
-          <label className="flex items-center justify-between text-xs font-bold">Give students full access<input type="checkbox" checked={values.GLOBAL_TRIAL_MODE === 'true'} onChange={(e) => set('GLOBAL_TRIAL_MODE', e.target.checked ? 'true' : 'false')} className="size-4 accent-[#e5a952]" data-testid="checkbox-global-trial-mode" /></label>
-        </div>
-        {values.GLOBAL_TRIAL_MODE === 'true' && <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <label className="block text-xs font-bold">Limit to Program<select value={values.GLOBAL_TRIAL_PROGRAM || ''} onChange={(e) => set('GLOBAL_TRIAL_PROGRAM', e.target.value)} className="mt-1.5 h-10 w-full rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-global-trial-program"><option value="">All Programs</option><option value="MBBS">MBBS</option><option value="BDS">BDS</option></select></label>
-          <label className="block text-xs font-bold">Limit to Year Group<select value={values.GLOBAL_TRIAL_YEAR || ''} onChange={(e) => set('GLOBAL_TRIAL_YEAR', e.target.value)} className="mt-1.5 h-10 w-full rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-global-trial-year"><option value="">All Years</option>{[1, 2, 3, 4, 5].map((y) => <option key={y} value={y}>{y}{y === 1 ? 'st' : y === 2 ? 'nd' : y === 3 ? 'rd' : 'th'} Year</option>)}</select></label>
-        </div>}
-        <p className="mt-3 text-[11px] text-muted-foreground">Unlocks every membership-gated page — MCQs, flashcards, exams, books, everything — regardless of payment/membership status, for <strong>{values.GLOBAL_TRIAL_MODE === 'true' && (values.GLOBAL_TRIAL_PROGRAM || values.GLOBAL_TRIAL_YEAR) ? [values.GLOBAL_TRIAL_PROGRAM, values.GLOBAL_TRIAL_YEAR && `${values.GLOBAL_TRIAL_YEAR}${values.GLOBAL_TRIAL_YEAR === '1' ? 'st' : values.GLOBAL_TRIAL_YEAR === '2' ? 'nd' : values.GLOBAL_TRIAL_YEAR === '3' ? 'rd' : 'th'} Year`].filter(Boolean).join(' · ') + ' students' : 'every signed-in student'}</strong>. Leave both dropdowns on "All" to open it to everyone. Doesn't touch anyone's individual membership record, so turning this back off (or narrowing the scope) instantly restores normal per-student access with nothing to undo. This is separate from granting a trial to one student at a time on <Link href="/admin/students" className="font-bold text-primary">Students</Link>. {values.GLOBAL_TRIAL_MODE === 'true' && <span className="font-bold text-[#8a5a12]">Currently ON{(values.GLOBAL_TRIAL_PROGRAM || values.GLOBAL_TRIAL_YEAR) ? ' for the group above' : ' — the whole platform is free to use right now'}.</span>}</p></div>
-      </>}
-
-      {tab === 'branding' && <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">Website favicon</h3><p className="mt-1 text-xs text-muted-foreground">The small icon shown in browser tabs and bookmarks.</p><div className="mt-5">
-        <FaviconUploader currentUrl={values.SITE_FAVICON_URL || ''} onUploaded={(storagePath) => set('SITE_FAVICON_PATH', storagePath)} />
-      </div></div>}
-
-      {tab === 'ai' && <div className="rounded-2xl border border-border bg-card p-6"><h3 className="font-bold">AI ("Ask AI to explain")</h3><p className="mt-1 text-xs text-muted-foreground">Powers the "Ask AI to explain differently" button students see on MCQs and flashcards, plus admin-side AI-generated questions, explanations, and flashcard drafts. Falls back to the server's ANTHROPIC_API_KEY/OPENAI_API_KEY/GEMINI_API_KEY env vars if left blank here.</p><div className="mt-5 grid gap-4 sm:grid-cols-2">
-        <label className="text-xs font-bold">Provider<select value={values.AI_PROVIDER || 'anthropic'} onChange={(e) => set('AI_PROVIDER', e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="select-ai-provider"><option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI</option><option value="gemini">Google Gemini</option><option value="custom">Custom (OpenAI-compatible)</option></select></label>
-        <label className="text-xs font-bold">API key{values.AI_API_KEY_SET === 'true' && <span className="ml-2 font-normal text-muted-foreground">Currently set · {values.AI_API_KEY_MASKED}</span>}<input type="password" value={values.AI_API_KEY || ''} onChange={(e) => set('AI_API_KEY', e.target.value)} placeholder={values.AI_API_KEY_SET === 'true' ? 'Leave blank to keep current key' : 'sk-...'} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-ai-api-key" /></label>
-        <label className="text-xs font-bold">Model <span className="font-normal text-muted-foreground">(optional — leave blank for the provider's default)</span><input value={values.AI_MODEL || ''} onChange={(e) => set('AI_MODEL', e.target.value)} placeholder="e.g. claude-sonnet-4-6, gpt-4o-mini, gemini-flash-latest" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-ai-model" /></label>
-        {values.AI_PROVIDER === 'custom' && <label className="text-xs font-bold">Base URL <span className="font-normal text-muted-foreground">(required for Custom — an OpenAI-compatible /chat/completions endpoint)</span><input value={values.AI_BASE_URL || ''} onChange={(e) => set('AI_BASE_URL', e.target.value)} placeholder="https://api.example.com/v1" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-ai-base-url" /></label>}
-      </div>
-      <div className="mt-6 border-t border-border pt-5">
-        <h4 className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Backup AI providers <span className="font-normal normal-case text-muted-foreground/80">(optional, up to 5)</span></h4>
-        <p className="mt-1 text-xs text-muted-foreground">Tried automatically, in order, whenever an earlier provider's request fails — an outage, a rate limit, an expired key, a timeout — so one API running out or going down doesn't take "Ask AI to explain" down with it; the request just moves on to the next one you've configured. Mix and match providers/accounts (e.g. Anthropic, then OpenAI, then a couple of Groq/OpenRouter keys via Custom) for up to 6 total including the primary above. Leave a slot blank to skip it — earlier slots (and any ANTHROPIC_API_KEY/OPENAI_API_KEY/GEMINI_API_KEY env vars, which are still tried last) keep working exactly as before.</p>
-        {(['2', '3', '4', '5', '6'] as const).map((n) => {
-          const providerKey = `AI_PROVIDER_${n}`, apiKeyKey = `AI_API_KEY_${n}`, modelKey = `AI_MODEL_${n}`, baseUrlKey = `AI_BASE_URL_${n}`;
-          return <div key={n} className="mt-4 grid gap-4 border-t border-border/60 pt-4 first:mt-0 first:border-t-0 first:pt-0 sm:grid-cols-2">
-            <label className="text-xs font-bold">Backup {Number(n) - 1} provider<select value={values[providerKey] || ''} onChange={(e) => set(providerKey, e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid={`select-ai-provider-${n}`}><option value="">None — slot not configured</option><option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI</option><option value="gemini">Google Gemini</option><option value="custom">Custom (OpenAI-compatible)</option></select></label>
-            {values[providerKey] && <>
-              <label className="text-xs font-bold">API key{values[`${apiKeyKey}_SET`] === 'true' && <span className="ml-2 font-normal text-muted-foreground">Currently set · {values[`${apiKeyKey}_MASKED`]}</span>}<input type="password" value={values[apiKeyKey] || ''} onChange={(e) => set(apiKeyKey, e.target.value)} placeholder={values[`${apiKeyKey}_SET`] === 'true' ? 'Leave blank to keep current key' : 'sk-...'} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid={`input-ai-api-key-${n}`} /></label>
-              <label className="text-xs font-bold">Model <span className="font-normal text-muted-foreground">(optional — leave blank for the provider's default)</span><input value={values[modelKey] || ''} onChange={(e) => set(modelKey, e.target.value)} placeholder="e.g. claude-sonnet-4-6, gpt-4o-mini, gemini-flash-latest" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid={`input-ai-model-${n}`} /></label>
-              {values[providerKey] === 'custom' && <label className="text-xs font-bold">Base URL <span className="font-normal text-muted-foreground">(required for Custom — an OpenAI-compatible /chat/completions endpoint)</span><input value={values[baseUrlKey] || ''} onChange={(e) => set(baseUrlKey, e.target.value)} placeholder="https://api.example.com/v1" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid={`input-ai-base-url-${n}`} /></label>}
-            </>}
-          </div>;
-        })}
-      </div>
-      <div className="mt-6 border-t border-border pt-5">
-        <label className="flex items-start gap-2.5 text-xs font-bold"><input type="checkbox" checked={values.AI_AUTO_EXPLAIN_ON_IMPORT === 'true'} onChange={(e) => set('AI_AUTO_EXPLAIN_ON_IMPORT', e.target.checked ? 'true' : 'false')} className="mt-0.5 size-4 accent-[#287058]" data-testid="checkbox-ai-auto-explain-import" /><span>Auto-generate explanations &amp; hints on MCQ import<span className="mt-1 block font-normal text-muted-foreground">Uses the same provider/API key above (and the backup, if configured). Every imported question that doesn't already have an explanation gets one queued automatically (across every module/subject and exam/past-paper import), landing as "AI generated — awaiting review," never auto-approved. Runs in the background — a large import won't wait on it.</span></span></label>
-        {values.AI_AUTO_EXPLAIN_ON_IMPORT === 'true' && <label className="mt-4 block text-xs font-bold">Bulk-generation model <span className="font-normal text-muted-foreground">(optional override — e.g. a cheaper/faster model for high-volume auto-explain; leave blank to use the Model field above)</span><input value={values.AI_AUTO_EXPLAIN_MODEL || ''} onChange={(e) => set('AI_AUTO_EXPLAIN_MODEL', e.target.value)} placeholder="e.g. claude-haiku-4-5, gpt-4o-mini" className="mt-2 h-10 w-full max-w-sm rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-ai-auto-explain-model" /></label>}
-      </div>
-      </div>}
-
-      {tab === 'email' && <>
-        {emailIssue && <div className="rounded-2xl border border-[#efc7bc] bg-[#fff5f0] p-5 text-xs text-[#9e4c39]" data-testid="banner-email-warning"><div className="flex items-center gap-2 font-bold"><CircleHelp size={15} /> No email provider is configured</div><p className="mt-1.5 leading-5 text-[#a96a5b]">Verification, welcome, password reset, membership/trial, and payment emails are all logged to the server console instead of actually sent until one of the providers below is set up.</p></div>}
-        <div className="rounded-2xl border border-border bg-card p-6"><h3 className="flex items-center gap-2 font-bold">Email provider {values.EMAIL_CONFIGURED === 'true' && <Badge tone="green">Configured</Badge>}</h3>
-          <p className="mt-1 text-xs text-muted-foreground">Used for every automated email the platform sends: account verification, welcome, forgot/reset password, membership activated, trial started, and payment submitted/rejected. Pick one provider — the fields for the other two can stay filled in without being used.</p>
-          <label className="mt-4 block text-xs font-bold">Provider<select value={values.EMAIL_PROVIDER || ''} onChange={(e) => set('EMAIL_PROVIDER', e.target.value)} className="mt-2 h-10 w-full max-w-xs rounded-xl border border-border bg-background px-3 text-xs" data-testid="select-email-provider"><option value="">None — use server env vars only</option><option value="brevo">Brevo</option><option value="smtp">SMTP</option><option value="custom">Custom API</option></select></label>
-
-          <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <label className="text-xs font-bold">"From" email<input value={values.MAIL_FROM || ''} onChange={(e) => set('MAIL_FROM', e.target.value)} placeholder="no-reply@yourdomain.com" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-mail-from" /></label>
-            <label className="text-xs font-bold">"From" name<input value={values.MAIL_FROM_NAME || ''} onChange={(e) => set('MAIL_FROM_NAME', e.target.value)} placeholder="MedschoolProffs" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-mail-from-name" /></label>
-          </div>
-
-          {values.EMAIL_PROVIDER === 'brevo' && <div className="mt-5 border-t border-border pt-5">
-            <h4 className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Brevo</h4>
-            <label className="mt-3 block text-xs font-bold">API key{values.BREVO_API_KEY_SET === 'true' && <span className="ml-2 font-normal text-muted-foreground">Currently set · {values.BREVO_API_KEY_MASKED}</span>}<input type="password" value={values.BREVO_API_KEY || ''} onChange={(e) => set('BREVO_API_KEY', e.target.value)} placeholder={values.BREVO_API_KEY_SET === 'true' ? 'Leave blank to keep current key' : 'xkeysib-...'} className="mt-2 h-10 w-full max-w-sm rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-brevo-api-key" /></label>
-            <p className="mt-2 text-[11px] text-muted-foreground">From Brevo: Settings → SMTP &amp; API → API keys.</p>
-          </div>}
-
-          {values.EMAIL_PROVIDER === 'smtp' && <div className="mt-5 border-t border-border pt-5">
-            <h4 className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">SMTP</h4>
-            <div className="mt-3 grid gap-4 sm:grid-cols-2">
-              <label className="text-xs font-bold">Host<input value={values.SMTP_HOST || ''} onChange={(e) => set('SMTP_HOST', e.target.value)} placeholder="smtp.yourprovider.com" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-smtp-host" /></label>
-              <label className="text-xs font-bold">Port<input value={values.SMTP_PORT || ''} onChange={(e) => set('SMTP_PORT', e.target.value.replace(/[^\d]/g, ''))} placeholder="587" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-smtp-port" /></label>
-              <label className="text-xs font-bold">Username<input value={values.SMTP_USER || ''} onChange={(e) => set('SMTP_USER', e.target.value)} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-smtp-user" /></label>
-              <label className="text-xs font-bold">Password{values.SMTP_PASS_SET === 'true' && <span className="ml-2 font-normal text-muted-foreground">Currently set · {values.SMTP_PASS_MASKED}</span>}<input type="password" value={values.SMTP_PASS || ''} onChange={(e) => set('SMTP_PASS', e.target.value)} placeholder={values.SMTP_PASS_SET === 'true' ? 'Leave blank to keep current password' : ''} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-smtp-pass" /></label>
+      <div className="min-w-0 space-y-5">
+        {/* ------------------------------------------------------------ General */}
+        {tab === 'general' && <>
+          <Panel icon={Globe} title="Platform profile" description="The details students see across their study desk, the footer and link previews.">
+            <div className={inputRow}>
+              <Field label="Platform name"><TextInput value={values.PLATFORM_NAME || ''} onChange={(e) => set('PLATFORM_NAME', e.target.value)} data-testid="input-platform-name" /></Field>
+              <Field label="WhatsApp support number" hint='Country code + number, digits only. Students get a "Chat on WhatsApp" button that opens this number.'>
+                <TextInput value={values.SUPPORT_WHATSAPP || ''} onChange={(e) => set('SUPPORT_WHATSAPP', e.target.value.replace(/[^\d+]/g, ''))} placeholder="e.g. 923001234567" data-testid="input-support-whatsapp" />
+              </Field>
+              <Field label="Tagline" className="sm:col-span-2"><TextInput value={values.PLATFORM_TAGLINE || ''} onChange={(e) => set('PLATFORM_TAGLINE', e.target.value)} data-testid="input-platform-tagline" /></Field>
+              <Field label="Platform description" hint="Shown in the site footer. Contact email, location, social links and SEO live on the Site content page." className="sm:col-span-2">
+                <TextArea value={values.PLATFORM_DESCRIPTION || ''} onChange={(e) => set('PLATFORM_DESCRIPTION', e.target.value)} data-testid="input-platform-description" />
+              </Field>
             </div>
-          </div>}
+          </Panel>
 
-          {values.EMAIL_PROVIDER === 'custom' && <div className="mt-5 border-t border-border pt-5">
-            <h4 className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Custom API</h4>
-            <p className="mt-1 text-[11px] text-muted-foreground">For any provider that isn't Brevo — Postmark, Resend, an internal mailer, etc. Point this at an endpoint that accepts a JSON body: <code className="rounded bg-background px-1 py-0.5">{'{ to, subject, html, from, fromName }'}</code>.</p>
-            <div className="mt-3 grid gap-4 sm:grid-cols-2">
-              <label className="text-xs font-bold sm:col-span-2">Endpoint URL<input value={values.CUSTOM_EMAIL_API_URL || ''} onChange={(e) => set('CUSTOM_EMAIL_API_URL', e.target.value)} placeholder="https://api.example.com/send-email" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-custom-email-url" /></label>
-              <label className="text-xs font-bold">API key{values.CUSTOM_EMAIL_API_KEY_SET === 'true' && <span className="ml-2 font-normal text-muted-foreground">Currently set · {values.CUSTOM_EMAIL_API_KEY_MASKED}</span>}<input type="password" value={values.CUSTOM_EMAIL_API_KEY || ''} onChange={(e) => set('CUSTOM_EMAIL_API_KEY', e.target.value)} placeholder={values.CUSTOM_EMAIL_API_KEY_SET === 'true' ? 'Leave blank to keep current key' : ''} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-custom-email-key" /></label>
-              <label className="text-xs font-bold">Header name <span className="font-normal text-muted-foreground">(default: Authorization)</span><input value={values.CUSTOM_EMAIL_API_KEY_HEADER || ''} onChange={(e) => set('CUSTOM_EMAIL_API_KEY_HEADER', e.target.value)} placeholder="Authorization" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-custom-email-header" /></label>
-              <label className="text-xs font-bold sm:col-span-2">Header prefix <span className="font-normal text-muted-foreground">(default: "Bearer " — clear this for providers that want the raw key, e.g. an "api-key" header)</span><input value={values.CUSTOM_EMAIL_API_KEY_PREFIX ?? ''} onChange={(e) => set('CUSTOM_EMAIL_API_KEY_PREFIX', e.target.value)} placeholder="Bearer " className="mt-2 h-10 w-full max-w-xs rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-custom-email-prefix" /></label>
+          <Panel icon={Megaphone} title="Announcement banner" badge={announcements.length ? <StatusPill tone="green">{announcements.length} live</StatusPill> : <StatusPill>Hidden</StatusPill>}
+            description="Scrolls across the top of the student app. Add more than one and they scroll through together. Remove them all to hide the banner.">
+            {announcements.length > 0 && <div className="mb-3 space-y-2">
+              {announcements.map((a, i) => <div key={i} className="flex items-center gap-2">
+                <TextInput value={a} onChange={(e) => setAnnouncements(announcements.map((x, idx) => (idx === i ? e.target.value : x)))} data-testid={`input-announcement-${i}`} />
+                <Button variant="ghost" size="sm" onClick={() => setAnnouncements(announcements.filter((_, idx) => idx !== i))} aria-label="Remove announcement" data-testid={`button-remove-announcement-${i}`}><Trash2 size={14} /></Button>
+              </div>)}
+            </div>}
+            <div className="flex gap-2">
+              <TextInput value={newAnnouncement} onChange={(e) => setNewAnnouncement(e.target.value)} placeholder="e.g. New batch enrollment opens Monday" data-testid="input-new-announcement"
+                onKeyDown={(e) => { if (e.key === 'Enter' && newAnnouncement.trim()) { e.preventDefault(); setAnnouncements([...announcements, newAnnouncement.trim()]); setNewAnnouncement(''); } }} />
+              <Button variant="primary" icon={Plus} disabled={!newAnnouncement.trim()} onClick={() => { setAnnouncements([...announcements, newAnnouncement.trim()]); setNewAnnouncement(''); }} data-testid="button-add-announcement">Add</Button>
             </div>
-          </div>}
-        </div>
+          </Panel>
+        </>}
 
-        <div className="rounded-2xl border border-border bg-card p-6">
-          <h3 className="font-bold">Send a test email</h3>
-          <p className="mt-1 text-xs text-muted-foreground">Save your settings first, then send a real test email to confirm the provider above actually works — not just that the fields aren't blank.</p>
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <input type="email" value={testEmailTo} onChange={(e) => setTestEmailTo(e.target.value)} placeholder="you@example.com" className="h-10 w-64 rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-test-email-to" />
-            <button type="button" onClick={() => testEmail.mutate(testEmailTo)} disabled={testEmail.isPending || !testEmailTo} className="rounded-xl border border-border bg-background px-4 py-2 text-xs font-bold disabled:opacity-50" data-testid="button-test-email">{testEmail.isPending ? 'Sending…' : 'Send test email'}</button>
-            {testEmail.data && (testEmail.data.ok ? <Badge tone="green">Sent</Badge> : <Badge tone="red">Failed</Badge>)}
+        {/* ----------------------------------------------------------- Branding */}
+        {tab === 'branding' && <>
+          <Panel icon={Palette} title="Design & branding" description="Applies across the student and admin apps, including the sign-in pages.">
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_240px]">
+              <div>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <ColorField label="Primary" value={theme.primary} onChange={(v) => set('THEME_PRIMARY', v)} testId="theme-primary" />
+                  <ColorField label="Secondary" value={theme.secondary} onChange={(v) => set('THEME_SECONDARY', v)} testId="theme-secondary" />
+                  <ColorField label="Accent" value={theme.accent} onChange={(v) => set('THEME_ACCENT', v)} testId="theme-accent" />
+                  <ColorField label="Background" value={theme.background} onChange={(v) => set('THEME_BACKGROUND', v)} testId="theme-background" />
+                  <ColorField label="Card" value={theme.card} onChange={(v) => set('THEME_CARD', v)} testId="theme-card" />
+                  <ColorField label="Text" value={theme.text} onChange={(v) => set('THEME_TEXT', v)} testId="theme-text" />
+                </div>
+                <div className="mt-5">
+                  <div className="text-xs font-bold">Theme mode</div>
+                  <div className="mt-2 inline-flex rounded-xl border border-border bg-background p-1">
+                    {(['light', 'dark'] as const).map((mode) => <button key={mode} type="button" onClick={() => set('THEME_MODE', mode)} className={cn('rounded-lg px-4 py-2 text-xs font-bold capitalize transition-colors', theme.mode === mode ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')} data-testid={`button-theme-mode-${mode}`}>{mode}</button>)}
+                  </div>
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Live preview</div>
+                <div className="mt-2 overflow-hidden rounded-xl border border-border" style={{ backgroundColor: theme.background }} data-testid="panel-theme-preview">
+                  <div className="m-3 overflow-hidden rounded-lg shadow-sm" style={{ backgroundColor: theme.card }}>
+                    <div className="flex items-center gap-2 px-3 py-2.5" style={{ backgroundColor: theme.primary }}>
+                      <span className="grid size-5 place-items-center rounded-md" style={{ backgroundColor: theme.accent }}><Stethoscope size={11} color="#fff" /></span>
+                      <span className="text-[10px] font-extrabold" style={{ color: readableForegroundHsl(theme.primary) === '0 0% 100%' ? '#fff' : theme.text }}>Dashboard</span>
+                    </div>
+                    <div className="space-y-2 p-3">
+                      <div className="h-2 w-3/4 rounded-full" style={{ backgroundColor: theme.secondary, opacity: 0.4 }} />
+                      <div className="h-2 w-1/2 rounded-full" style={{ backgroundColor: theme.secondary, opacity: 0.25 }} />
+                      <span className="mt-2 inline-block rounded-md px-3 py-1.5 text-[10px] font-extrabold text-white" style={{ backgroundColor: theme.primary }}>Continue</span>
+                      <span className="ml-2 inline-block rounded-md px-3 py-1.5 text-[10px] font-extrabold" style={{ backgroundColor: theme.accent, color: '#fff' }}>68%</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Panel>
+          <Panel icon={GraduationCap} title="Dashboard greeting photo" description="Optional — shown behind the student Dashboard's greeting card (e.g. a stethoscope photo). PNG, JPEG or WEBP. Falls back to a plain pattern when unset.">
+            <AdminImageUpload currentUrl={values.DASHBOARD_HERO_IMAGE_URL || ''} kind="resource" accept="image/png,image/jpeg,image/webp" hint="" testId="input-dashboard-hero-upload" onUploaded={(storagePath) => set('DASHBOARD_HERO_IMAGE_PATH', storagePath)} />
+          </Panel>
+          <Panel icon={Globe} title="Website favicon" description="The small icon shown in browser tabs and bookmarks.">
+            <FaviconUploader currentUrl={values.SITE_FAVICON_URL || ''} onUploaded={(storagePath) => set('SITE_FAVICON_PATH', storagePath)} />
+          </Panel>
+        </>}
+
+        {/* ------------------------------------------------------ Access & trial */}
+        {tab === 'access' && <>
+          <Panel icon={Users} title="Registration" description="Whether new students can create an account. Payment methods and collection details live under Payments & collection.">
+            <ToggleRow title="Open student registration" description="Off hides the sign-up form; existing students can still sign in." checked={values.REGISTRATION_ENABLED !== 'false'} onChange={(on) => set('REGISTRATION_ENABLED', on ? 'true' : 'false')} testId="checkbox-registration-enabled" />
+          </Panel>
+
+          <Panel icon={ToggleRight} title="Student features" description="Site-wide switches. Turning one off hides it for every student and blocks direct access too.">
+            <div className="space-y-3">
+              <ToggleRow title="AI Visualizer" description='Off removes the "AI Visualizer" link from every sidebar and blocks the page directly.' checked={values.AI_VISUALIZER_ENABLED !== 'false'} onChange={(on) => set('AI_VISUALIZER_ENABLED', on ? 'true' : 'false')} testId="checkbox-ai-visualizer-enabled" />
+              <ToggleRow title={'"Ask AI to explain differently"'} description="The button on MCQs, flashcards and past papers. Doesn't touch admin-side AI generation or auto-explain-on-import (AI tab)." checked={values.AI_EXPLAIN_ENABLED !== 'false'} onChange={(on) => set('AI_EXPLAIN_ENABLED', on ? 'true' : 'false')} testId="checkbox-ai-explain-enabled" />
+            </div>
+          </Panel>
+
+          <Panel icon={Gift} tone={trialOn && !trialExpired ? 'amber' : 'default'} title="General trial mode"
+            badge={trialOn ? (trialExpired ? <StatusPill tone="red">Ended</StatusPill> : <StatusPill tone="amber">Live</StatusPill>) : <StatusPill>Off</StatusPill>}
+            description="Let students without a paid membership use chosen features for free — for a launch week, an exam-season promo or a single year group. It never touches anyone's membership record, so switching it off restores normal access instantly.">
+            <ToggleRow tone="amber" title="Enable trial mode" description="Students inside the group below get the features you pick, signed in and free." checked={trialOn} onChange={(on) => set('GLOBAL_TRIAL_MODE', on ? 'true' : 'false')} testId="checkbox-global-trial-mode" />
+
+            {trialOn && <div className="mt-6 space-y-7">
+              <SubSection title="Who gets it" description="Leave everything on “All” to open it to every signed-in student. Students with no program or year on their profile only match an unrestricted trial.">
+                <div className="grid gap-4 sm:grid-cols-[200px_minmax(0,1fr)]">
+                  <Field label="Program">
+                    <SelectInput value={values.GLOBAL_TRIAL_PROGRAM || ''} onChange={(e) => set('GLOBAL_TRIAL_PROGRAM', e.target.value)} data-testid="select-global-trial-program">
+                      <option value="">All programs</option><option value="MBBS">MBBS</option><option value="BDS">BDS</option>
+                    </SelectInput>
+                  </Field>
+                  <div>
+                    <div className="text-xs font-bold">Academic years <span className="font-normal text-muted-foreground">— pick as many as you like</span></div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Chip active={trialYears.length === 0} onClick={() => setTrialYears([])} testId="chip-trial-year-all">All years</Chip>
+                      {[1, 2, 3, 4, 5].map((y) => <Chip key={y} active={trialYears.includes(y)} onClick={() => toggleTrialYear(y)} testId={`chip-trial-year-${y}`}>{ordinal(y)}</Chip>)}
+                    </div>
+                  </div>
+                </div>
+              </SubSection>
+
+              <SubSection title="What they can use" description="Only the features you switch on unlock. Everything else stays behind the normal membership.">
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] font-bold text-muted-foreground">Presets:</span>
+                  <Chip active={false} onClick={() => setTrialFeatures(defaultFeatureKeys)} testId="preset-trial-everything">Everything (no paid books)</Chip>
+                  <Chip active={false} onClick={() => setTrialFeatures(PRACTICE_ESSENTIALS.filter((k) => featureOptions.some((o) => o.key === k)))} testId="preset-trial-practice">MCQs, past papers &amp; Pre-Proffs</Chip>
+                  <Chip active={false} onClick={() => setTrialFeatures([])} testId="preset-trial-none">Clear</Chip>
+                </div>
+                <div className="grid gap-2.5 sm:grid-cols-2" data-testid="grid-trial-features">
+                  {featureOptions.map((o) => {
+                    const Icon = FEATURE_ICON[o.key] ?? Sparkles;
+                    const on = trialFeatures.includes(o.key);
+                    return <button key={o.key} type="button" onClick={() => toggleTrialFeature(o.key)} aria-pressed={on} data-testid={`toggle-trial-feature-${o.key}`}
+                      className={cn('flex items-start gap-3 rounded-xl border p-3.5 text-left transition-all', on ? 'border-[#d9982f] bg-white shadow-sm ring-2 ring-[#e5a952]/25' : 'border-border bg-background/60 hover:border-[#e5a952]/60')}>
+                      <span className={cn('grid size-9 shrink-0 place-items-center rounded-lg', on ? 'bg-[#e5a952] text-[#183844]' : 'bg-muted text-muted-foreground')}><Icon size={16} /></span>
+                      <span className="min-w-0 flex-1"><span className="flex items-center gap-2 text-xs font-extrabold">{o.label}{!o.defaultOn && <StatusPill tone="red">Paid content</StatusPill>}</span><span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">{o.description}</span></span>
+                      <span className={cn('mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border text-[10px] font-black', on ? 'border-[#d9982f] bg-[#d9982f] text-white' : 'border-border text-transparent')}>✓</span>
+                    </button>;
+                  })}
+                </div>
+                {trialFeatures.length === 0 && <div className="mt-3"><Callout tone="warn" title="Nothing selected">With no features switched on, trial mode unlocks nothing for anyone.</Callout></div>}
+                {trialFeatures.includes('books') && <div className="mt-3"><Callout tone="warn" title="Paid books are included">Every paid book becomes readable for trial students. Book files are still direct links today, so anyone who opens one can keep or share it — leave this off unless you're comfortable with that.</Callout></div>}
+              </SubSection>
+
+              <SubSection title="Until when" description="Optional. The trial switches itself off after the end of this day (UTC) — no need to remember to come back.">
+                <div className="flex flex-wrap items-end gap-3">
+                  <Field label="End date"><TextInput type="date" value={trialEndsAt} onChange={(e) => set('GLOBAL_TRIAL_ENDS_AT', e.target.value)} className="w-48" data-testid="input-global-trial-ends-at" /></Field>
+                  {trialEndsAt && <Button variant="ghost" size="sm" icon={X} onClick={() => set('GLOBAL_TRIAL_ENDS_AT', '')}>No end date</Button>}
+                </div>
+              </SubSection>
+
+              <div data-testid="text-trial-summary">
+                {trialExpired
+                  ? <Callout tone="danger" title="This trial has ended">Its end date has passed, so nothing is unlocked. Change the date or clear it to run it again.</Callout>
+                  : <Callout tone="warn" title="Live once you save">
+                    <strong>{trialWho ? `${trialWho} students` : 'Every signed-in student'}</strong> {trialWhat.length ? <>can use <strong>{trialWhat.join(', ')}</strong></> : 'get nothing yet'}{trialEndsAt ? <>, until <strong>{new Date(`${trialEndsAt}T12:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}</strong></> : ', with no end date'}. This is separate from granting a trial to a single student on <Link href="/admin/students" className="font-extrabold underline">Students</Link>.
+                  </Callout>}
+              </div>
+            </div>}
+          </Panel>
+        </>}
+
+        {/* ----------------------------------------------------------------- AI */}
+        {tab === 'ai' && <>
+          <Panel icon={Sparkles} title="AI provider" description={'Powers the "Ask AI to explain differently" button, plus admin-side AI-generated questions, explanations and flashcard drafts. Falls back to the server\'s ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY env vars if left blank.'}>
+            <div className={inputRow}>
+              <Field label="Provider"><SelectInput value={values.AI_PROVIDER || 'anthropic'} onChange={(e) => set('AI_PROVIDER', e.target.value)} data-testid="select-ai-provider">{AI_PROVIDERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</SelectInput></Field>
+              <Field label="API key"><SecretInput value={values.AI_API_KEY || ''} onChange={(v) => set('AI_API_KEY', v)} isSet={values.AI_API_KEY_SET === 'true'} masked={values.AI_API_KEY_MASKED} placeholder="sk-..." testId="input-ai-api-key" /></Field>
+              <Field label={<>Model <span className="font-normal text-muted-foreground">(optional)</span></>} hint="Blank uses the provider's default."><TextInput value={values.AI_MODEL || ''} onChange={(e) => set('AI_MODEL', e.target.value)} placeholder="e.g. claude-sonnet-4-6, gpt-4o-mini" data-testid="input-ai-model" /></Field>
+              {values.AI_PROVIDER === 'custom' && <Field label="Base URL" hint="An OpenAI-compatible /chat/completions endpoint."><TextInput value={values.AI_BASE_URL || ''} onChange={(e) => set('AI_BASE_URL', e.target.value)} placeholder="https://api.example.com/v1" data-testid="input-ai-base-url" /></Field>}
+            </div>
+          </Panel>
+
+          <Panel icon={Repeat} title="Backup AI providers" badge={<StatusPill>Optional · up to 5</StatusPill>}
+            description="Tried automatically, in order, whenever an earlier provider fails — an outage, a rate limit, an expired key, a timeout — so one API running out doesn't take Ask AI down. Mix providers and accounts freely (e.g. Anthropic, then OpenAI, then a couple of Groq/OpenRouter keys via Custom). Leave a slot blank to skip it.">
+            <div className="space-y-4">
+              {(['2', '3', '4', '5', '6'] as const).map((n) => {
+                const providerKey = `AI_PROVIDER_${n}`, apiKeyKey = `AI_API_KEY_${n}`, modelKey = `AI_MODEL_${n}`, baseUrlKey = `AI_BASE_URL_${n}`;
+                const active = !!values[providerKey];
+                return <div key={n} className={cn('rounded-xl border p-4 transition-colors', active ? 'border-primary/30 bg-background/60' : 'border-dashed border-border')}>
+                  <div className="flex items-center gap-3">
+                    <span className={cn('grid size-8 place-items-center rounded-lg text-[11px] font-black', active ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground')}>{Number(n) - 1}</span>
+                    <div className="min-w-0 flex-1"><SelectInput value={values[providerKey] || ''} onChange={(e) => set(providerKey, e.target.value)} data-testid={`select-ai-provider-${n}`}><option value="">Backup {Number(n) - 1} — not configured</option>{AI_PROVIDERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</SelectInput></div>
+                  </div>
+                  {active && <div className={cn(inputRow, 'mt-4')}>
+                    <Field label="API key"><SecretInput value={values[apiKeyKey] || ''} onChange={(v) => set(apiKeyKey, v)} isSet={values[`${apiKeyKey}_SET`] === 'true'} masked={values[`${apiKeyKey}_MASKED`]} placeholder="sk-..." testId={`input-ai-api-key-${n}`} /></Field>
+                    <Field label={<>Model <span className="font-normal text-muted-foreground">(optional)</span></>}><TextInput value={values[modelKey] || ''} onChange={(e) => set(modelKey, e.target.value)} placeholder="Provider default" data-testid={`input-ai-model-${n}`} /></Field>
+                    {values[providerKey] === 'custom' && <Field label="Base URL" className="sm:col-span-2"><TextInput value={values[baseUrlKey] || ''} onChange={(e) => set(baseUrlKey, e.target.value)} placeholder="https://api.example.com/v1" data-testid={`input-ai-base-url-${n}`} /></Field>}
+                  </div>}
+                </div>;
+              })}
+            </div>
+          </Panel>
+
+          <Panel icon={Wand2} title="Auto-explain on import" description="Generate explanations and hints while MCQs are imported, instead of only on demand.">
+            <ToggleRow title="Auto-generate explanations & hints on MCQ import" description='Uses the provider above (and backups). Every imported question without an explanation is queued automatically, landing as "AI generated — awaiting review", never auto-approved. Runs in the background.' checked={values.AI_AUTO_EXPLAIN_ON_IMPORT === 'true'} onChange={(on) => set('AI_AUTO_EXPLAIN_ON_IMPORT', on ? 'true' : 'false')} testId="checkbox-ai-auto-explain-import" />
+            {values.AI_AUTO_EXPLAIN_ON_IMPORT === 'true' && <div className="mt-4 max-w-sm"><Field label={<>Bulk-generation model <span className="font-normal text-muted-foreground">(optional)</span></>} hint="A cheaper/faster model for high-volume imports. Blank uses the Model above."><TextInput value={values.AI_AUTO_EXPLAIN_MODEL || ''} onChange={(e) => set('AI_AUTO_EXPLAIN_MODEL', e.target.value)} placeholder="e.g. claude-haiku-4-5, gpt-4o-mini" data-testid="input-ai-auto-explain-model" /></Field></div>}
+          </Panel>
+        </>}
+
+        {/* -------------------------------------------------------------- Email */}
+        {tab === 'email' && <>
+          {emailIssue && <Callout tone="danger" title="No email provider is configured" testId="banner-email-warning">Verification, welcome, password-reset, membership/trial and payment emails are logged to the server console instead of being sent until a provider below is set up.</Callout>}
+
+          <Panel icon={Mail} title="Email provider" badge={values.EMAIL_CONFIGURED === 'true' ? <StatusPill tone="green">Configured</StatusPill> : undefined}
+            description="Used for every automated email: verification, welcome, password reset, membership activated, trial started, payment submitted/rejected. Pick one — the fields for the others can stay filled in without being used.">
+            <div className="grid gap-3 sm:grid-cols-4">
+              <OptionCard active={emailProvider === ''} onClick={() => set('EMAIL_PROVIDER', '')} icon={Server} title="Env vars only" description="Use the server's environment variables." testId="option-email-none" />
+              <OptionCard active={emailProvider === 'brevo'} onClick={() => set('EMAIL_PROVIDER', 'brevo')} icon={Send} title="Brevo" description="API keys, with backup accounts." testId="option-email-brevo" />
+              <OptionCard active={emailProvider === 'smtp'} onClick={() => set('EMAIL_PROVIDER', 'smtp')} icon={Mail} title="SMTP" description="Any standard mail server." testId="option-email-smtp" />
+              <OptionCard active={emailProvider === 'custom'} onClick={() => set('EMAIL_PROVIDER', 'custom')} icon={Cloud} title="Custom API" description="Postmark, Resend, an internal mailer…" testId="option-email-custom" />
+            </div>
+            <div className={cn(inputRow, 'mt-5')}>
+              <Field label={'"From" email'}><TextInput value={values.MAIL_FROM || ''} onChange={(e) => set('MAIL_FROM', e.target.value)} placeholder="no-reply@yourdomain.com" data-testid="input-mail-from" /></Field>
+              <Field label={'"From" name'}><TextInput value={values.MAIL_FROM_NAME || ''} onChange={(e) => set('MAIL_FROM_NAME', e.target.value)} placeholder="MedschoolProffs" data-testid="input-mail-from-name" /></Field>
+            </div>
+          </Panel>
+
+          {emailProvider === 'brevo' && <Panel icon={Send} title="Brevo accounts" badge={<StatusPill tone={filledSlotCount ? 'green' : 'neutral'}>{filledSlotCount} of {brevoMax} slots in use</StatusPill>}
+            description="Each Brevo account has its own daily sending limit. Add more than one API key and mail keeps flowing when one runs out, is revoked or Brevo has a hiccup. Get a key at Brevo → Settings → SMTP & API → API keys.">
+            <Field label="How to use the slots" className="max-w-md" hint={values.BREVO_SLOT_STRATEGY === 'round_robin' ? 'Each email goes out through the next account in turn (spreading the daily limits); if that one fails, the others are tried for that email.' : 'Slot 1 sends everything; the next slot is used only when a send fails (quota reached, bad key, outage).'}>
+              <SelectInput value={values.BREVO_SLOT_STRATEGY || 'failover'} onChange={(e) => set('BREVO_SLOT_STRATEGY', e.target.value)} data-testid="select-brevo-strategy">
+                <option value="failover">Failover — slot 1 first, others as backup</option>
+                <option value="round_robin">Round robin — spread across all slots</option>
+              </SelectInput>
+            </Field>
+
+            <div className="mt-5 space-y-3">
+              {Array.from({ length: shownSlots }, (_, i) => i + 1).map((n) => {
+                const key = slotKey(n);
+                const marked = values[key] === CLEAR_SECRET;
+                const result = emailTests[String(n)];
+                return <div key={n} className={cn('rounded-xl border p-4', marked ? 'border-[#efc7bc] bg-[#fff5f0]' : slotFilled(n) ? 'border-primary/30 bg-background/60' : 'border-dashed border-border')} data-testid={`brevo-slot-${n}`}>
+                  <div className="mb-3 flex flex-wrap items-center gap-2.5">
+                    <span className={cn('grid size-8 place-items-center rounded-lg text-[11px] font-black', slotFilled(n) && !marked ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground')}>{n}</span>
+                    <div className="text-xs font-extrabold">{n === 1 ? 'Primary account' : `Backup account ${n - 1}`}</div>
+                    {marked ? <StatusPill tone="red">Will be removed on save</StatusPill> : slotSaved(n) ? <StatusPill tone="green">Saved</StatusPill> : <StatusPill>Empty</StatusPill>}
+                    {result && <StatusPill tone={result.ok ? 'green' : 'red'}>{result.ok ? 'Test sent' : 'Test failed'}</StatusPill>}
+                    <div className="ml-auto flex gap-1.5">
+                      {slotSaved(n) && !marked && <Button size="sm" variant="secondary" icon={Send} loading={testingTarget === String(n)} disabled={dirty || !testEmailTo} title={dirty ? 'Save your changes first' : !testEmailTo ? 'Enter an address in "Send a test email" below' : undefined} onClick={() => testEmail.mutate({ to: testEmailTo, slot: n })} data-testid={`button-test-brevo-slot-${n}`}>Test this key</Button>}
+                      {n > 1 && (marked
+                        ? <Button size="sm" variant="ghost" onClick={() => patch({ [key]: '' })}>Undo</Button>
+                        : (slotSaved(n) || values[key]) && <Button size="sm" variant="danger" icon={Trash2} onClick={() => patch({ [key]: slotSaved(n) ? CLEAR_SECRET : '', [slotSenderKey(n)]: '' })} data-testid={`button-remove-brevo-slot-${n}`}>Remove</Button>)}
+                    </div>
+                  </div>
+                  {!marked && <div className={inputRow}>
+                    <Field label="API key"><SecretInput value={values[key] || ''} onChange={(v) => set(key, v)} isSet={slotSaved(n)} masked={values[`${key}_MASKED`]} placeholder="xkeysib-..." testId={n === 1 ? 'input-brevo-api-key' : `input-brevo-api-key-${n}`} /></Field>
+                    {n > 1 && <Field label={<>Sender email <span className="font-normal text-muted-foreground">(optional)</span></>} hint={<>Only if this account&apos;s verified sender differs from the “From” email above.</>}><TextInput type="email" value={values[slotSenderKey(n)] || ''} onChange={(e) => set(slotSenderKey(n), e.target.value)} placeholder="Uses the “From” email" data-testid={`input-brevo-sender-${n}`} /></Field>}
+                  </div>}
+                  {result && !result.ok && <p className="mt-3 rounded-lg bg-[#fff5f0] p-3 text-[11px] leading-4 text-[#9e4c39]" data-testid={`text-brevo-slot-error-${n}`}>{result.error}</p>}
+                </div>;
+              })}
+            </div>
+            {shownSlots < brevoMax && <Button className="mt-4" variant="secondary" icon={Plus} onClick={() => setSlotsRequested(shownSlots + 1)} data-testid="button-add-brevo-slot">Add another Brevo account</Button>}
+          </Panel>}
+
+          {emailProvider === 'smtp' && <Panel icon={Mail} title="SMTP server">
+            <div className={inputRow}>
+              <Field label="Host"><TextInput value={values.SMTP_HOST || ''} onChange={(e) => set('SMTP_HOST', e.target.value)} placeholder="smtp.yourprovider.com" data-testid="input-smtp-host" /></Field>
+              <Field label="Port"><TextInput value={values.SMTP_PORT || ''} onChange={(e) => set('SMTP_PORT', e.target.value.replace(/[^\d]/g, ''))} placeholder="587" data-testid="input-smtp-port" /></Field>
+              <Field label="Username"><TextInput value={values.SMTP_USER || ''} onChange={(e) => set('SMTP_USER', e.target.value)} data-testid="input-smtp-user" /></Field>
+              <Field label="Password"><SecretInput value={values.SMTP_PASS || ''} onChange={(v) => set('SMTP_PASS', v)} isSet={values.SMTP_PASS_SET === 'true'} masked={values.SMTP_PASS_MASKED} testId="input-smtp-pass" /></Field>
+            </div>
+          </Panel>}
+
+          {emailProvider === 'custom' && <Panel icon={Cloud} title="Custom email API" description={<>For any provider that isn't Brevo. Point this at an endpoint that accepts a JSON body: <code className="rounded bg-background px-1 py-0.5">{'{ to, subject, html, from, fromName }'}</code>.</>}>
+            <div className={inputRow}>
+              <Field label="Endpoint URL" className="sm:col-span-2"><TextInput value={values.CUSTOM_EMAIL_API_URL || ''} onChange={(e) => set('CUSTOM_EMAIL_API_URL', e.target.value)} placeholder="https://api.example.com/send-email" data-testid="input-custom-email-url" /></Field>
+              <Field label="API key"><SecretInput value={values.CUSTOM_EMAIL_API_KEY || ''} onChange={(v) => set('CUSTOM_EMAIL_API_KEY', v)} isSet={values.CUSTOM_EMAIL_API_KEY_SET === 'true'} masked={values.CUSTOM_EMAIL_API_KEY_MASKED} testId="input-custom-email-key" /></Field>
+              <Field label={<>Header name <span className="font-normal text-muted-foreground">(default: Authorization)</span></>}><TextInput value={values.CUSTOM_EMAIL_API_KEY_HEADER || ''} onChange={(e) => set('CUSTOM_EMAIL_API_KEY_HEADER', e.target.value)} placeholder="Authorization" data-testid="input-custom-email-header" /></Field>
+              <Field label={<>Header prefix <span className="font-normal text-muted-foreground">(default: "Bearer ")</span></>} hint='Clear it for providers that want the raw key in a header like "api-key".' className="sm:col-span-2"><TextInput value={values.CUSTOM_EMAIL_API_KEY_PREFIX ?? ''} onChange={(e) => set('CUSTOM_EMAIL_API_KEY_PREFIX', e.target.value)} placeholder="Bearer " className="max-w-xs" data-testid="input-custom-email-prefix" /></Field>
+            </div>
+          </Panel>}
+
+          <Panel icon={Send} title="Send a test email" description="Save your settings first, then send a real email to confirm the provider actually works — not just that the fields aren't blank.">
+            <div className="flex flex-wrap items-center gap-3">
+              <TextInput type="email" value={testEmailTo} onChange={(e) => setTestEmailTo(e.target.value)} placeholder="you@example.com" className="w-72" data-testid="input-test-email-to" />
+              <Button variant="primary" icon={Send} loading={testingTarget === 'all'} disabled={!testEmailTo || dirty} onClick={() => testEmail.mutate({ to: testEmailTo })} data-testid="button-test-email">{testingTarget === 'all' ? 'Sending…' : emailProvider === 'brevo' && filledSlotCount > 1 ? 'Test full setup' : 'Send test email'}</Button>
+              {emailTests.all && <StatusPill tone={emailTests.all.ok ? 'green' : 'red'}>{emailTests.all.ok ? 'Sent' : 'Failed'}</StatusPill>}
+            </div>
+            {dirty && <p className="mt-2 text-[11px] text-muted-foreground">You have unsaved changes — save them before testing, since tests use what's saved.</p>}
+            {emailTests.all && !emailTests.all.ok && <p className="mt-3 rounded-xl bg-[#fff5f0] p-3 text-[11px] leading-4 text-[#9e4c39]" data-testid="text-email-test-error">{emailTests.all.error}</p>}
+          </Panel>
+        </>}
+
+        {/* ------------------------------------------------------------ Storage */}
+        {tab === 'storage' && <>
+          {storageIssue && <Callout tone="danger" title="No file storage is configured" testId="banner-storage-warning">Every upload (favicon, payment QR code, payment proofs, team photos, MCQ images, books, resources) goes through Cloudinary — there's no fallback, so uploads fail until it's configured below.</Callout>}
+          <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-border bg-card p-4">
+            <p className="min-w-0 flex-1 text-xs leading-5 text-muted-foreground">The green “Saved” badge only means credentials were entered — it doesn't prove the connection works. Save first, then test. (Supabase holds the database only; file storage runs on Cloudinary.)</p>
+            <Button icon={Wifi} loading={testStorage.isPending} disabled={dirty} onClick={() => testStorage.mutate()} data-testid="button-test-storage">{testStorage.isPending ? 'Testing…' : 'Test connection'}</Button>
           </div>
-          {testEmail.data && !testEmail.data.ok && <p className="mt-2 rounded-xl bg-[#fff5f0] p-3 text-[11px] text-[#9e4c39]" data-testid="text-email-test-error">{testEmail.data.error}</p>}
-        </div>
-      </>}
 
-      {tab === 'storage' && <>
-        {storageIssue && <div className="rounded-2xl border border-[#efc7bc] bg-[#fff5f0] p-5 text-xs text-[#9e4c39]" data-testid="banner-storage-warning"><div className="flex items-center gap-2 font-bold"><CircleHelp size={15} /> No file storage is configured</div><p className="mt-1.5 leading-5 text-[#a96a5b]">Every upload (favicon, payment QR code, payment proofs, team photos, MCQ images, books, resources) goes through Cloudinary — there's no fallback, so uploads will fail until it's configured below.</p></div>}
-        <div className="flex items-center justify-between rounded-2xl border border-border bg-card p-4">
-          <p className="text-xs text-muted-foreground">The green "Saved" badge below only means credentials were entered — it doesn't confirm the connection actually works. Save your settings first, then test.</p>
-          <button type="button" onClick={() => testStorage.mutate()} disabled={testStorage.isPending} className="ml-4 shrink-0 rounded-xl border border-border bg-background px-4 py-2 text-xs font-bold disabled:opacity-50" data-testid="button-test-storage">{testStorage.isPending ? 'Testing…' : 'Test connection'}</button>
-        </div>
-        <p className="text-[11px] text-muted-foreground">Supabase is used for this platform's database only — file storage runs on Cloudinary.</p>
-        <div className="rounded-2xl border border-border bg-card p-6"><h3 className="flex items-center gap-2 font-bold">Cloudinary {values.CLOUDINARY_CONFIGURED === 'true' && <Badge tone="green">Saved</Badge>}
-            {testStorage.data && (testStorage.data.cloudinary.ok
-              ? <Badge tone="green">Connected</Badge>
-              : <Badge tone="red">Not working</Badge>)}
-          </h3><p className="mt-1 text-xs text-muted-foreground">Used for large files — book PDFs, resource files, and anything over ~5MB regardless of type.</p>
-          {testStorage.data && !testStorage.data.cloudinary.ok && <p className="mt-2 rounded-xl bg-[#fff5f0] p-3 text-[11px] text-[#9e4c39]" data-testid="text-cloudinary-test-error">{testStorage.data.cloudinary.error}</p>}
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <label className="text-xs font-bold">Cloud name<input value={values.CLOUDINARY_CLOUD_NAME || ''} onChange={(e) => set('CLOUDINARY_CLOUD_NAME', e.target.value)} placeholder="my-cloud-name" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-cloudinary-cloud-name" /></label>
-            <label className="text-xs font-bold">API key<input value={values.CLOUDINARY_API_KEY || ''} onChange={(e) => set('CLOUDINARY_API_KEY', e.target.value)} placeholder="123456789012345" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-cloudinary-api-key" /></label>
-            <label className="text-xs font-bold sm:col-span-2">API secret{values.CLOUDINARY_API_SECRET_SET === 'true' && <span className="ml-2 font-normal text-muted-foreground">Currently set · {values.CLOUDINARY_API_SECRET_MASKED}</span>}<input type="password" value={values.CLOUDINARY_API_SECRET || ''} onChange={(e) => set('CLOUDINARY_API_SECRET', e.target.value)} placeholder={values.CLOUDINARY_API_SECRET_SET === 'true' ? 'Leave blank to keep current key' : 'abc123...'} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-cloudinary-api-secret" /></label>
-          </div>
-        </div>
+          <Panel icon={Cloud} title="Cloudinary" badge={<>
+            {values.CLOUDINARY_CONFIGURED === 'true' && <StatusPill tone="green">Saved</StatusPill>}
+            {testStorage.data && <StatusPill tone={testStorage.data.cloudinary.ok ? 'green' : 'red'}>{testStorage.data.cloudinary.ok ? 'Connected' : 'Not working'}</StatusPill>}
+          </>} description="Used for large files — book PDFs, resource files, and anything over ~5MB regardless of type.">
+            {testStorage.data && !testStorage.data.cloudinary.ok && <p className="mb-4 rounded-xl bg-[#fff5f0] p-3 text-[11px] text-[#9e4c39]" data-testid="text-cloudinary-test-error">{testStorage.data.cloudinary.error}</p>}
+            <div className={inputRow}>
+              <Field label="Cloud name"><TextInput value={values.CLOUDINARY_CLOUD_NAME || ''} onChange={(e) => set('CLOUDINARY_CLOUD_NAME', e.target.value)} placeholder="my-cloud-name" data-testid="input-cloudinary-cloud-name" /></Field>
+              <Field label="API key"><TextInput value={values.CLOUDINARY_API_KEY || ''} onChange={(e) => set('CLOUDINARY_API_KEY', e.target.value)} placeholder="123456789012345" data-testid="input-cloudinary-api-key" /></Field>
+              <Field label="API secret" className="sm:col-span-2"><SecretInput value={values.CLOUDINARY_API_SECRET || ''} onChange={(v) => set('CLOUDINARY_API_SECRET', v)} isSet={values.CLOUDINARY_API_SECRET_SET === 'true'} masked={values.CLOUDINARY_API_SECRET_MASKED} placeholder="abc123..." testId="input-cloudinary-api-secret" /></Field>
+            </div>
+          </Panel>
 
-        {/* Backup slot — same "extra numbered slot, tried automatically on
-            failure" idea as the AI tab's backup providers, just one slot
-            instead of five (a second Cloudinary account is heavier to set
-            up than an extra API key, and one backup covers "the primary
-            plan filled up" — the actual ask — without over-building this). */}
-        <div className="rounded-2xl border border-border bg-card p-6"><h3 className="flex items-center gap-2 font-bold">Backup Cloudinary account <span className="font-normal normal-case text-muted-foreground/80 text-[11px]">(optional)</span>
-            {values.CLOUDINARY_BACKUP_CONFIGURED === 'true' && <Badge tone="green">Saved</Badge>}
-            {testStorage.data && (testStorage.data.cloudinaryBackup.ok
-              ? <Badge tone="green">Connected</Badge>
-              : values.CLOUDINARY_BACKUP_CONFIGURED === 'true' && <Badge tone="red">Not working</Badge>)}
-          </h3>
-          <p className="mt-1 text-xs text-muted-foreground">A second Cloudinary account, tried automatically whenever the primary one's upload fails for any reason — full on its plan quota, a bad/expired key, a temporary outage. Every upload still tries the primary account first; this only kicks in on failure, so leaving it blank behaves exactly as before. Existing files aren't moved — this only affects new uploads made after the primary account starts failing.</p>
-          {testStorage.data && values.CLOUDINARY_BACKUP_CONFIGURED === 'true' && !testStorage.data.cloudinaryBackup.ok && <p className="mt-2 rounded-xl bg-[#fff5f0] p-3 text-[11px] text-[#9e4c39]" data-testid="text-cloudinary-backup-test-error">{testStorage.data.cloudinaryBackup.error}</p>}
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <label className="text-xs font-bold">Cloud name<input value={values.CLOUDINARY_CLOUD_NAME_2 || ''} onChange={(e) => set('CLOUDINARY_CLOUD_NAME_2', e.target.value)} placeholder="my-backup-cloud-name" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-cloudinary-backup-cloud-name" /></label>
-            <label className="text-xs font-bold">API key<input value={values.CLOUDINARY_API_KEY_2 || ''} onChange={(e) => set('CLOUDINARY_API_KEY_2', e.target.value)} placeholder="123456789012345" className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-cloudinary-backup-api-key" /></label>
-            <label className="text-xs font-bold sm:col-span-2">API secret{values.CLOUDINARY_API_SECRET_2_SET === 'true' && <span className="ml-2 font-normal text-muted-foreground">Currently set · {values.CLOUDINARY_API_SECRET_2_MASKED}</span>}<input type="password" value={values.CLOUDINARY_API_SECRET_2 || ''} onChange={(e) => set('CLOUDINARY_API_SECRET_2', e.target.value)} placeholder={values.CLOUDINARY_API_SECRET_2_SET === 'true' ? 'Leave blank to keep current key' : 'abc123...'} className="mt-2 h-10 w-full rounded-xl border border-border bg-background px-3 text-xs" data-testid="input-cloudinary-backup-api-secret" /></label>
-          </div>
-        </div>
-        <p className="text-[11px] text-muted-foreground">Save settings below, then re-upload anything affected by a past storage issue — old files aren't retroactively moved.</p>
-      </>}
+          <Panel icon={Repeat} title="Backup Cloudinary account" badge={<>
+            <StatusPill>Optional</StatusPill>
+            {values.CLOUDINARY_BACKUP_CONFIGURED === 'true' && <StatusPill tone="green">Saved</StatusPill>}
+            {testStorage.data && values.CLOUDINARY_BACKUP_CONFIGURED === 'true' && <StatusPill tone={testStorage.data.cloudinaryBackup.ok ? 'green' : 'red'}>{testStorage.data.cloudinaryBackup.ok ? 'Connected' : 'Not working'}</StatusPill>}
+          </>} description="A second account, tried automatically whenever the primary's upload fails — plan quota full, bad key, outage. Uploads still try the primary first. Existing files aren't moved; re-upload anything affected by a past storage issue.">
+            {testStorage.data && values.CLOUDINARY_BACKUP_CONFIGURED === 'true' && !testStorage.data.cloudinaryBackup.ok && <p className="mb-4 rounded-xl bg-[#fff5f0] p-3 text-[11px] text-[#9e4c39]" data-testid="text-cloudinary-backup-test-error">{testStorage.data.cloudinaryBackup.error}</p>}
+            <div className={inputRow}>
+              <Field label="Cloud name"><TextInput value={values.CLOUDINARY_CLOUD_NAME_2 || ''} onChange={(e) => set('CLOUDINARY_CLOUD_NAME_2', e.target.value)} placeholder="my-backup-cloud-name" data-testid="input-cloudinary-backup-cloud-name" /></Field>
+              <Field label="API key"><TextInput value={values.CLOUDINARY_API_KEY_2 || ''} onChange={(e) => set('CLOUDINARY_API_KEY_2', e.target.value)} placeholder="123456789012345" data-testid="input-cloudinary-backup-api-key" /></Field>
+              <Field label="API secret" className="sm:col-span-2"><SecretInput value={values.CLOUDINARY_API_SECRET_2 || ''} onChange={(v) => set('CLOUDINARY_API_SECRET_2', v)} isSet={values.CLOUDINARY_API_SECRET_2_SET === 'true'} masked={values.CLOUDINARY_API_SECRET_2_MASKED} placeholder="abc123..." testId="input-cloudinary-backup-api-secret" /></Field>
+            </div>
+          </Panel>
+        </>}
 
-      {tab === 'security' && <div className="rounded-2xl border border-primary/30 bg-[#eef7f1] p-6"><h3 className="font-bold">Admin sign-up invite code</h3><p className="mt-1 text-xs text-muted-foreground">Share this code with anyone who should be able to create an admin account at <code className="rounded bg-card px-1 py-0.5">/admin-signup/1</code>. Rotate it any time to revoke access for anyone who has the old code.</p><div className="mt-4 flex flex-wrap items-center gap-3"><input value={values.ADMIN_SIGNUP_CODE || ''} onChange={(e) => set('ADMIN_SIGNUP_CODE', e.target.value)} className="h-10 w-56 rounded-xl border border-border bg-card px-3 text-xs font-mono-app tracking-wider" data-testid="input-admin-signup-code" /><button type="button" onClick={() => rotate.mutate()} disabled={rotate.isPending} className="rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold" data-testid="button-rotate-admin-code">{rotate.isPending ? 'Rotating…' : 'Generate new code'}</button></div>
-        {values.ADMIN_SIGNUP_CODE && <div className="mt-3 flex flex-wrap items-center gap-2"><input readOnly value={`${window.location.origin}/admin-signup/1?code=${encodeURIComponent(values.ADMIN_SIGNUP_CODE)}`} className="h-9 min-w-0 flex-1 rounded-xl border border-border bg-card px-3 text-[11px] text-muted-foreground" data-testid="input-admin-invite-link" onFocus={(e) => e.currentTarget.select()} /><button type="button" onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/admin-signup/1?code=${encodeURIComponent(values.ADMIN_SIGNUP_CODE || '')}`); toast({ title: 'Invite link copied' }); }} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3 py-2 text-[11px] font-bold text-primary-foreground" data-testid="button-copy-admin-invite-link"><Copy size={12} /> Copy link</button></div>}
-      </div>}
+        {/* ----------------------------------------------------------- Security */}
+        {tab === 'security' && <>
+          <Panel icon={KeyRound} tone="green" title="Admin sign-up invite code" description={<>Share this code with anyone who should be able to create an admin account at <code className="rounded bg-card px-1 py-0.5">/admin-signup/1</code>. Rotate it any time to revoke access for anyone holding the old one.</>}>
+            <div className="flex flex-wrap items-center gap-3">
+              <TextInput value={values.ADMIN_SIGNUP_CODE || ''} onChange={(e) => set('ADMIN_SIGNUP_CODE', e.target.value)} className="w-56 font-mono-app tracking-wider" data-testid="input-admin-signup-code" />
+              <Button icon={Shuffle} loading={rotate.isPending} onClick={() => rotate.mutate()} data-testid="button-rotate-admin-code">{rotate.isPending ? 'Rotating…' : 'Generate new code'}</Button>
+            </div>
+            {values.ADMIN_SIGNUP_CODE && <div className="mt-3 flex flex-wrap items-center gap-2">
+              <TextInput readOnly value={`${window.location.origin}/admin-signup/1?code=${encodeURIComponent(values.ADMIN_SIGNUP_CODE)}`} className="h-9 min-w-0 flex-1 text-[11px] text-muted-foreground" data-testid="input-admin-invite-link" onFocus={(e) => e.currentTarget.select()} />
+              <Button variant="primary" icon={Copy} onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/admin-signup/1?code=${encodeURIComponent(values.ADMIN_SIGNUP_CODE || '')}`); toast({ title: 'Invite link copied' }); }} data-testid="button-copy-admin-invite-link">Copy link</Button>
+            </div>}
+          </Panel>
+          <Panel icon={Users} tone="green" title="Devices per student account" description="How many devices one student account can be signed in on at the same time. Signing out (or an admin resetting devices) frees a slot. Admin accounts are never limited.">
+            <div className="flex flex-wrap items-center gap-3">
+              <TextInput type="number" min={0} max={50} value={values.DEFAULT_MAX_DEVICES ?? ''} placeholder="2" onChange={(e) => set('DEFAULT_MAX_DEVICES', e.target.value)} className="w-24" data-testid="input-default-max-devices" />
+              <span className="text-xs text-muted-foreground">devices at once — blank means 2, 0 means unlimited</span>
+            </div>
+            <p className="mt-3 text-[11px] leading-5 text-muted-foreground">This is the default for every student. To give one student more or fewer, open them under Students and change their device limit there — that overrides this number for them only. Lowering it never signs anyone out; it only blocks new sign-ins until they're under the limit.</p>
+          </Panel>
+          <AdminAccountSection />
+        </>}
 
-      {tab === 'notifications' && <NotificationBroadcastPanel />}
+        {tab === 'notifications' && <NotificationBroadcastPanel />}
+
+        {tab !== 'notifications' && <SaveBar dirty={dirty} saving={save.isPending} saved={save.isSuccess && !dirty} onSave={() => save.mutate(values)} onDiscard={() => setForm(null)} />}
+      </div>
     </div>
-
-    {tab !== 'notifications' && <button onClick={() => save.mutate(values)} disabled={save.isPending} className="mt-5 rounded-xl bg-primary px-5 py-3 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-save-settings">{save.isPending ? 'Saving…' : save.isSuccess && !form ? 'Settings saved' : 'Save settings'}</button>}
-    <AdminAccountSection />
   </div>;
 }
-
-// Send a one-off notification to students, optionally narrowed to a
-// program (MBBS/BDS) and/or academic year — a separate "Send" action
-// rather than a settings field, since it fires immediately instead of
-// being saved for later like the rest of this page.
 
 export default AdminSettings;

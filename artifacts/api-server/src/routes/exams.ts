@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { and, count, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, examsTable, examQuestionsTable, examAttemptsTable, examAnswersTable, mcqsTable, usersTable, auditLogsTable } from "@workspace/db";
-import { requireAuth, requireAdmin, requireActiveMembership, isAdminRole } from "../middlewares/auth";
+import { requireAuth, requireAdmin, requireMembershipFor, isAdminRole } from "../middlewares/auth";
 import { getStudentTargeting, notifyTargetedStudents } from "../lib/contentVisibility";
 import { deleteMcqsEverywhere } from "../lib/mcqCascade";
 
@@ -233,7 +233,7 @@ router.post("/admin/exams/:id/release-all", requireAdmin, async (req, res): Prom
 // Student: list eligible exams, start, answer, submit, result
 // ---------------------------------------------------------------------------
 
-router.get("/exams", requireAuth, requireActiveMembership, async (req, res): Promise<void> => {
+router.get("/exams", requireAuth, requireMembershipFor("exams"), async (req, res): Promise<void> => {
   const isAdmin = isAdminRole(req.user!.role);
   const rows = await db.select().from(examsTable).where(eq(examsTable.status, "published"));
   const targeting = isAdmin ? { programKind: null, yearNumber: null } : await getStudentTargeting(req.user!.id);
@@ -257,7 +257,7 @@ router.get("/exams", requireAuth, requireActiveMembership, async (req, res): Pro
   }));
 });
 
-router.post("/exams/:id/start", requireAuth, requireActiveMembership, async (req, res): Promise<void> => {
+router.post("/exams/:id/start", requireAuth, requireMembershipFor("exams"), async (req, res): Promise<void> => {
   const examId = Number(req.params.id);
   const [exam] = await db.select().from(examsTable).where(and(eq(examsTable.id, examId), eq(examsTable.status, "published")));
   if (!exam) { res.status(404).json({ error: "Exam not found" }); return; }

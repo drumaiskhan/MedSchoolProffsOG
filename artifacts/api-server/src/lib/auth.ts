@@ -9,12 +9,14 @@ if (!process.env.JWT_SECRET && process.env.NODE_ENV === "production") {
 }
 
 const JWT_EXPIRY = "7d";
+export const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // keep in step with JWT_EXPIRY / cookie maxAge
 const BCRYPT_ROUNDS = 12;
 
 export interface SessionPayload {
   sub: number; // user id
   role: string; // student | admin (legacy "superadmin" rows are normalized to "admin" at boot — see lib/normalizeLegacyRoles.ts)
   passwordChangedAt: number; // ms epoch, used to invalidate tokens after password change
+  sid?: string; // med_user_sessions.token_id — the device this token belongs to (see lib/deviceSessions.ts)
 }
 
 export async function hashPassword(plain: string): Promise<string> {

@@ -8,7 +8,7 @@ import { Link } from 'wouter';
 import { ArrowRight, GraduationCap, Lightbulb, Target, TrendingUp, Trophy, Bookmark } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { siteContentApi } from '@/lib/api';
-import { Footer, AnimatedBrandMark, useDocumentHead } from '@/lib/shared';
+import { Footer, AnimatedBrandMark, useDocumentHead, TeamPhoto } from '@/lib/shared';
 
 const VALUES = [
   { icon: GraduationCap, title: 'Every college, one bank', desc: 'MCQs organised by program, year, subject, and topic — MBBS and BDS, side by side.' },
@@ -80,9 +80,10 @@ export default function About() {
         </div>
         <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {team.slice(0, 6).map((member) => <div key={member.id} className="rounded-2xl border border-border bg-card p-6 text-center">
-            <div className="mx-auto grid size-14 place-items-center rounded-full bg-[#eef7f1] text-lg font-extrabold text-primary">{member.name.split(' ').map((n) => n[0]).slice(0, 2).join('')}</div>
+            <div className="mx-auto w-fit"><TeamPhoto member={member} /></div>
             <h3 className="mt-3 text-sm font-extrabold">{member.name}</h3>
             <p className="mt-1 text-xs text-muted-foreground">{member.role}</p>
+            {member.achievementBadge && <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-[#fdeecb] px-2.5 py-1 text-[10px] font-bold text-[#8a5a12]">{member.achievementBadge}</span>}
           </div>)}
         </div>
       </div>

@@ -70,13 +70,16 @@ import {
   practiceAnswersTable,
   examAnswersTable,
   examQuestionsTable,
+  userSessionsTable,
 } from "@workspace/db";
-import { requireAuth, requireAdmin, requireActiveMembership, isAdminRole } from "../middlewares/auth";
+import { requireAuth, requireAdmin, requireMembershipFor, isAdminRole } from "../middlewares/auth";
+import { getDefaultDeviceLimit, getEffectiveDeviceLimit, listActiveSessions, revokeAllForUser, revokeOneForUser, MAX_DEVICES_CEILING } from "../lib/deviceSessions";
 import { getStudentTargeting, getVisibleModuleIds, getVisibleBlockIds, describeModuleTargeting } from "../lib/contentVisibility";
 import { resolveFileUrl, THUMBNAIL_TRANSFORM } from "../lib/storage";
 import { dbErrorMessage } from "../lib/dbErrors";
 import { shuffleMcqOptions } from "../lib/mcqShuffle";
 import { sendEmail, membershipActivatedEmailHtml, trialActivatedEmailHtml, paymentSubmittedEmailHtml, paymentRejectedEmailHtml, accountRejectedEmailHtml } from "../lib/email";
+import { validateCoupon, markCouponUsed, type CouponApplication } from "../lib/coupons";
 
 const router: IRouter = Router();
 
@@ -367,11 +370,25 @@ router.post("/payments", requireAuth, async (req, res): Promise<void> => {
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
   const [plan] = await db.select().from(membershipPlansTable).where(and(eq(membershipPlansTable.id, parsed.data.planId), eq(membershipPlansTable.active, true)));
   if (!plan) { res.status(400).json({ error: "Selected plan is not available" }); return; }
+  // couponCode isn't part of the generated SubmitPaymentBody schema (that
+  // schema is auto-generated from openapi.yaml — see lib/api-zod — so it's
+  // read directly off the body here rather than hand-editing generated
+  // code). Same validateCoupon() helper as registration; see its comment.
+  let couponApplied: CouponApplication | null = null;
+  const couponCode = typeof req.body?.couponCode === "string" ? req.body.couponCode.trim() : "";
+  if (couponCode) {
+    const result = await validateCoupon(couponCode, Number(plan.price));
+    if ("error" in result) { res.status(400).json({ error: result.error }); return; }
+    couponApplied = result;
+  }
   const [payment] = await db.insert(paymentsTable).values({
-    userId: req.user!.id, planId: plan.id, planName: plan.name, amount: plan.price, currency: plan.currency,
+    userId: req.user!.id, planId: plan.id, planName: plan.name,
+    amount: couponApplied ? String(couponApplied.discountedAmount) : plan.price, currency: plan.currency,
     duration: plan.duration, durationUnit: plan.durationUnit, method: parsed.data.method, reference: parsed.data.reference,
     paymentDate: parsed.data.paymentDate, proofPath: parsed.data.proofPath ?? null, status: "PAYMENT_PENDING_REVIEW",
+    couponCode: couponApplied?.coupon.code ?? null, discountAmount: couponApplied ? String(couponApplied.discountAmount) : null,
   }).returning();
+  if (couponApplied) await markCouponUsed(couponApplied.coupon.id);
   await db.update(usersTable).set({ status: "PAYMENT_PENDING_REVIEW" }).where(eq(usersTable.id, req.user!.id));
   void sendEmail(req.user!.email, "We've received your payment", paymentSubmittedEmailHtml(req.user!.name, plan.name)).catch(() => {});
   res.status(201).json(await paymentView(payment));
@@ -840,7 +857,11 @@ router.delete("/topics/:id", requireAdmin, async (req, res): Promise<void> => {
   res.json({ ok: true });
 });
 
-router.get("/mcqs", requireAuth, requireActiveMembership, async (req, res): Promise<void> => {
+// One route, two features: past-paper practice loads its questions through
+// here too (?pastPaperId=), so it follows the "past_papers" trial toggle;
+// a single-question jump (?mcqId=, from a notebook note or flag) is allowed
+// by either; everything else is the MCQ bank.
+router.get("/mcqs", requireAuth, requireMembershipFor((req) => (req.query.pastPaperId ? "past_papers" : req.query.mcqId ? ["mcqs", "past_papers", "exams"] : "mcqs")), async (req, res): Promise<void> => {
   const params = ListMcqsQueryParams.safeParse(req.query);
   if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
   const isAdmin = isAdminRole(req.user!.role);
@@ -1099,7 +1120,13 @@ router.post("/admin/mcqs/shuffle-options", requireAdmin, async (req, res): Promi
   if (shuffledCount) {
     await db.transaction(async (tx) => {
       for (let i = 0; i < updates.length; i += BATCH_SIZE) {
-        const batch = updates.slice(i, i + BATCH_SIZE);
+        // Bug fix: the payload's keys must match the recordset's COLUMN names
+        // below. It used to be sent as `optionExplanations` (camelCase) while
+        // the column is `option_explanations`, so jsonb_to_recordset found no
+        // matching key, read NULL, and the UPDATE wiped every question's
+        // per-option explanations on every shuffle. Only `options` (whose name
+        // is the same in both spellings) survived.
+        const batch = updates.slice(i, i + BATCH_SIZE).map((u) => ({ id: u.id, options: u.options, option_explanations: u.optionExplanations }));
         await tx.execute(sql`
           UPDATE med_mcqs AS m
           SET options = v.options, option_explanations = v.option_explanations
@@ -1117,7 +1144,7 @@ router.post("/admin/mcqs/shuffle-options", requireAdmin, async (req, res): Promi
   res.json({ ok: true, shuffled: shuffledCount, skipped: rows.length - shuffledCount });
 });
 
-router.get("/flashcards", requireAuth, requireActiveMembership, async (req, res): Promise<void> => {
+router.get("/flashcards", requireAuth, requireMembershipFor("flashcards"), async (req, res): Promise<void> => {
   const params = ListFlashcardsQueryParams.safeParse(req.query);
   if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
   const isAdmin = isAdminRole(req.user!.role);
@@ -1214,7 +1241,7 @@ router.delete("/admin/flashcards/bulk", requireAdmin, async (req, res): Promise<
   res.json({ ok: true, deleted: rows.length });
 });
 
-router.get("/resources", requireAuth, requireActiveMembership, async (req, res): Promise<void> => {
+router.get("/resources", requireAuth, requireMembershipFor("resources"), async (req, res): Promise<void> => {
   const params = ListResourcesQueryParams.safeParse(req.query);
   if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
   const rows = await db.select().from(resourcesTable).where(and(params.data.kind ? eq(resourcesTable.kind, params.data.kind) : undefined, eq(resourcesTable.active, true)));
@@ -1312,6 +1339,60 @@ router.patch("/students/:id", requireAdmin, async (req, res): Promise<void> => {
   if (!row) { res.status(404).json({ error: "Student not found" }); return; }
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "STUDENT_UPDATED", entity: "user", entityId: row.id });
   res.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// Device limit (see lib/deviceSessions.ts). Each student may be signed in on
+// at most `limit` devices at once: their own override (users.max_devices) if
+// an admin set one, otherwise the platform default (DEFAULT_MAX_DEVICES, 2).
+// 0 means unlimited.
+// ---------------------------------------------------------------------------
+
+router.get("/students/:id/devices", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) { res.status(400).json({ error: "Invalid student id" }); return; }
+  const [student] = await db.select().from(usersTable).where(and(eq(usersTable.id, id), eq(usersTable.role, "student")));
+  if (!student) { res.status(404).json({ error: "Student not found" }); return; }
+  const [sessions, defaultLimit, limit] = await Promise.all([listActiveSessions(id), getDefaultDeviceLimit(), getEffectiveDeviceLimit(student)]);
+  res.json({
+    limit,
+    override: student.maxDevices,
+    defaultLimit,
+    devices: sessions.map((d) => ({
+      id: d.id, label: d.deviceLabel, ip: d.ip,
+      signedInAt: d.createdAt.toISOString(), lastSeenAt: d.lastSeenAt.toISOString(),
+    })),
+  });
+});
+
+// maxDevices: a whole number 0..50 (0 = unlimited), or null to go back to the platform default.
+router.patch("/students/:id/device-limit", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const parsed = z.object({ maxDevices: z.number().int().min(0).max(MAX_DEVICES_CEILING).nullable() }).safeParse(req.body);
+  if (!parsed.success || !Number.isInteger(id)) { res.status(400).json({ error: `Device limit must be a whole number from 0 (unlimited) to ${MAX_DEVICES_CEILING}.` }); return; }
+  const [row] = await db.update(usersTable).set({ maxDevices: parsed.data.maxDevices }).where(and(eq(usersTable.id, id), eq(usersTable.role, "student"))).returning();
+  if (!row) { res.status(404).json({ error: "Student not found" }); return; }
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "STUDENT_DEVICE_LIMIT_SET", entity: "user", entityId: id, metadata: JSON.stringify({ maxDevices: parsed.data.maxDevices }) });
+  res.json({ ok: true, limit: await getEffectiveDeviceLimit(row), override: row.maxDevices });
+});
+
+// Sign one device out (frees its slot; that browser is logged out on its next request).
+router.delete("/students/:id/devices/:sessionId", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const sessionId = Number(req.params.sessionId);
+  if (!Number.isInteger(id) || !Number.isInteger(sessionId)) { res.status(400).json({ error: "Invalid id" }); return; }
+  if (!(await revokeOneForUser(id, sessionId))) { res.status(404).json({ error: "That device is no longer signed in." }); return; }
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "STUDENT_DEVICE_REVOKED", entity: "user", entityId: id });
+  res.json({ ok: true });
+});
+
+// Sign the student out everywhere — the fix for "I lost my phone / I'm locked out at the limit".
+router.delete("/students/:id/devices", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) { res.status(400).json({ error: "Invalid student id" }); return; }
+  const revoked = await revokeAllForUser(id);
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "STUDENT_DEVICES_RESET", entity: "user", entityId: id, metadata: JSON.stringify({ revoked }) });
+  res.json({ ok: true, revoked });
 });
 
 const STUDENT_STATUSES = ["UNVERIFIED", "VERIFIED", "PAYMENT_PENDING_REVIEW", "ACTIVE", "EXPIRED", "SUSPENDED", "REJECTED"] as const;
@@ -1501,6 +1582,7 @@ router.delete("/students/:id/permanent", requireAdmin, async (req, res): Promise
   await db.update(membershipsTable).set({ paymentId: null }).where(eq(membershipsTable.userId, id));
   await db.delete(emailVerificationTokensTable).where(eq(emailVerificationTokensTable.userId, id));
   await db.delete(passwordResetTokensTable).where(eq(passwordResetTokensTable.userId, id));
+  await db.delete(userSessionsTable).where(eq(userSessionsTable.userId, id));
   await db.delete(studentDocumentsTable).where(eq(studentDocumentsTable.userId, id));
   await db.delete(practiceAttemptsTable).where(eq(practiceAttemptsTable.userId, id));
   await db.delete(studentProgressTable).where(eq(studentProgressTable.userId, id));

@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { desc } from "drizzle-orm";
 import { z } from "zod";
 import { db, aiVisualizerLogsTable, usersTable } from "@workspace/db";
-import { requireAuth, requireActiveMembership, requireAdmin } from "../middlewares/auth";
+import { requireAuth, requireMembershipFor, requireAdmin } from "../middlewares/auth";
 import { checkRateLimit } from "../lib/rateLimit";
 import { generateVisualization, explainStep, AiNotConfiguredError, InvalidVisualizationError } from "../lib/aiVisualizer";
 import { getAllSettings } from "../lib/settings";
@@ -15,7 +15,7 @@ const router: IRouter = Router();
 
 const VisualizerBody = z.object({ prompt: z.string().min(3).max(500) });
 
-router.post("/ai/visualizer", requireAuth, requireActiveMembership, async (req, res): Promise<void> => {
+router.post("/ai/visualizer", requireAuth, requireMembershipFor("ai_visualizer"), async (req, res): Promise<void> => {
   // Defense in depth: the student sidebar already hides this page when
   // AI_VISUALIZER_ENABLED is off, but that's just UI — a direct API call
   // (or a stale page still open in a tab) should be refused too, not just
@@ -55,7 +55,7 @@ router.post("/ai/visualizer", requireAuth, requireActiveMembership, async (req, 
 
 const ExplainStepBody = z.object({ overallTitle: z.string().max(160), stepTitle: z.string().max(120), stepDescription: z.string().max(600) });
 
-router.post("/ai/visualizer/explain-step", requireAuth, requireActiveMembership, async (req, res): Promise<void> => {
+router.post("/ai/visualizer/explain-step", requireAuth, requireMembershipFor("ai_visualizer"), async (req, res): Promise<void> => {
   const parsed = ExplainStepBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "Invalid step" }); return; }
   const limit = checkRateLimit(`ai-visualizer-explain:${req.user!.id}`, 20, 10 * 60 * 1000);

@@ -32,7 +32,7 @@ import { toast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
-import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, type MyFeedbackEntry, analyticsApi, type ProgressTrend, mcqImportApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blocksApi, type Block, examsAdminApi, examsApi, explanationsApi, booksApi, type AdminBookStudent, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type StudentDetail, type SiteContent, type TeamMember, TEAM_CATEGORIES, TEAM_CATEGORY_LABELS, type AdminModule, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type PaymentDetails, type PaymentMethodConfig, aiVisualizerApi, type VisualizationSpec, LeaderboardRow } from '@/lib/api';
+import { authApi, couponsApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, type MyFeedbackEntry, analyticsApi, type ProgressTrend, mcqImportApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blocksApi, type Block, examsAdminApi, examsApi, explanationsApi, booksApi, type AdminBookStudent, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type StudentDetail, type SiteContent, type TeamMember, TEAM_CATEGORIES, TEAM_CATEGORY_LABELS, type AdminModule, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type PaymentDetails, type PaymentMethodConfig, aiVisualizerApi, type VisualizationSpec, LeaderboardRow } from '@/lib/api';
 import { VisualizationRenderer, isStepBased } from '@/components/visualizer/VisualizationRenderer';
 import { StepControls } from '@/components/visualizer/StepControls';
 import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
@@ -64,6 +64,11 @@ function Payments() {
   const isActive = dashboard.data?.membershipStatus === 'ACTIVE';
   const [selectedPlan, setSelectedPlan] = useState<number | null>(null);
   useEffect(() => { if (selectedPlan === null && plans.length) setSelectedPlan(plans[1]?.id ?? plans[0].id); }, [plans, selectedPlan]);
+  useEffect(() => { setCouponResult(null); setCouponError(null); }, [selectedPlan]);
+  const [couponInput, setCouponInput] = useState('');
+  const [couponResult, setCouponResult] = useState<{ code: string; discountedAmount: number; discountAmount: number } | null>(null);
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [couponChecking, setCouponChecking] = useState(false);
   const [method, setMethod] = useState('');
   const [proof, setProof] = useState<{ storagePath: string; fileName: string; previewUrl: string | null } | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -72,6 +77,21 @@ function Payments() {
   const [showForm, setShowForm] = useState(false);
   const submit = useSubmitPayment();
   const pd = paymentDetails.data;
+  const selectedPlanObj = plans.find((p) => p.id === selectedPlan) || null;
+
+  const applyCoupon = async () => {
+    if (!selectedPlan || !couponInput.trim()) return;
+    setCouponChecking(true); setCouponError(null);
+    try {
+      const result = await couponsApi.validate(couponInput.trim(), selectedPlan);
+      setCouponResult({ code: couponInput.trim().toUpperCase(), discountedAmount: result.discountedAmount, discountAmount: result.discountAmount });
+    } catch (err) {
+      setCouponResult(null);
+      setCouponError(err instanceof ApiRequestError ? err.message : 'Could not check that code right now.');
+    } finally {
+      setCouponChecking(false);
+    }
+  };
 
   const handleFile = async (file: File | undefined | null) => {
     if (!file) return;
@@ -91,8 +111,13 @@ function Payments() {
     <div className="mb-3 text-xs font-bold text-muted-foreground">Choose your access</div>
     <div className="space-y-3">{plans.map((p) => <button onClick={() => setSelectedPlan(p.id)} key={p.id} className={cn('w-full rounded-2xl border p-5 text-left transition-all hover:-translate-y-0.5', selectedPlan === p.id ? 'border-primary bg-[#eef7f1] shadow-sm' : 'border-border bg-card hover:border-primary/40')} data-testid={`button-plan-${p.id}`}><div className="flex items-start justify-between"><div><div className="flex items-center gap-2"><span className="text-sm font-extrabold">{p.name}</span>{p.discountLabel && <span className="rounded-full bg-[#fff0cb] px-2 py-0.5 text-[10px] font-bold text-[#94651c]">{p.discountLabel}</span>}</div><p className="mt-1 max-w-xs text-xs leading-5 text-muted-foreground">{p.description}</p></div><div className="text-right">{p.originalPrice != null && p.originalPrice > p.price && <div className="text-xs text-muted-foreground line-through">{money(p.originalPrice, p.currency)}</div>}<div className="font-display text-2xl">{money(p.price, p.currency)}</div><div className="text-[10px] text-muted-foreground">/{p.durationUnit}</div></div></div><div className="mt-4 flex items-center gap-2 text-[11px] font-bold text-primary">{selectedPlan === p.id ? <CheckCircle2 size={14} /> : <div className="size-3.5 rounded-full border border-border" />} {selectedPlan === p.id ? 'Selected' : 'Select this plan'}</div></button>)}{!plans.length && <EmptyState icon={CreditCard} title="No plans available yet" body="Your academic team hasn't published any membership plans yet." />}</div>
     {pd && <div className="mt-5"><PaymentDestinationCard pd={pd} /></div>}
+    {selectedPlanObj && <div className="mt-5 rounded-2xl border border-border bg-card p-4">
+      <div className="flex items-center gap-2"><input value={couponInput} onChange={(e) => { setCouponInput(e.target.value); setCouponResult(null); setCouponError(null); }} placeholder="Coupon code (optional)" className="h-10 flex-1 rounded-xl border border-border bg-background px-3 text-xs outline-none focus:ring-2 focus:ring-primary/20" data-testid="input-payment-coupon" /><button type="button" onClick={applyCoupon} disabled={!couponInput.trim() || couponChecking} className="h-10 shrink-0 rounded-xl border border-border px-4 text-xs font-bold hover:bg-muted disabled:opacity-50" data-testid="button-apply-payment-coupon">{couponChecking ? 'Checking…' : 'Apply'}</button></div>
+      {couponError && <p className="mt-2 text-[11px] font-bold text-destructive" data-testid="text-payment-coupon-error">{couponError}</p>}
+      {couponResult && <p className="mt-2 text-[11px] font-bold text-primary" data-testid="text-payment-coupon-applied">Coupon applied — new price {money(couponResult.discountedAmount, selectedPlanObj.currency)}</p>}
+    </div>}
   </div>
-  <form onSubmit={(e) => { e.preventDefault(); if (!method || selectedPlan === null) return; const f = new FormData(e.currentTarget); submit.mutate({ data: { planId: selectedPlan, method, reference: String(f.get('reference')), paymentDate: String(f.get('paymentDate')), proofPath: proof?.storagePath ?? null } }, { onSuccess: () => setSubmitted(true) }); }} className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+  <form onSubmit={(e) => { e.preventDefault(); if (!method || selectedPlan === null) return; const f = new FormData(e.currentTarget); submit.mutate({ data: { planId: selectedPlan, method, reference: String(f.get('reference')), paymentDate: String(f.get('paymentDate')), proofPath: proof?.storagePath ?? null, ...(couponResult ? { couponCode: couponResult.code } : {}) } as Parameters<typeof submit.mutate>[0]['data'] }, { onSuccess: () => setSubmitted(true) }); }} className="rounded-2xl border border-border bg-card p-6 shadow-sm">
     <div className="flex items-center gap-2 text-sm font-bold"><CreditCard size={17} className="text-primary" /> Submit payment proof</div><p className="mt-2 text-xs leading-5 text-muted-foreground">Your access activates after a quick review by your institution team.</p>
     <div className="mt-6"><div className="mb-2 text-xs font-bold">Payment method</div><div className="flex flex-wrap gap-2">{PAYMENT_METHODS.map(({ value, label, icon: Icon }) => <button type="button" key={value} onClick={() => setMethod(value)} className={cn('inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold transition-colors', method === value ? 'border-primary bg-[#eef7f1] text-primary' : 'border-border bg-background hover:bg-muted')} data-testid={`button-method-${value.toLowerCase().replaceAll(' ', '-')}`}><Icon size={14} /> {label}</button>)}</div></div>
     <label className="mt-4 block text-xs font-bold">Transaction reference<input required name="reference" placeholder="e.g. NBX-20481" className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-primary/20" data-testid="input-payment-reference" /></label>

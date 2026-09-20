@@ -22,15 +22,18 @@ import {
   generateOneTimeToken,
   generateOtp,
   hashToken,
+  verifySession,
   SESSION_COOKIE_NAME,
   sessionCookieOptions,
 } from "../lib/auth";
+import { createDeviceSession, DeviceLimitError, revokeAllForUser, revokeByTokenId } from "../lib/deviceSessions";
 import { sendEmail, otpEmailHtml, resetPasswordEmailHtml, welcomeEmailHtml } from "../lib/email";
 import { checkRateLimit } from "../lib/rateLimit";
 import { requireAuth } from "../middlewares/auth";
 import { getSetting } from "../lib/settings";
 import { getPublicAppUrl } from "../lib/publicAppUrl";
 import { resolveFileUrl } from "../lib/storage";
+import { validateCoupon, markCouponUsed, type CouponApplication } from "../lib/coupons";
 
 const router: IRouter = Router();
 
@@ -84,14 +87,39 @@ async function userPublicView(user: typeof usersTable.$inferSelect) {
   };
 }
 
-function setSessionCookie(res: import("express").Response, user: typeof usersTable.$inferSelect) {
+/** The session id (`sid`) carried by the request's cookie/bearer token, if it verifies. */
+function requestSession(req: import("express").Request): { sid: string | null; userId: number | null } {
+  const raw = req.cookies?.[SESSION_COOKIE_NAME] || (req.headers.authorization?.startsWith("Bearer ") ? req.headers.authorization.slice(7) : null);
+  const payload = raw ? verifySession(raw) : null;
+  return { sid: payload?.sid ?? null, userId: payload?.sub ?? null };
+}
+
+// Registers this browser as a signed-in device (enforcing the per-account
+// device limit — see lib/deviceSessions.ts), then sets the cookie. Throws
+// DeviceLimitError when the account is already on its maximum number of
+// devices; callers turn that into a 403 via sendDeviceLimit().
+async function setSessionCookie(req: import("express").Request, res: import("express").Response, user: typeof usersTable.$inferSelect) {
+  // Signing in again from a browser that already holds a session for this same
+  // account replaces that session rather than taking a second slot.
+  const existing = requestSession(req);
+  const replace = existing.userId === user.id ? existing.sid : null;
+  const sid = await createDeviceSession(user, req, replace);
   const token = signSession({
     sub: user.id,
     role: user.role,
     passwordChangedAt: Math.floor(user.passwordChangedAt.getTime() / 1000),
+    sid,
   });
   res.cookie(SESSION_COOKIE_NAME, token, sessionCookieOptions);
   return token;
+}
+
+function sendDeviceLimit(res: import("express").Response, err: unknown): boolean {
+  if (err instanceof DeviceLimitError) {
+    res.status(403).json({ error: err.message, code: err.code, limit: err.limit });
+    return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -112,6 +140,11 @@ const RegisterSchema = z.object({
   // Payment is collected as part of account creation — students choose a
   // plan and submit proof up front rather than registering "free" first.
   planId: z.coerce.number().int().positive(),
+  // Optional — validated against med_coupons in the handler below (same
+  // validateCoupon() helper POST /coupons/validate uses), discounts the
+  // amount recorded on the signup payment row. Coupons only ever apply to
+  // membership plans, never to books.
+  couponCode: z.string().trim().max(40).optional(),
   method: z.string().max(60).optional(),
   reference: z.string().max(120).optional(),
   paymentDate: z.string().max(20).optional(),
@@ -172,6 +205,16 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     return;
   }
 
+  // Optional coupon (plans only — see lib/coupons.ts). Validated before any
+  // row is created so a bad code fails the whole signup cleanly, same as
+  // an invalid plan/institution above.
+  let couponApplied: CouponApplication | null = null;
+  if (data.couponCode) {
+    const result = await validateCoupon(data.couponCode, Number(plan.price));
+    if ("error" in result) { res.status(400).json({ error: result.error }); return; }
+    couponApplied = result;
+  }
+
   const passwordHash = await hashPassword(data.password);
   const [created] = await db
     .insert(usersTable)
@@ -196,7 +239,7 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     userId: created.id,
     planId: plan.id,
     planName: plan.name,
-    amount: plan.price,
+    amount: couponApplied ? String(couponApplied.discountedAmount) : plan.price,
     currency: plan.currency,
     duration: plan.duration,
     durationUnit: plan.durationUnit,
@@ -205,7 +248,10 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     paymentDate: data.paymentDate || new Date().toISOString().slice(0, 10),
     proofPath: data.proofPath ?? null,
     status: "PAYMENT_PENDING_REVIEW",
+    couponCode: couponApplied?.coupon.code ?? null,
+    discountAmount: couponApplied ? String(couponApplied.discountAmount) : null,
   });
+  if (couponApplied) await markCouponUsed(couponApplied.coupon.id);
 
   const { code, hash } = generateOtp();
   await db.insert(emailVerificationTokensTable).values({
@@ -273,7 +319,7 @@ router.post("/auth/admin/register", async (req, res): Promise<void> => {
 
   await db.insert(auditLogsTable).values({ actorId: created.id, action: "ADMIN_REGISTERED", entity: "user", entityId: created.id });
 
-  const token = setSessionCookie(res, created);
+  const token = await setSessionCookie(req, res, created);
   res.status(201).json({ token, user: await userPublicView(created) });
 });
 
@@ -336,13 +382,23 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     return;
   }
 
+  // Device limit is checked before anything is recorded as a successful login,
+  // so a blocked attempt doesn't touch lastLoginAt.
+  let token: string;
+  try {
+    token = await setSessionCookie(req, res, user);
+  } catch (err) {
+    if (sendDeviceLimit(res, err)) return;
+    throw err;
+  }
   await db.update(usersTable).set({ failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() }).where(eq(usersTable.id, user.id));
-
-  const token = setSessionCookie(res, user);
   res.json({ token, user: await userPublicView(user) });
 });
 
-router.post("/auth/logout", (_req, res): void => {
+// Frees this device's slot so the student can sign in somewhere else.
+router.post("/auth/logout", async (req, res): Promise<void> => {
+  const { sid } = requestSession(req);
+  if (sid) await revokeByTokenId(sid).catch(() => undefined);
   res.clearCookie(SESSION_COOKIE_NAME, { path: "/" });
   res.status(204).send();
 });
@@ -564,6 +620,8 @@ router.post("/auth/reset-password", async (req, res): Promise<void> => {
   const passwordHash = await hashPassword(parsed.data.password);
   await db.update(usersTable).set({ passwordHash, passwordChangedAt: new Date(), failedLoginAttempts: 0, lockedUntil: null }).where(eq(usersTable.id, record.userId));
   await db.update(passwordResetTokensTable).set({ usedAt: new Date() }).where(eq(passwordResetTokensTable.id, record.id));
+  // Old tokens stop working on a password change anyway; free their device slots too.
+  await revokeAllForUser(record.userId);
 
   res.json({ message: "Password updated. You can now log in with your new password." });
 });
@@ -581,6 +639,7 @@ router.post("/auth/change-password", requireAuth, async (req, res): Promise<void
   }
   const passwordHash = await hashPassword(parsed.data.newPassword);
   await db.update(usersTable).set({ passwordHash, passwordChangedAt: new Date() }).where(eq(usersTable.id, user.id));
+  await revokeAllForUser(user.id); // every token is void after a password change — free the device slots
   res.json({ message: "Password changed." });
 });
 

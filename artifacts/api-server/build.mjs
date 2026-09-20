@@ -33,6 +33,10 @@ async function buildAll() {
       "better-sqlite3",
       "sqlite3",
       "canvas",
+      // Secure book reader (lib/bookReader.ts): pdf.js loads its own fonts/cMaps from
+      // its package directory and the canvas is a native module — neither bundles.
+      "pdfjs-dist",
+      "@napi-rs/canvas",
       "bcrypt",
       "argon2",
       "fsevents",

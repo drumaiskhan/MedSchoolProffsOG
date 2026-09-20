@@ -1,3 +1,32 @@
+# Round 17 — Device limit (2 per account by default, admin-adjustable)
+
+See AI_HANDOFF_NOTE_v33.md. A student account can now be signed in on at most
+2 devices at once. Admins can change the platform default (Settings →
+Security) and override it per student, see the signed-in devices, and sign
+one or all of them out (Students → student drawer → Devices).
+
+---
+
+# Round 16 — Shuffle bug fix, My Progress, secure paid-book reader
+
+See AI_HANDOFF_NOTE_v30.md. Fixed MCQ shuffle wiping per-option explanations;
+added the student My Progress page (MCQs, past papers, improvement, Pre-Proffs);
+paid books now open only in a server-rendered, watermarked reader with
+highlighting (no file download, URL never sent); admin shell polish;
+integration tests in tests/integration/.
+
+---
+
+# Round 15 — Trial mode overhaul, admin modernisation, Brevo slots
+
+See AI_HANDOFF_NOTE_v29.md for the full breakdown. Summary: multi-year and
+per-feature General Trial Mode with optional end date; rebuilt Settings and
+Site content admin pages, modernised sidebar/header; up to five Brevo API
+slots with failover or round robin and per-key test; duplicate settings
+(branding on two pages, unused Support email) consolidated.
+
+---
+
 # Round 14 — admin control for the "Ask AI to explain differently" button
 
 The "Ask AI to explain differently" button (MCQs via `Practice.tsx` — which

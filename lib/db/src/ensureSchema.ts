@@ -505,6 +505,31 @@ CREATE TABLE IF NOT EXISTS med_notebook_entries (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS med_book_highlights (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  book_id INTEGER NOT NULL,
+  file_key TEXT NOT NULL,
+  page INTEGER NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'words',
+  start_word INTEGER,
+  end_word INTEGER,
+  rect TEXT,
+  color TEXT NOT NULL DEFAULT 'yellow',
+  note TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS med_book_highlights_user_book_idx ON med_book_highlights (user_id, book_id);
+
+CREATE TABLE IF NOT EXISTS med_book_reading_progress (
+  user_id INTEGER NOT NULL,
+  book_id INTEGER NOT NULL,
+  page INTEGER NOT NULL DEFAULT 1,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, book_id)
+);
+
 CREATE TABLE IF NOT EXISTS med_saved_sessions (
   id SERIAL PRIMARY KEY,
   user_id INTEGER NOT NULL,
@@ -729,6 +754,59 @@ ALTER TABLE med_past_papers ADD COLUMN IF NOT EXISTS year_target_number INTEGER;
 ALTER TABLE med_books ADD COLUMN IF NOT EXISTS program_target_kind TEXT;
 ALTER TABLE med_books ADD COLUMN IF NOT EXISTS year_target_number INTEGER;
 
+-- Free/paid books (client request): a free book bypasses the membership
+-- gate entirely in books.ts; a paid book keeps the original "any active
+-- membership" gate. price/currency are informational only — there is no
+-- per-book purchase flow. See schema/medschool.ts's comment on booksTable.
+ALTER TABLE med_books ADD COLUMN IF NOT EXISTS is_free BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE med_books ADD COLUMN IF NOT EXISTS price NUMERIC(12, 2);
+ALTER TABLE med_books ADD COLUMN IF NOT EXISTS currency TEXT;
+
+-- Membership-plan coupon codes (client request, plans only — not books).
+-- See schema/medschool.ts's comment on couponsTable/med_payments.coupon_code
+-- for how these apply given payment here is a manual proof-review flow,
+-- not a live gateway.
+CREATE TABLE IF NOT EXISTS med_coupons (
+  id SERIAL PRIMARY KEY,
+  code TEXT NOT NULL,
+  discount_type TEXT NOT NULL,
+  discount_value NUMERIC(12, 2) NOT NULL,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  max_uses INTEGER,
+  used_count INTEGER NOT NULL DEFAULT 0,
+  expires_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS med_coupons_code_idx ON med_coupons (code);
+ALTER TABLE med_payments ADD COLUMN IF NOT EXISTS coupon_code TEXT;
+ALTER TABLE med_payments ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(12, 2);
+
+-- Per-book purchases: a paid book requires its own approved purchase now,
+-- reviewed by an admin independently of the membership-payments queue
+-- (med_payments) above. See schema/medschool.ts's comment on
+-- bookPurchasesTable and routes/books.ts for the submit/approve/reject
+-- routes.
+CREATE TABLE IF NOT EXISTS med_book_purchases (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  book_id INTEGER NOT NULL,
+  book_title TEXT NOT NULL,
+  amount NUMERIC(12, 2) NOT NULL,
+  currency TEXT NOT NULL,
+  method TEXT NOT NULL,
+  reference TEXT NOT NULL,
+  payment_date DATE NOT NULL,
+  proof_path TEXT,
+  proof_mime_type TEXT,
+  status TEXT NOT NULL DEFAULT 'PAYMENT_PENDING_REVIEW',
+  rejection_reason TEXT,
+  reviewed_by INTEGER,
+  reviewed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Trial mode: an admin can grant a student temporary access for a set
 -- number of days without a payment, and revoke it early. Reuses the
 -- existing med_memberships grant mechanism (same ACTIVE/expires_at shape
@@ -753,6 +831,26 @@ ALTER TABLE med_challenges ADD COLUMN IF NOT EXISTS block_id INTEGER;
 -- stored here so it can be shown back in the admin UI and emailed to the
 -- student. See routes/medschool.ts.
 ALTER TABLE med_users ADD COLUMN IF NOT EXISTS status_message TEXT;
+
+-- Device limit: per-account cap (NULL = platform default, 0 = unlimited) and
+-- one row per signed-in device. See api-server/src/lib/deviceSessions.ts.
+ALTER TABLE med_users ADD COLUMN IF NOT EXISTS max_devices INTEGER;
+
+CREATE TABLE IF NOT EXISTS med_user_sessions (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  token_id TEXT NOT NULL,
+  device_label TEXT NOT NULL DEFAULT 'Unknown device',
+  ip TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS med_user_sessions_token_idx
+  ON med_user_sessions (token_id);
+CREATE INDEX IF NOT EXISTS med_user_sessions_user_idx
+  ON med_user_sessions (user_id);
 
 COMMIT;
 `;

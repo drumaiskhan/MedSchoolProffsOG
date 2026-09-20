@@ -14,7 +14,8 @@ import { cn, Footer, AnimatedBrandMark, useDocumentHead } from '@/lib/shared';
 function formatPrice(plan: MembershipPlan) {
   if (!plan.price) return 'Free';
   const amount = plan.currency === 'PKR' ? `Rs. ${plan.price.toLocaleString()}` : `${plan.currency} ${plan.price}`;
-  const unit = plan.duration === 1 ? plan.durationUnit : `${plan.duration} ${plan.durationUnit}s`;
+  // Same fix as Home.tsx's copy of this function — see its comment.
+  const unit = plan.duration === 1 ? plan.durationUnit.replace(/s$/, '') : `${plan.duration} ${plan.durationUnit}`;
   return `${amount} / ${unit}`;
 }
 

@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, pastPapersTable, mcqsTable, auditLogsTable, usersTable } from "@workspace/db";
-import { requireAdmin, requireAuth, requireActiveMembership, isAdminRole } from "../middlewares/auth";
+import { requireAdmin, requireAuth, requireMembershipFor, isAdminRole } from "../middlewares/auth";
 import { deleteMcqsEverywhere } from "../lib/mcqCascade";
 import { getStudentTargeting, isTargetVisible, notifyTargetedStudents } from "../lib/contentVisibility";
 
@@ -57,7 +57,7 @@ router.get("/past-papers", async (req, res): Promise<void> => {
   res.json(await Promise.all(scoped.map(paperView)));
 });
 
-router.get("/past-papers/:id/mcqs", requireAuth, requireActiveMembership, async (req, res): Promise<void> => {
+router.get("/past-papers/:id/mcqs", requireAuth, requireMembershipFor("past_papers"), async (req, res): Promise<void> => {
   const id = Number(req.params.id);
   const rows = await db.select().from(mcqsTable).where(and(eq(mcqsTable.pastPaperId, id), eq(mcqsTable.status, "published")));
   res.json(rows.map((row) => ({ ...row, module: "", subject: "", topic: "" })));

@@ -2,8 +2,8 @@ import type { NextFunction, Request, Response } from "express";
 import { eq } from "drizzle-orm";
 import { db, usersTable } from "@workspace/db";
 import { SESSION_COOKIE_NAME, verifySession } from "../lib/auth";
-import { getSetting } from "../lib/settings";
-import { getStudentTargeting, isTargetVisible } from "../lib/contentVisibility";
+import { trialGrantsAccess, type TrialFeature } from "../lib/trial";
+import { isSessionActive } from "../lib/deviceSessions";
 
 export interface AuthedUser {
   id: number;
@@ -81,6 +81,15 @@ export async function attachUser(req: Request, _res: Response, next: NextFunctio
     return next();
   }
 
+  // The token must belong to a device session that is still active. This is
+  // what enforces the per-account device limit and lets an admin sign a
+  // device out. Tokens minted before device sessions existed carry no `sid`
+  // and are treated as signed out (one re-login, then everything is tracked).
+  if (!payload.sid || !(await isSessionActive(payload.sid, user.id))) {
+    debugAuth(req, "token rejected: device session missing, revoked or expired", { userId: user.id, hasSid: Boolean(payload.sid) });
+    return next();
+  }
+
   req.user = { id: user.id, role: user.role, status: user.status, email: user.email, name: user.name };
   next();
 }
@@ -105,57 +114,48 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
   next();
 }
 
-/** Blocks students whose membership isn't ACTIVE (admins always pass). */
-export async function requireActiveMembership(req: Request, res: Response, next: NextFunction): Promise<void> {
-  if (!req.user) {
-    res.status(401).json({ error: "Please sign in to continue." });
-    return;
-  }
-  if (isAdminRole(req.user.role)) { next(); return; }
-  if (req.user.status === "ACTIVE") { next(); return; }
-
-  // General Trial Mode — an admin-flipped, platform-wide switch (separate
-  // from any individual student's membership/status, and from the existing
-  // per-student POST /students/:id/trial grant) that opens every
-  // membership-gated route to every signed-in student at once, e.g. for a
-  // free trial week or launch promo, without creating/touching a single
-  // med_memberships row. See GET/PATCH /admin/settings's GLOBAL_TRIAL_MODE
-  // key and AdminSettings.tsx's "General trial mode" toggle. Defaults to
-  // off — the setting must be the exact string "true" — so a missing/unset
-  // key (fresh install, or the settings lookup itself failing below) never
-  // accidentally opens the whole site.
-  //
-  // GLOBAL_TRIAL_PROGRAM / GLOBAL_TRIAL_YEAR optionally narrow that switch
-  // to one program (MBBS/BDS) and/or one academic year instead of every
-  // student — e.g. a trial week for MBBS Year 1 only. Empty string on
-  // either key (the default) means "no restriction on that axis", so
-  // leaving both blank reproduces the original every-student behavior
-  // exactly. Uses the same programTargetKind/yearTargetNumber matching
-  // rule as modules/blocks/exams (lib/contentVisibility.ts's
-  // isTargetVisible) for consistency with how targeting already works
-  // everywhere else in the app.
-  let globalTrialEnabled = false;
-  let trialProgram = "";
-  let trialYear = "";
-  try {
-    globalTrialEnabled = (await getSetting("GLOBAL_TRIAL_MODE", "false")) === "true";
-    if (globalTrialEnabled) {
-      trialProgram = (await getSetting("GLOBAL_TRIAL_PROGRAM", "")) ?? "";
-      trialYear = (await getSetting("GLOBAL_TRIAL_YEAR", "")) ?? "";
-    }
-  } catch {
-    globalTrialEnabled = false;
-  }
-  if (globalTrialEnabled) {
-    if (!trialProgram && !trialYear) { next(); return; }
-    try {
-      const targeting = await getStudentTargeting(req.user.id);
-      const yearNum = trialYear ? Number(trialYear) : null;
-      if (isTargetVisible(trialProgram || null, yearNum, targeting)) { next(); return; }
-    } catch {
-      // fails closed — a lookup error here should not silently grant access
-    }
-  }
-
-  res.status(403).json({ error: "An active membership is required to access this content." });
+/** Core "does this user currently have active-membership-gated access"
+ * check, factored out of requireMembershipFor below so a route that needs a
+ * soft yes/no doesn't have to re-implement admin bypass + trial-mode logic
+ * itself and risk drifting out of sync with the real gate. Never touches
+ * the response — safe to call from inside a route handler.
+ *
+ * Order: admins always pass, then a student with an ACTIVE membership, then
+ * General Trial Mode (lib/trial.ts) — an admin-flipped, platform-wide
+ * switch that opens membership-gated routes to signed-in students without
+ * creating or touching a single med_memberships row, so switching it off
+ * (or letting its end date pass) instantly restores normal per-student
+ * gating with nothing to clean up. The trial can be narrowed to a program,
+ * to any set of academic years, and to a chosen set of features — `feature`
+ * says which one THIS route belongs to, so a trial that only unlocks the
+ * MCQ bank doesn't also unlock flashcards. Separate from the per-student
+ * POST /students/:id/trial grant, which is unaffected either way. */
+export async function hasActiveMembership(user: AuthedUser, feature?: TrialFeature | readonly TrialFeature[]): Promise<boolean> {
+  if (isAdminRole(user.role)) return true;
+  if (user.status === "ACTIVE") return true;
+  return trialGrantsAccess(user.id, feature);
 }
+
+type FeatureResolver = TrialFeature | readonly TrialFeature[] | ((req: Request) => TrialFeature | readonly TrialFeature[]);
+
+/** Blocks students whose membership isn't ACTIVE (admins always pass),
+ * unless the platform-wide trial is on and covers `feature` for them.
+ * `feature` may be a function of the request for routes that serve more than
+ * one feature depending on their query (GET /mcqs serves both the MCQ bank
+ * and past-paper practice). */
+export function requireMembershipFor(feature?: FeatureResolver) {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.user) {
+      res.status(401).json({ error: "Please sign in to continue." });
+      return;
+    }
+    const resolved = typeof feature === "function" ? feature(req) : feature;
+    if (await hasActiveMembership(req.user, resolved)) { next(); return; }
+    res.status(403).json({ error: "An active membership is required to access this content." });
+  };
+}
+
+/** Feature-agnostic variant, kept so existing imports keep compiling — only
+ * a full-access trial opens routes gated this way. Prefer
+ * requireMembershipFor("<feature>") on anything new. */
+export const requireActiveMembership = requireMembershipFor();

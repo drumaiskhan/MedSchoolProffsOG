@@ -125,7 +125,12 @@ export const TEAM_CATEGORIES = ['ownership', 'reviewer', 'question_setter'] as c
 export type TeamCategory = typeof TEAM_CATEGORIES[number];
 export const TEAM_CATEGORY_LABELS: Record<TeamCategory, string> = { reviewer: 'Reviewers', question_setter: 'Question setters', ownership: 'Ownership' };
 export interface TeamMember { id: number; name: string; role: string; category: TeamCategory; bio: string; achievementBadge: string; photoPath: string | null; linkedinUrl: string; instagramUrl: string; email: string; active: boolean; displayOrder: number }
+// Resolved General Trial Mode state from GET /site-content (server applies the
+// defaults and honours the end date) — read this, not the raw GLOBAL_TRIAL_*
+// strings below, which are only what an admin last saved.
+export interface TrialStatus { active: boolean; program: string; years: number[]; features: string[]; endsAt: string | null }
 export interface SiteContent {
+  trial?: TrialStatus;
   PLATFORM_NAME: string; PLATFORM_TAGLINE: string; PLATFORM_DESCRIPTION: string;
   // SEO — browser tab title, Google listing, and link-preview title/
   // description; blank means the site falls back to index.html's static
@@ -179,9 +184,39 @@ export const teamApi = {
   remove: (id: number) => request<{ ok: true }>(`/admin/team-members/${id}`, { method: 'DELETE' }),
 };
 
-export interface AdminBookStudent { id: number; title: string; author: string | null; moduleId: number | null; subjectId: number | null; topicId: number | null; storagePath: string | null; coverImagePath: string | null }
+export interface AdminBookStudent { id: number; title: string; author: string | null; moduleId: number | null; subjectId: number | null; topicId: number | null; storagePath: string | null; coverImagePath: string | null; isFree: boolean; price: number | null; currency: string | null; locked: boolean; secureReader?: boolean; purchasePending: boolean }
+export interface BookPurchase { id: number; bookId: number; bookTitle: string; amount: number; currency: string; method: string; reference: string; paymentDate: string; proofPath: string | null; status: 'PAYMENT_PENDING_REVIEW' | 'approved' | 'rejected'; rejectionReason: string | null; submittedAt: string; reviewedAt: string | null }
+// Secure book reader (GET /books/:id/reader …). The reader never receives the
+// PDF: pages arrive as watermarked images, and the word "boxes" carry no text.
+export interface BookReaderInfo { id: number; title: string; author: string | null; pageCount: number; pages: Array<{ w: number; h: number }>; resumePage: number; fileKey: string }
+export type WordBox = [number, number, number, number];
+export type HighlightColor = 'yellow' | 'green' | 'pink' | 'blue';
+export interface BookHighlight { id: number; page: number; kind: 'words' | 'area'; startWord: number | null; endWord: number | null; rect: { x: number; y: number; w: number; h: number } | null; color: HighlightColor; note: string | null; createdAt: string }
+export type NewBookHighlight =
+  | { kind: 'words'; page: number; startWord: number; endWord: number; color?: HighlightColor; note?: string | null }
+  | { kind: 'area'; page: number; rect: { x: number; y: number; w: number; h: number }; color?: HighlightColor; note?: string | null };
+
 export const booksApi = {
+  readerInfo: (id: number) => request<BookReaderInfo>(`/books/${id}/reader`),
+  pageWords: (id: number, page: number) => request<{ page: number; words: WordBox[] }>(`/books/${id}/pages/${page}/words`),
+  // Fetched with the session cookie and drawn straight onto a <canvas>; no
+  // object URL is kept, so there's nothing to "save image as".
+  pageImage: async (id: number, page: number, width: number): Promise<Blob> => {
+    const res = await fetch(`${API_BASE}/books/${id}/pages/${page}/image?w=${width}`, { credentials: 'include', cache: 'no-store' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new ApiRequestError(res.status, (data && data.error) || `Request failed (${res.status})`, data);
+    }
+    return res.blob();
+  },
+  highlights: (id: number) => request<BookHighlight[]>(`/books/${id}/highlights`),
+  addHighlight: (id: number, body: NewBookHighlight) => request<BookHighlight>(`/books/${id}/highlights`, { method: 'POST', body: JSON.stringify(body) }),
+  updateHighlight: (id: number, hid: number, body: { color?: HighlightColor; note?: string | null }) => request<BookHighlight>(`/books/${id}/highlights/${hid}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteHighlight: (id: number, hid: number) => request<{ ok: true }>(`/books/${id}/highlights/${hid}`, { method: 'DELETE' }),
+  saveProgress: (id: number, page: number) => request<{ ok: true }>(`/books/${id}/progress`, { method: 'PUT', body: JSON.stringify({ page }) }),
   list: () => request<AdminBookStudent[]>('/books'),
+  purchase: (bookId: number, body: { method: string; reference: string; paymentDate: string; proofPath?: string | null }) => request<BookPurchase>(`/books/${bookId}/purchases`, { method: 'POST', body: JSON.stringify(body) }),
+  myPurchases: () => request<BookPurchase[]>('/books/purchases/mine'),
 };
 
 export interface AdminModule { id: number; name: string; subtitle: string; subjectCount: number; topicCount: number; progress: number; active: boolean; blockId?: number | null; blockName?: string | null; displayOrder?: number; programTargetKind?: string | null; yearTargetNumber?: number | null; targetingLabel?: string }
@@ -300,15 +335,21 @@ export interface MyFeedbackEntry extends FeedbackEntry { replies: FeedbackReply[
 // api-server routes/student-tools.ts for what's deliberately left out.
 export interface FeaturedTestimonial { id: number; rating: number; message: string; createdAt: string; name: string }
 export interface Analytics { range: string; totalSessions: number; averageScore: number; questionsAnswered: number; timeSpentMinutes: number; currentStreak: number; longestStreak: number }
-export interface LeaderboardRow { rank: number; userId: number; name: string; sessions: number; questionsAnswered: number; correct: number; points: number; accuracy: number; isYou: boolean }
+export interface LeaderboardRow { rank: number; userId: number; name: string; institution: string | null; sessions: number; questionsAnswered: number; correct: number; points: number; accuracy: number; isYou: boolean }
 export interface PaymentDetails { PAYMENT_INSTRUCTIONS: string; PAYMENT_ACCOUNT_HOLDER: string; PAYMENT_ACCOUNT_NUMBER: string; PAYMENT_BANK_NAME: string; PAYMENT_IFSC_OR_ROUTING: string; PAYMENT_UPI_ID: string; PAYMENT_QR_CODE_PATH: string; PAYMENT_QR_CODE_URL?: string; PAYMENT_RAAST_ID: string; PAYMENT_WALLET_PROVIDER: string; PAYMENT_WALLET_NUMBER: string; PAYMENT_WALLET_ACCOUNT_NAME: string; PAYMENT_BANK_ACCOUNTS: string; PAYMENT_METHODS_CONFIG: string; PAYMENT_LATE_FEE_NOTE: string; PAYMENT_REFUND_POLICY: string; DEFAULT_CURRENCY: string; bankAccounts: BankAccount[]; methods: PaymentMethodConfig[] }
 
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
 
+export const couponsApi = {
+  // Public — see routes/coupons.ts's comment for why (registration calls
+  // this before an account even exists).
+  validate: (code: string, planId: number) => request<{ valid: true; discountedAmount: number; discountAmount: number; currency: string }>('/coupons/validate', { method: 'POST', body: JSON.stringify({ code, planId }) }),
+};
+
 export const authApi = {
-  register: (body: { name: string; email: string; password: string; phone: string; rollNumber?: string; institutionId: number; programKind: 'MBBS' | 'BDS'; yearNumber: number; planId: number; method?: string; reference?: string; paymentDate?: string; proofPath?: string }) =>
+  register: (body: { name: string; email: string; password: string; phone: string; rollNumber?: string; institutionId: number; programKind: 'MBBS' | 'BDS'; yearNumber: number; planId: number; method?: string; reference?: string; paymentDate?: string; proofPath?: string; couponCode?: string }) =>
     request<{ user: AuthUser; message: string }>('/auth/register', { method: 'POST', body: JSON.stringify(body) }),
   adminRegister: (body: { name: string; email: string; password: string; inviteCode: string }) =>
     request<{ token: string; user: AuthUser }>('/auth/admin/register', { method: 'POST', body: JSON.stringify(body) }),
@@ -426,7 +467,23 @@ export const feedbackApi = {
 };
 
 export interface ProgressTrend { recentAverage: number | null; priorAverage: number | null; trend: 'up' | 'down' | 'flat' | 'new'; trendDelta: number; recentSessions: number; history: Array<{ date: string; scorePercent: number }>; currentStreak: number; longestStreak: number }
+// GET /student/progress-overview — everything the "My Progress" page shows.
+export interface ProgressOverview {
+  summary: { sessions: number; questionsAnswered: number; uniqueMcqsAttempted: number; accuracy: number | null; timeSpentMinutes: number; activeDaysLast30: number; currentStreak: number; longestStreak: number };
+  recentSessions: Array<{ id: number; date: string; scope: string; mode: string; totalQuestions: number; correctCount: number; scorePercent: number; durationMinutes: number | null }>;
+  bySubject: Array<{ id: number; name: string; answered: number; accuracy: number | null; delta: number | null }>;
+  pastPapers: Array<{ id: number; title: string; year: string; examBoard: string; attemptedQuestions: number; totalQuestions: number; coveragePercent: number; accuracy: number | null; sessions: number; lastAttemptAt: string }>;
+  improvement: {
+    weekly: Array<{ weekStart: string; sessions: number; questions: number; accuracy: number | null }>;
+    trend: 'up' | 'down' | 'flat' | 'new'; deltaPoints: number | null; firstAccuracy: number | null; latestAccuracy: number | null;
+    improvedTopics: ProgressTopic[]; needsWork: ProgressTopic[]; strongest: ProgressTopic[];
+  };
+  exams: Array<{ attemptId: number; examId: number; title: string; attemptNumber: number; submittedAt: string; released: boolean; totalQuestions: number; correctCount: number | null; percentage: number | null; score: number | null; passed: boolean | null }>;
+}
+export interface ProgressTopic { id: number; name: string; subject: string | null; answered: number; accuracy: number | null; delta: number | null }
+
 export const analyticsApi = {
+  overview: () => request<ProgressOverview>('/student/progress-overview'),
   get: (range: string) => request<Analytics>(`/student/analytics?range=${range}`),
   progress: () => request<ProgressTrend>('/student/progress'),
   leaderboard: (range = '30d') => request<LeaderboardRow[]>(`/leaderboard?range=${range}`),

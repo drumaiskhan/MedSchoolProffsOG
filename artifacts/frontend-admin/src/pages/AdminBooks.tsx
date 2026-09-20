@@ -41,9 +41,26 @@ import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiReq
 // mutations already call invalidateQueries on the specific keys they
 // change, so edits still show up immediately — this only avoids redundant
 // background refetches of data nothing has touched.
-import { CollapsibleGroup, ConfirmDialog, EmptyState, SectionHeader, DEGREE_OPTIONS, DEGREE_YEAR_OPTIONS, studyYearToNumber, groupByDegreeYear } from '@/lib/shared';
+import { CollapsibleGroup, ConfirmDialog, EmptyState, SectionHeader, DEGREE_OPTIONS, DEGREE_YEAR_OPTIONS, studyYearToNumber, groupByDegreeYear, cn } from '@/lib/shared';
 import { queryClient } from '@/lib/query-client';
 import { renderPdfFirstPageThumbnail } from '@/lib/pdf-thumbnail';
+
+function BookEditForm({ book, onSave, onCancel, pending }: { book: AdminBook; onSave: (body: { isFree: boolean; price: number | null; currency: string | null }) => void; onCancel: () => void; pending: boolean }) {
+  const [isFree, setIsFree] = useState(book.isFree);
+  const [price, setPrice] = useState(book.price != null ? String(book.price) : '');
+  const [currency, setCurrency] = useState(book.currency || 'PKR');
+  return <div className="mt-3 space-y-2 rounded-xl border border-border bg-background p-3">
+    <label className="flex items-center gap-2 text-xs font-bold"><input type="checkbox" checked={isFree} onChange={(e) => setIsFree(e.target.checked)} data-testid={`checkbox-edit-book-free-${book.id}`} /> Free (no membership required)</label>
+    {!isFree && <div className="flex items-center gap-2">
+      <select value={currency} onChange={(e) => setCurrency(e.target.value)} className="h-8 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`select-edit-book-currency-${book.id}`}><option value="PKR">PKR</option><option value="USD">USD</option></select>
+      <input value={price} onChange={(e) => setPrice(e.target.value)} type="number" min="0" step="0.01" placeholder="Price (optional)" className="h-8 w-full rounded-lg border border-border bg-background px-2 text-xs" data-testid={`input-edit-book-price-${book.id}`} />
+    </div>}
+    <div className="flex justify-end gap-2">
+      <button onClick={onCancel} className="rounded-lg px-3 py-1.5 text-[11px] font-bold text-muted-foreground hover:bg-muted" data-testid={`button-cancel-edit-book-${book.id}`}>Cancel</button>
+      <button onClick={() => onSave({ isFree, price: isFree ? null : (price ? Number(price) : null), currency: isFree ? null : currency })} disabled={pending} className="rounded-lg bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground disabled:opacity-50" data-testid={`button-save-edit-book-${book.id}`}>{pending ? 'Saving…' : 'Save'}</button>
+    </div>
+  </div>;
+}
 
 function AdminBooks() {
   const [degree, setDegree] = useState('');
@@ -52,8 +69,12 @@ function AdminBooks() {
   const [author, setAuthor] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [cover, setCover] = useState<File | null>(null);
+  const [isFree, setIsFree] = useState(false);
+  const [price, setPrice] = useState('');
+  const [currency, setCurrency] = useState('PKR');
   const [open, setOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const booksQ = useQuery({ queryKey: ['admin-books'], queryFn: booksAdminApi.list });
   const books = booksQ.data ?? [];
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['admin-books'] });
@@ -72,10 +93,15 @@ function AdminBooks() {
         const thumb = await renderPdfFirstPageThumbnail(file);
         if (thumb) coverPath = (await uploadFile(new File([thumb], 'cover.jpg', { type: 'image/jpeg' }), 'book')).storagePath;
       }
-      return booksAdminApi.create({ title: title.trim(), author: author.trim() || undefined, programTargetKind: degree || null, yearTargetNumber: studyYearToNumber(degree, studyYear) ?? null, storagePath: uploaded.storagePath, coverImagePath: coverPath });
+      return booksAdminApi.create({ title: title.trim(), author: author.trim() || undefined, programTargetKind: degree || null, yearTargetNumber: studyYearToNumber(degree, studyYear) ?? null, storagePath: uploaded.storagePath, coverImagePath: coverPath, isFree, price: isFree ? null : (price ? Number(price) : null), currency: isFree ? null : currency });
     },
-    onSuccess: () => { invalidate(); setOpen(false); setTitle(''); setAuthor(''); setFile(null); setCover(null); setDegree(''); setStudyYear(''); toast({ title: 'Book added', description: 'Now visible to students.' }); },
+    onSuccess: () => { invalidate(); setOpen(false); setTitle(''); setAuthor(''); setFile(null); setCover(null); setDegree(''); setStudyYear(''); setIsFree(false); setPrice(''); toast({ title: 'Book added', description: 'Now visible to students.' }); },
     onError: (err: unknown) => toast({ title: 'Could not add book', description: err instanceof ApiRequestError ? err.message : err instanceof Error ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  });
+  const update = useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Parameters<typeof booksAdminApi.update>[1] }) => booksAdminApi.update(id, body),
+    onSuccess: () => { invalidate(); setEditingId(null); toast({ title: 'Book updated' }); },
+    onError: (err: unknown) => toast({ title: 'Could not update book', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
   const remove = useMutation({
     mutationFn: booksAdminApi.removePermanent,
@@ -116,6 +142,14 @@ function AdminBooks() {
         </select>
       </div>
       <p className="text-[11px] text-muted-foreground">Leave program/year unset to make the book visible to every student.</p>
+      <div className="flex items-center gap-4 rounded-xl border border-border bg-background px-3 py-2.5">
+        <label className="flex items-center gap-2 text-xs font-bold"><input type="checkbox" checked={isFree} onChange={(e) => setIsFree(e.target.checked)} data-testid="checkbox-book-free" /> Free (no membership required)</label>
+        {!isFree && <div className="flex items-center gap-2">
+          <select value={currency} onChange={(e) => setCurrency(e.target.value)} className="h-8 rounded-lg border border-border bg-background px-2 text-xs" data-testid="select-book-currency"><option value="PKR">PKR</option><option value="USD">USD</option></select>
+          <input value={price} onChange={(e) => setPrice(e.target.value)} type="number" min="0" step="0.01" placeholder="Price (optional)" className="h-8 w-32 rounded-lg border border-border bg-background px-2 text-xs" data-testid="input-book-price" />
+        </div>}
+      </div>
+      <p className="text-[11px] text-muted-foreground">{isFree ? 'Visible to every logged-in student, regardless of membership.' : 'Requires an active membership. Price shown here is informational only — students still get access through membership, not a separate purchase.'}</p>
       <div className="grid gap-2 sm:grid-cols-2"><label className="flex h-10 cursor-pointer items-center gap-2 rounded-xl border border-dashed border-border px-3 text-xs font-bold text-muted-foreground"><UploadCloud size={14} />{file ? file.name : 'Choose PDF'}<input type="file" accept="application/pdf" onChange={(e) => setFile(e.target.files?.[0] ?? null)} className="hidden" data-testid="input-book-file" /></label><label className="flex h-10 cursor-pointer items-center gap-2 rounded-xl border border-dashed border-border px-3 text-xs font-bold text-muted-foreground"><UploadCloud size={14} />{cover ? cover.name : 'Cover image (optional)'}<input type="file" accept="image/*" onChange={(e) => setCover(e.target.files?.[0] ?? null)} className="hidden" data-testid="input-book-cover" /></label></div>
       <button type="submit" disabled={create.isPending || !title.trim() || !file} className="rounded-xl bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-submit-book">{create.isPending ? 'Uploading…' : 'Add book'}</button>
     </form>}
@@ -129,8 +163,17 @@ function AdminBooks() {
       {g.groups.map((yg) => <CollapsibleGroup key={yg.year || 'no-year'} defaultOpen title={yg.year ? [yg.year, (g.degree === 'MBBS' || g.degree === 'BDS') ? g.degree : ''].filter(Boolean).join(' ') : 'No year set'} count={yg.items.length} nested testId={`books-year-${g.degree || 'unspecified'}-${yg.year || 'no-year'}`}>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{yg.items.map((b) => <div key={b.id} className="rounded-2xl border border-border bg-card p-4" data-testid={`card-book-${b.id}`}>
           {b.coverImagePath && <img src={resolveUploadUrl(b.coverImagePath) ?? undefined} alt="" loading="lazy" decoding="async" className="mb-3 h-32 w-full rounded-lg object-cover" />}
-          <p className="text-sm font-bold leading-5">{b.title}</p>{b.author && <p className="mt-1 text-xs text-muted-foreground">{b.author}</p>}
-          <div className="mt-3 flex items-center justify-between">{resolveUploadUrl(b.storagePath) ? <a href={resolveUploadUrl(b.storagePath)!} target="_blank" rel="noreferrer" className="text-xs font-bold text-primary" data-testid={`link-open-book-${b.id}`}>Open PDF <ArrowRight size={12} className="ml-1 inline" /></a> : <span className="text-[11px] font-bold text-destructive" data-testid={`text-book-unavailable-${b.id}`}>Link broken — try "Fix broken links"</span>}<button onClick={() => setDeletingId(b.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-book-${b.id}`}><Trash2 size={14} /></button></div>
+          <div className="flex items-start justify-between gap-2">
+            <div><p className="text-sm font-bold leading-5">{b.title}</p>{b.author && <p className="mt-1 text-xs text-muted-foreground">{b.author}</p>}</div>
+            <span className={cn('shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold', b.isFree ? 'bg-[#d7eee4] text-[#164b4b]' : 'bg-muted text-muted-foreground')} data-testid={`text-book-tier-${b.id}`}>{b.isFree ? 'Free' : b.price != null ? `${b.currency ?? ''} ${b.price}`.trim() : 'Paid'}</span>
+          </div>
+          {editingId === b.id ? <BookEditForm book={b} onSave={(body) => update.mutate({ id: b.id, body })} onCancel={() => setEditingId(null)} pending={update.isPending} /> : <div className="mt-3 flex items-center justify-between">
+            {resolveUploadUrl(b.storagePath) ? <a href={resolveUploadUrl(b.storagePath)!} target="_blank" rel="noreferrer" className="text-xs font-bold text-primary" data-testid={`link-open-book-${b.id}`}>Open PDF <ArrowRight size={12} className="ml-1 inline" /></a> : <span className="text-[11px] font-bold text-destructive" data-testid={`text-book-unavailable-${b.id}`}>Link broken — try "Fix broken links"</span>}
+            <div className="flex items-center gap-1">
+              <button onClick={() => setEditingId(b.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Edit book" data-testid={`button-edit-book-${b.id}`}><Pencil size={14} /></button>
+              <button onClick={() => setDeletingId(b.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Delete book" data-testid={`button-delete-book-${b.id}`}><Trash2 size={14} /></button>
+            </div>
+          </div>}
         </div>)}</div>
       </CollapsibleGroup>)}
     </CollapsibleGroup>) : <EmptyState icon={BookOpen} title="No books yet" body="Upload a PDF above — students can browse and open it from their Books tab." />}

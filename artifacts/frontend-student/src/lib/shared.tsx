@@ -67,11 +67,36 @@ export const money = (amount: number, currency = 'PKR') => new Intl.NumberFormat
 // program/year strings mean "no restriction on that axis" (see
 // routes/settings.ts's comment on those two keys) — this only affects the
 // wording, the actual access grant is enforced server-side either way.
-function ordinalYear(year: string) { return `${year}${year === '1' ? 'st' : year === '2' ? 'nd' : year === '3' ? 'rd' : 'th'} Year`; }
-export function trialScopeLabel(program?: string, year?: string): string | null {
-  const parts = [program || '', year ? ordinalYear(year) : ''].filter(Boolean);
+function ordinalYear(year: number) { return `${year}${year === 1 ? 'st' : year === 2 ? 'nd' : year === 3 ? 'rd' : 'th'}`; }
+// e.g. "MBBS · 1st, 2nd & 3rd Year". Null when the trial isn't narrowed at all.
+export function trialScopeLabel(program?: string, years?: number[]): string | null {
+  const yearPart = years?.length ? `${years.map(ordinalYear).join(', ').replace(/, (\d+\w+)$/, ' & $1')} Year` : '';
+  const parts = [program || '', yearPart].filter(Boolean);
   return parts.length ? parts.join(' · ') : null;
 }
+
+// Student-facing names for the trial's feature keys (the server's
+// TRIAL_FEATURE_OPTIONS in api-server/src/lib/trial.ts). Unknown keys fall
+// back to the key itself so a newly added feature still reads sensibly.
+const TRIAL_FEATURE_LABEL: Record<string, string> = {
+  mcqs: 'MCQ bank', past_papers: 'Past papers', exams: 'Pre-Proffs exams', flashcards: 'Flashcards', resources: 'Resources',
+  ai_explain: 'Ask AI', ai_visualizer: 'AI Visualizer', challenges: 'Challenges', books: 'Books',
+};
+export function trialFeatureSummary(features: string[]): string {
+  const names = features.map((k) => TRIAL_FEATURE_LABEL[k] ?? k);
+  if (!names.length) return 'no features';
+  if (names.length === 1) return names[0];
+  return `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`;
+}
+export function trialEndsLabel(endsAt: string | null | undefined): string {
+  return endsAt ? ` until ${new Date(endsAt).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })}` : '';
+}
+
+// Sidebar routes that belong to one trial-gated feature. Books aren't listed:
+// they're sold one by one, so the Books page shows lock state per book.
+const NAV_FEATURE: Record<string, string> = {
+  '/blocks': 'mcqs', '/exams': 'exams', '/past-papers': 'past_papers', '/flashcards': 'flashcards', '/ai-visualizer': 'ai_visualizer', '/challenge': 'challenges',
+};
 // Turns a just-finished session's score plus the student's recent-vs-prior
 // trend into one short, human verdict for the result card and the
 // dashboard progress profile. Session score takes priority when it's a
@@ -218,7 +243,7 @@ type NavItem = [string, string, typeof LayoutDashboard];
 
 export const navGroups: Array<{ label: string; items: NavItem[] }> = [
   { label: 'Study desk', items: [
-    ['/dashboard', 'Overview', LayoutDashboard], ['/blocks', 'Blocks', BookOpen], ['/exams', 'Pre-Proffs Exams', ClipboardCheck], ['/past-papers', 'Past papers', FileStack], ['/flashcards', 'Flashcards', Zap], ['/ai-visualizer', 'AI Visualizer', Wand2], ['/books', 'Books', Library],
+    ['/dashboard', 'Overview', LayoutDashboard], ['/progress', 'My progress', TrendingUp], ['/blocks', 'Blocks', BookOpen], ['/exams', 'Pre-Proffs Exams', ClipboardCheck], ['/past-papers', 'Past papers', FileStack], ['/flashcards', 'Flashcards', Zap], ['/ai-visualizer', 'AI Visualizer', Wand2], ['/books', 'Books', Library],
   ] },
   { label: 'Your tools', items: [
     ['/notebook', 'My notebook', NotebookPen], ['/saved-sessions', 'Saved sessions', Bookmark], ['/flagged-mcqs', 'Flagged MCQs', Flag], ['/leaderboard', 'Leaderboard', Trophy], ['/challenge', 'Challenge a friend', Swords],
@@ -236,13 +261,24 @@ export function SideNav({ user, onClose }: { user: User; onClose: () => void }) 
   const siteContentQ = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get });
   const aiVisualizerEnabled = siteContentQ.data?.AI_VISUALIZER_ENABLED !== 'false';
   const groups = aiVisualizerEnabled ? navGroups : navGroups.map((g) => ({ ...g, items: g.items.filter(([href]) => href !== '/ai-visualizer') }));
+  // While a feature-limited trial is live, a student without a paid
+  // membership sees which sections the trial doesn't include (lock icon,
+  // linking to Membership) instead of tapping in and hitting a 403. Purely
+  // presentational — the API enforces the same rule (requireMembershipFor).
+  const dashboardQ = useGetStudentDashboard();
+  const trial = siteContentQ.data?.trial;
+  const paidMember = dashboardQ.data?.membershipStatus === 'ACTIVE';
+  const isLockedByTrial = (href: string) => {
+    const feature = NAV_FEATURE[href];
+    return !!(trial?.active && feature && user.role !== 'admin' && !paidMember && dashboardQ.data && !trial.features.includes(feature));
+  };
   const notifQ = useListNotifications();
   const unreadCount = (notifQ.data ?? []).filter((n) => !n.read).length;
   const logout = useMutation({ mutationFn: authApi.logout, onSuccess: () => { queryClient.clear(); window.location.href = '/login'; } });
   return <aside className="fixed inset-y-0 left-0 z-40 flex w-[240px] flex-col overflow-y-auto bg-sidebar px-3 py-5 text-sidebar-foreground shadow-xl md:sticky md:top-0 md:h-[100dvh] md:shadow-none">
     <div className="mb-8 flex items-center justify-between px-2"><Logo dark href="/dashboard" /><button className="rounded-lg p-2 text-sidebar-foreground/60 hover:bg-sidebar-accent md:hidden" onClick={onClose} data-testid="button-close-menu"><X size={18} /></button></div>
     <nav className="space-y-5">
-       {groups.map((group) => <div key={group.label}><div className="mb-1.5 px-3.5 font-mono-app text-[9px] font-bold uppercase tracking-[.14em] text-sidebar-foreground/40">{group.label}</div><div className="space-y-1">{group.items.map(([href, label, Icon]) => <Link key={href} href={href} onClick={onClose} className={cn('group flex items-center gap-3 rounded-xl px-3.5 py-3 text-[13px] font-semibold transition-colors', location === href ? 'nav-active bg-white text-sidebar shadow-sm' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground')} data-testid={`link-nav-${label.toLowerCase().replaceAll(' ', '-')}`}><Icon size={18} strokeWidth={location === href ? 2.2 : 1.8} /><span>{label}</span>{label === 'Notifications' && unreadCount > 0 && <span className="ml-auto grid size-5 place-items-center rounded-full bg-[#e5a952] text-[10px] font-bold text-[#183844]">{unreadCount > 9 ? '9+' : unreadCount}</span>}</Link>)}</div></div>)}
+       {groups.map((group) => <div key={group.label}><div className="mb-1.5 px-3.5 font-mono-app text-[9px] font-bold uppercase tracking-[.14em] text-sidebar-foreground/40">{group.label}</div><div className="space-y-1">{group.items.map(([href, label, Icon]) => { const locked = isLockedByTrial(href); return <Link key={href} href={locked ? '/payments' : href} onClick={onClose} title={locked ? `${label} isn't part of the free trial — see Membership` : undefined} className={cn('group flex items-center gap-3 rounded-xl px-3.5 py-3 text-[13px] font-semibold transition-colors', location === href ? 'nav-active bg-white text-sidebar shadow-sm' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground', locked && 'opacity-60')} data-testid={`link-nav-${label.toLowerCase().replaceAll(' ', '-')}`}><Icon size={18} strokeWidth={location === href ? 2.2 : 1.8} /><span>{label}</span>{locked && <LockKeyhole size={12} className="ml-auto" data-testid={`icon-nav-locked-${label.toLowerCase().replaceAll(' ', '-')}`} />}{label === 'Notifications' && unreadCount > 0 && <span className="ml-auto grid size-5 place-items-center rounded-full bg-[#e5a952] text-[10px] font-bold text-[#183844]">{unreadCount > 9 ? '9+' : unreadCount}</span>}</Link>; })}</div></div>)}
     </nav>
     <div className="mt-auto pt-5">
       <div className="flex items-center gap-3 rounded-xl px-2.5 py-2.5"><div className="grid size-9 shrink-0 place-items-center rounded-full bg-sidebar-primary text-xs font-extrabold text-sidebar-primary-foreground">{initials(user.name)}</div><div className="min-w-0 flex-1"><div className="truncate text-xs font-bold text-sidebar-foreground">{user.name}</div><div className="truncate text-[10px] text-sidebar-foreground/45">{user.institution || 'Medical student'}</div></div><button onClick={() => logout.mutate()} disabled={logout.isPending} className="text-sidebar-foreground/50 hover:text-sidebar-foreground disabled:opacity-50" data-testid="button-signout" title="Sign out"><LogOut size={15} /></button></div>
@@ -456,8 +492,9 @@ export function Shell({ children }: { children: ReactNode }) {
   // as one) that every membership-gated page is unlocked for everyone
   // right now. Hidden in focus mode so it doesn't crowd the
   // distraction-free exam/practice header.
-  const globalTrialMode = siteContentQ.data?.GLOBAL_TRIAL_MODE === 'true';
-  const globalTrialScope = trialScopeLabel(siteContentQ.data?.GLOBAL_TRIAL_PROGRAM, siteContentQ.data?.GLOBAL_TRIAL_YEAR);
+  const trial = siteContentQ.data?.trial;
+  const globalTrialMode = !!trial?.active;
+  const globalTrialScope = trialScopeLabel(trial?.program, trial?.years);
   // Bug fix: admin's "Announcement banner" setting had a live text field
   // and a "blank to hide" contract, but nothing on the student side ever
   // read ANNOUNCEMENT_BANNER or rendered it — so it silently did nothing
@@ -527,7 +564,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </div>
           <button onClick={() => setDismissedAnnouncement(announcementText)} className="ml-1 shrink-0 rounded p-0.5 hover:bg-white/15" aria-label="Dismiss announcement" data-testid="button-dismiss-announcement"><X size={12} /></button>
         </div>}
-        {globalTrialMode && <div className="flex items-center justify-center gap-2 bg-[#e5a952] px-4 py-1.5 text-center text-[11px] font-bold text-[#183844]" data-testid="banner-global-trial-mode"><Sparkles size={12} /> Trial mode is on — every feature is free to use right now{globalTrialScope ? ` for ${globalTrialScope} students` : ''}.</div>}
+        {globalTrialMode && trial && <div className="flex items-center justify-center gap-2 bg-[#e5a952] px-4 py-1.5 text-center text-[11px] font-bold text-[#183844]" data-testid="banner-global-trial-mode"><Sparkles size={12} /> Free trial{globalTrialScope ? ` for ${globalTrialScope} students` : ''}: {trialFeatureSummary(trial.features)} unlocked{trialEndsLabel(trial.endsAt)}.</div>}
       </div>}
       {focusMode
         ? <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border/70 bg-background/90 px-4 backdrop-blur-md md:px-8">{strictFocusMode ? <span className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold text-muted-foreground" data-testid="text-exam-locked"><LockKeyhole size={13} /> Exam in progress</span> : <button onClick={() => setLocation('/dashboard')} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold text-muted-foreground hover:bg-muted" data-testid="button-exit-focus-mode"><ArrowLeft size={15} /> Exit</button>}<span className="text-xs font-bold capitalize text-foreground">{title}</span></header>
@@ -640,7 +677,7 @@ export const QUICK_LINK_TILES: Array<{ href: string; label: string; sub: string;
   { href: '/flashcards', label: 'Flashcards', sub: 'Revise smarter', icon: Sparkles, bg: 'bg-[#e6dcf5]', fg: 'text-[#6b3fa0]' },
   { href: '/past-papers', label: 'Past Papers', sub: 'Previous exam papers', icon: FileStack, bg: 'bg-[#fbdada]', fg: 'text-[#b8493f]' },
   { href: '/flagged-mcqs', label: 'Bookmarks', sub: 'Saved content', icon: Bookmark, bg: 'bg-[#fff0cb]', fg: 'text-[#94651c]' },
-  { href: '#progress-profile', label: 'My Progress', sub: 'Track your growth', icon: TrendingUp, bg: 'bg-[#dde4f7]', fg: 'text-[#3b4f8f]' },
+  { href: '/progress', label: 'My Progress', sub: 'Track your growth', icon: TrendingUp, bg: 'bg-[#dde4f7]', fg: 'text-[#3b4f8f]' },
   // Special-cased in the render below (href === OPEN_SEARCH_HREF) to open
   // the QuickJump overlay via a custom event instead of navigating — the
   // Shell that owns QuickJump's open/close state lives outside Dashboard's
@@ -660,6 +697,8 @@ export const OPEN_SEARCH_EVENT = 'medschoolproffs:open-search';
 // section (with a brief highlight so it's obvious something happened)
 // instead of attempting a "navigation".
 
+// Kept for the dashboard's inline Progress profile card anchor; the "My Progress"
+// quick link itself now goes to the full /progress page.
 export const PROGRESS_ANCHOR_HREF = '#progress-profile';
 
 // Cycling palette for module tiles (Continue Learning / Recommended) so the
@@ -991,6 +1030,7 @@ export function Podium({ rows }: { rows: LeaderboardRow[] }) {
       {config.crown && <Crown size={22} className="mb-1 text-[#e8c34a]" fill="currentColor" />}
       <div className={cn('relative grid place-items-center rounded-full font-extrabold', config.size, config.ring, config.avatarBg, config.avatarText)}>{initials(row.name)}</div>
       <div className="mt-2.5 max-w-[92px] truncate text-center text-xs font-extrabold text-foreground">{row.name}{row.isYou && <span className="block text-[9px] font-bold text-primary">(you)</span>}</div>
+      {row.institution && <div className="max-w-[92px] truncate text-center text-[9px] font-semibold text-muted-foreground">{row.institution}</div>}
       <div className="mt-0.5 font-mono-app text-[11px] font-bold text-[#8a5a12]">{row.points} pts</div>
       <div className={cn('mt-3 flex w-full flex-col items-center justify-start rounded-t-2xl border-t border-border pt-2.5', config.height, config.bar)}><span className={cn('grid size-7 place-items-center rounded-full text-xs font-extrabold', config.badge)}>{place}</span></div>
     </div>;
