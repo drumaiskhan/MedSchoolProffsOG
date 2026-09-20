@@ -3,6 +3,7 @@ import { and, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, practiceAttemptsTable, practiceAnswersTable, mcqsTable, usersTable } from "@workspace/db";
 import { requireAuth, requireMembershipFor } from "../middlewares/auth";
+import { liveStreak, utcDay } from "../lib/streak";
 
 const router: IRouter = Router();
 
@@ -111,8 +112,10 @@ router.get("/student/analytics", requireAuth, async (req, res): Promise<void> =>
     averageScore: Number(averageScore.toFixed(1)),
     questionsAnswered: totalQuestions,
     timeSpentMinutes: Math.round(timeSpentSeconds / 60),
-    currentStreak: user?.currentStreak ?? 0,
-    longestStreak: user?.longestStreak ?? 0,
+    // liveStreak(): the stored number goes stale the moment a student stops
+    // practising, so a lapsed run reads 0 instead of its old value.
+    currentStreak: liveStreak(user).current,
+    longestStreak: liveStreak(user).longest,
   });
 });
 
@@ -137,10 +140,15 @@ router.get("/student/progress", requireAuth, async (req, res): Promise<void> => 
   const recentSince = new Date(now); recentSince.setDate(recentSince.getDate() - 7);
   const priorSince = new Date(now); priorSince.setDate(priorSince.getDate() - 14);
 
-  const [allAttempts, user] = await Promise.all([
+  // Bug fix: this destructured `user` straight out of Promise.all, but
+  // db.select() resolves to an ARRAY of rows — so `user?.currentStreak` below
+  // was always undefined and the "day streak" on the progress profile card
+  // read 0 for everyone. Take the first row explicitly.
+  const [allAttempts, userRows] = await Promise.all([
     db.select().from(practiceAttemptsTable).where(and(eq(practiceAttemptsTable.userId, req.user!.id), gte(practiceAttemptsTable.createdAt, priorSince))).orderBy(desc(practiceAttemptsTable.createdAt)),
     db.select().from(usersTable).where(eq(usersTable.id, req.user!.id)),
   ]);
+  const user = userRows[0];
   const recentAttempts = allAttempts.filter((a) => a.createdAt >= recentSince);
   const priorAttempts = allAttempts.filter((a) => a.createdAt < recentSince);
   const recentAverage = weightedAverage(recentAttempts);
@@ -162,8 +170,8 @@ router.get("/student/progress", requireAuth, async (req, res): Promise<void> => 
     trendDelta,
     recentSessions: recentAttempts.length,
     history,
-    currentStreak: user?.currentStreak ?? 0,
-    longestStreak: user?.longestStreak ?? 0,
+    currentStreak: liveStreak(user).current,
+    longestStreak: liveStreak(user).longest,
   });
 });
 
@@ -219,25 +227,77 @@ router.get("/leaderboard", requireAuth, async (req, res): Promise<void> => {
     : [];
   const studentMap = new Map(students.map((u) => [u.id, u]));
 
-  const ranked = scored.filter((row) => studentMap.has(row.userId)).sort((a, b) => b.points - a.points);
+  // Ties on points used to fall back to whatever order the GROUP BY happened
+  // to return, so two students on the same score could swap places between
+  // polls (the page refreshes every 10s). Break ties by accuracy, then volume,
+  // then id so the order is stable.
+  const ranked = scored
+    .filter((row) => studentMap.has(row.userId))
+    .sort((a, b) => b.points - a.points || (b.total ? b.correct / b.total : 0) - (a.total ? a.correct / a.total : 0) || b.total - a.total || a.userId - b.userId);
 
-  res.json(ranked.map((row, index) => ({
-    rank: index + 1,
-    userId: row.userId,
-    name: studentMap.get(row.userId)?.name ?? "Student",
-    // Same field the payment/profile views already surface a student's
-    // college under (usersTable.institution — see userView/paymentView in
-    // routes/medschool.ts) — added here so the leaderboard can show which
-    // college each player is from, without a separate institutionsTable
-    // join or a new column.
-    institution: studentMap.get(row.userId)?.institution ?? null,
-    sessions: Number(row.sessions),
-    questionsAnswered: row.total,
-    correct: row.correct,
-    points: row.points,
-    accuracy: row.total ? Number(((row.correct / row.total) * 100).toFixed(1)) : 0,
-    isYou: row.userId === req.user!.id,
-  })));
+  res.json(ranked.map((row, index) => {
+    const student = studentMap.get(row.userId);
+    // Live streak (0 once a day has been missed) — see lib/streak.ts.
+    const streak = liveStreak(student);
+    return {
+      rank: index + 1,
+      userId: row.userId,
+      name: student?.name ?? "Student",
+      currentStreak: streak.current,
+      longestStreak: streak.longest,
+      practicedToday: streak.practicedToday,
+      // Same field the payment/profile views already surface a student's
+      // college under (usersTable.institution — see userView/paymentView in
+      // routes/medschool.ts) — added here so the leaderboard can show which
+      // college each player is from, without a separate institutionsTable
+      // join or a new column.
+      institution: student?.institution ?? null,
+      sessions: Number(row.sessions),
+      questionsAnswered: row.total,
+      correct: row.correct,
+      points: row.points,
+      accuracy: row.total ? Number(((row.correct / row.total) * 100).toFixed(1)) : 0,
+      isYou: row.userId === req.user!.id,
+    };
+  }));
+});
+
+// ---------------------------------------------------------------------------
+// Streak card — the signed-in student's own streak plus the last 14 days of
+// activity, for the leaderboard hero (flame + day dots). Separate from
+// /leaderboard so the (polled, all-students) board doesn't carry per-day data.
+// ---------------------------------------------------------------------------
+
+router.get("/leaderboard/streak", requireAuth, async (req, res): Promise<void> => {
+  const WINDOW_DAYS = 14;
+  const since = new Date();
+  since.setUTCDate(since.getUTCDate() - (WINDOW_DAYS - 1));
+  since.setUTCHours(0, 0, 0, 0);
+
+  const [attempts, [user]] = await Promise.all([
+    db.select({ createdAt: practiceAttemptsTable.createdAt, totalQuestions: practiceAttemptsTable.totalQuestions })
+      .from(practiceAttemptsTable)
+      .where(and(eq(practiceAttemptsTable.userId, req.user!.id), gte(practiceAttemptsTable.createdAt, since))),
+    db.select().from(usersTable).where(eq(usersTable.id, req.user!.id)),
+  ]);
+
+  const perDay = new Map<string, { sessions: number; questions: number }>();
+  for (const a of attempts) {
+    const key = a.createdAt.toISOString().slice(0, 10);
+    const cur = perDay.get(key) ?? { sessions: 0, questions: 0 };
+    cur.sessions += 1;
+    cur.questions += a.totalQuestions;
+    perDay.set(key, cur);
+  }
+  // Oldest -> newest, always WINDOW_DAYS entries (empty days included).
+  const days = Array.from({ length: WINDOW_DAYS }, (_, i) => {
+    const date = utcDay(i - (WINDOW_DAYS - 1));
+    const v = perDay.get(date);
+    return { date, sessions: v?.sessions ?? 0, questions: v?.questions ?? 0 };
+  });
+
+  const s = liveStreak(user);
+  res.json({ currentStreak: s.current, longestStreak: s.longest, practicedToday: s.practicedToday, atRisk: s.atRisk, days });
 });
 
 export default router;

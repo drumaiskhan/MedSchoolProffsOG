@@ -91,7 +91,7 @@ function Dashboard() {
             <div className="flex items-center justify-between"><span className="flex items-center gap-1.5 text-muted-foreground"><Target size={13} className="text-primary" /> Questions attempted</span><span className="font-bold">{analytics.data?.questionsAnswered ?? 0}</span></div>
             <div className="flex items-center justify-between"><span className="flex items-center gap-1.5 text-muted-foreground"><CheckCircle2 size={13} className="text-primary" /> Accuracy</span><span className="font-bold">{analytics.data?.averageScore ?? 0}%</span></div>
             <div className="flex items-center justify-between"><span className="flex items-center gap-1.5 text-muted-foreground"><BookOpen size={13} className="text-primary" /> Modules completed</span><span className="font-bold">{modulesCompleted}</span></div>
-            <div className="flex items-center justify-between"><span className="flex items-center gap-1.5 text-muted-foreground"><Flame size={13} className="text-[#e5a952]" /> Current streak</span><span className="font-bold">{analytics.data?.currentStreak ?? 0} days</span></div>
+            <div className="flex items-center justify-between"><span className="flex items-center gap-1.5 text-muted-foreground"><Flame size={13} className="text-[#e5a952]" /> Current streak</span><Link href="/leaderboard" className="inline-flex items-center gap-1 rounded-full bg-[#fff0cb] px-2 py-0.5 font-bold text-[#94651c]" data-testid="link-dashboard-streak"><Flame size={11} fill="currentColor" />{analytics.data?.currentStreak ?? 0} days</Link></div>
           </div>
         </div>
       </div>

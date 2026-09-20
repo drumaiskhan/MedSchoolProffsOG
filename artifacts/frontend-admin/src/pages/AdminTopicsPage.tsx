@@ -1,125 +1,147 @@
-// Auto-extracted route page — code-split via React.lazy() in App.tsx.
-import { type ReactNode, type ComponentProps, useState, useEffect } from 'react';
-import { QueryClient, QueryClientProvider, useMutation, useQuery } from '@tanstack/react-query';
-import { Link, Route, Switch, useLocation, useSearch, useParams, Router as WouterRouter } from 'wouter';
-import {ArrowLeft, ArrowRight, BookOpen, Check, CheckCircle2, ChevronRight, ChevronUp, ChevronDown, CircleHelp, Clock3, CreditCard, FileText, Flame, FolderOpen, LayoutDashboard, Library, LockKeyhole, LogOut, Menu, MoreHorizontal, Pencil, Plus, ReceiptText, Search, Settings, ShieldCheck, Sparkles, Stethoscope, Target, Trash2, TrendingUp, Users, X, Zap, Bell, SlidersHorizontal, FileStack, NotebookPen, Bookmark, Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash, GraduationCap, CalendarDays, Eye, EyeOff, Smartphone, UploadCloud, ImageOff, RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Wand2, Activity, Layers, BarChart3, ToggleLeft, Download, Database, Loader2} from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { applyThemeVars, DEFAULT_THEME, readableForegroundHsl } from '@/lib/theme';
-import {
-  getListMembershipPlansQueryKey, getListPaymentsQueryKey, getListMcqsQueryKey, getListModulesQueryKey, getListStudentsQueryKey, getListNotificationsQueryKey, getGetCurrentUserQueryKey, getListFlashcardsQueryKey,
-  useApprovePayment, useCreateMembershipPlan, useCreateMcq, useCreateModule, useGetAdminDashboard, getGetAdminDashboardQueryKey,
-  useGetCurrentUser, useGetStudentDashboard, useListFlashcards, useListMembershipPlans,
-  useListMcqs, useListModules, useListNotifications, useListPayments, useListResources,
-  useListStudents, useListSubjects, useListTopics, useRejectPayment,
-  useSubmitPayment, useUpdateMembershipPlan,
-} from '@workspace/api-client-react';
-import type {
-  AdminDashboard, Flashcard, Mcq, MembershipPlan, Module, Notification, Payment, Resource,
-  Student, Subject, Topic, User
-} from '@workspace/api-client-react';
-import { ErrorBoundary } from '@/components/error-boundary';
-import { Toaster } from '@/components/ui/toaster';
+// Topics (v37 rebuild): Program/Year → Subject tree with search, an "empty
+// topics" filter (topics no MCQ points at yet), in-place add, BULK add (paste a
+// list, one topic per line), inline rename and a reorder that renumbers the
+// whole subject list. data-testid hooks of the old page are kept.
+import { useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { CircleSlash, Layers, ListChecks, ListPlus, ListTree, Pencil, Trash2, GraduationCap } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
-import { useIsMobile } from '@/hooks/use-mobile';
-import { TooltipProvider } from '@/components/ui/tooltip';
-import NotFound from '@/pages/not-found';
-import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, analyticsApi, mcqImportApi, flashcardImportApi, mcqBackupApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, subjectAdminApi, topicAdminApi, flashcardsAdminApi, flashcardsAiApi, booksAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blockAdminApi, examsAdminApi, examsApi, explanationsApi, auditApi, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type FlashcardCandidate, type StudentDetail, type SiteContent, type TeamMember, TEAM_CATEGORIES, TEAM_CATEGORY_LABELS, type TeamCategory, type AdminModule, type AdminBlock, type AdminSubject, type AdminTopic, type AdminFlashcard, type GeneratedFlashcard, type AdminMcqRow, type AdminBook, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type BankAccount, type PaymentMethodConfig, aiVisualizerAdminApi, type AiVisualizerLogEntry, type AuditLogEntry } from '@/lib/api';
-
-// Round 3, item 10 (performance) — same over-fetching fix as the student
-// app (see its App.tsx for the full rationale): `new QueryClient()` with no
-// options refetched on every mount and every window refocus. Admin
-// mutations already call invalidateQueries on the specific keys they
-// change, so edits still show up immediately — this only avoids redundant
-// background refetches of data nothing has touched.
-import { CollapsibleGroup, ConfirmDialog, EmptyState, SectionHeader, groupByProgramYear } from '@/lib/shared';
+import { ApiRequestError, moduleAdminApi, subjectAdminApi, topicAdminApi, type AdminTopic } from '@/lib/api';
+import { ConfirmDialog, EmptyState, SectionHeader, SkeletonPage, groupByProgramYear } from '@/lib/shared';
+import { Chip, Group, MoveButtons, QuickAdd, SearchBox, StatTiles, byOrder, inputClass, planReorder } from '@/lib/admin-ui';
 import { queryClient } from '@/lib/query-client';
+
+const failToast = (title: string) => (err: unknown) => toast({ title, description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' });
 
 function AdminTopicsPage() {
   const modulesQ = useQuery({ queryKey: ['admin-modules'], queryFn: moduleAdminApi.listAll });
   const subjectsQ = useQuery({ queryKey: ['admin-subjects-all'], queryFn: () => subjectAdminApi.list() });
   const topicsQ = useQuery({ queryKey: ['admin-topics-all'], queryFn: () => topicAdminApi.list() });
   const modules = modulesQ.data ?? [];
-  const subjects = subjectsQ.data ?? [];
-  const moduleName = (id: number) => modules.find((m) => m.id === id)?.name ?? `Module #${id}`;
-  const subjectLabel = (id: number) => { const s = subjects.find((x) => x.id === id); return s ? `${s.name} — ${moduleName(s.moduleId)}` : `Subject #${id}`; };
-  const [subjectFilter, setSubjectFilter] = useState<'all' | number>('all');
-  const [newSubjectId, setNewSubjectId] = useState<number | ''>('');
-  const [newTopicName, setNewTopicName] = useState('');
-  const [deletingTopicId, setDeletingTopicId] = useState<number | null>(null);
-  const [editingTopicId, setEditingTopicId] = useState<number | null>(null);
-  const [editTopicName, setEditTopicName] = useState('');
+  const subjects = [...(subjectsQ.data ?? [])].sort(byOrder);
+  const topics = topicsQ.data ?? [];
+  const moduleOf = (id: number) => modules.find((m) => m.id === id);
 
-  // Same cross-invalidation as AdminSubjectsPage, for TopicsManager's
-  // per-subject cache.
-  const invalidate = () => { queryClient.invalidateQueries({ queryKey: ['admin-topics-all'] }); queryClient.invalidateQueries({ queryKey: ['admin-topics'] }); };
-  const createTopic = useMutation({ mutationFn: topicAdminApi.create, onSuccess: () => { invalidate(); setNewTopicName(''); }, onError: (err: unknown) => toast({ title: 'Could not create topic', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
-  const updateTopic = useMutation({ mutationFn: ({ id, body }: { id: number; body: Parameters<typeof topicAdminApi.update>[1] }) => topicAdminApi.update(id, body), onSuccess: () => { invalidate(); setEditingTopicId(null); }, onError: (err: unknown) => toast({ title: 'Could not rename topic', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
-  const removeTopic = useMutation({ mutationFn: topicAdminApi.remove, onSuccess: () => { invalidate(); setDeletingTopicId(null); }, onError: (err: unknown) => toast({ title: 'Could not delete topic', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
-  const reorderTopics = useMutation({
-    mutationFn: (rows: { id: number; displayOrder: number }[]) => Promise.all(rows.map((r) => topicAdminApi.update(r.id, { displayOrder: r.displayOrder }))),
-    onSuccess: invalidate,
-    onError: (err: unknown) => toast({ title: 'Could not reorder topics', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
+  const [search, setSearch] = useState('');
+  const [emptyOnly, setEmptyOnly] = useState(false);
+  const [subjectFilter, setSubjectFilter] = useState<'all' | number>('all');
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkSubjectId, setBulkSubjectId] = useState<number | ''>('');
+  const [bulkText, setBulkText] = useState('');
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editName, setEditName] = useState('');
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  const invalidate = () => { queryClient.invalidateQueries({ queryKey: ['admin-topics-all'] }); queryClient.invalidateQueries({ queryKey: ['admin-topics'] }); queryClient.invalidateQueries({ queryKey: ['admin-subjects-all'] }); queryClient.invalidateQueries({ queryKey: ['admin-subjects'] }); queryClient.invalidateQueries({ queryKey: ['admin-modules'] }); };
+  const createTopic = useMutation({ mutationFn: topicAdminApi.create, onSuccess: invalidate, onError: failToast('Could not create topic') });
+  const updateTopic = useMutation({ mutationFn: ({ id, body }: { id: number; body: Parameters<typeof topicAdminApi.update>[1] }) => topicAdminApi.update(id, body), onSuccess: () => { invalidate(); setEditingId(null); }, onError: failToast('Could not update topic') });
+  const removeTopic = useMutation({ mutationFn: topicAdminApi.remove, onSuccess: () => { invalidate(); setDeletingId(null); }, onError: failToast('Could not delete topic') });
+  const reorderTopics = useMutation({ mutationFn: (rows: { id: number; displayOrder: number }[]) => Promise.all(rows.map((r) => topicAdminApi.update(r.id, { displayOrder: r.displayOrder }))), onSuccess: invalidate, onError: failToast('Could not reorder topics') });
+  // Sequential on purpose so the pasted order is the saved order.
+  const bulkCreate = useMutation({
+    mutationFn: async ({ subjectId, names, startOrder }: { subjectId: number; names: string[]; startOrder: number }) => {
+      let created = 0;
+      for (const [i, name] of names.entries()) { await topicAdminApi.create({ subjectId, name, active: true, displayOrder: startOrder + i }); created += 1; }
+      return created;
+    },
+    onSuccess: (n) => { invalidate(); setBulkText(''); toast({ title: `${n} topic${n === 1 ? '' : 's'} added` }); },
+    onError: (err) => { invalidate(); failToast('Bulk add stopped part-way')(err); },
   });
 
-  const allTopics = topicsQ.data ?? [];
-  const grouped = new Map<number, AdminTopic[]>();
-  for (const t of allTopics) { if (subjectFilter !== 'all' && t.subjectId !== subjectFilter) continue; if (!grouped.has(t.subjectId)) grouped.set(t.subjectId, []); grouped.get(t.subjectId)!.push(t); }
-  for (const list of grouped.values()) list.sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
-  const groupIds = [...grouped.keys()].sort((a, b) => subjectLabel(a).localeCompare(subjectLabel(b)));
-  // Program/Year layer above the per-subject groups — a topic's year comes
-  // from its subject's parent module, same lookup subjectLabel already
-  // does. Collapsed by default, same as the MCQ bank/flashcard bank trees.
-  const yearGroups = groupByProgramYear(groupIds.map((id) => {
-    const subject = subjects.find((s) => s.id === id);
-    const m = subject ? modules.find((mod) => mod.id === subject.moduleId) : undefined;
-    return { key: id, program: m?.programTargetKind ?? null, year: m?.yearTargetNumber ?? null };
-  }));
-  const moveTopic = (subjectId: number, index: number, dir: -1 | 1) => {
-    const list = grouped.get(subjectId) ?? [];
-    const target = index + dir;
-    if (target < 0 || target >= list.length || reorderTopics.isPending) return;
-    const reordered = [...list];
-    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
-    reorderTopics.mutate(reordered.map((t, i) => ({ id: t.id, displayOrder: i })));
+  const q = search.trim().toLowerCase();
+  const filtering = !!q || emptyOnly || subjectFilter !== 'all';
+  const bySubject = new Map<number, AdminTopic[]>();
+  for (const t of topics) { if (!bySubject.has(t.subjectId)) bySubject.set(t.subjectId, []); bySubject.get(t.subjectId)!.push(t); }
+  for (const list of bySubject.values()) list.sort(byOrder);
+  const visibleIn = (subjectId: number, subjectName: string) => (bySubject.get(subjectId) ?? []).filter((t) => (!emptyOnly || t.questionCount === 0) && (!q || t.name.toLowerCase().includes(q) || subjectName.toLowerCase().includes(q)));
+
+  const shownSubjects = subjects.filter((s) => (subjectFilter === 'all' || s.id === subjectFilter) && (!(q || emptyOnly) || visibleIn(s.id, s.name).length > 0));
+  const yearGroups = groupByProgramYear(shownSubjects.map((s) => ({ key: s.id, program: moduleOf(s.moduleId)?.programTargetKind ?? null, year: moduleOf(s.moduleId)?.yearTargetNumber ?? null })));
+  const toggle = (key: string) => setOpen((set) => { const next = new Set(set); if (next.has(key)) next.delete(key); else next.add(key); return next; });
+  const allKeys = [...yearGroups.map((g) => `y-${g.programLabel}-${g.yearLabel}`), ...shownSubjects.map((s) => `s-${s.id}`)];
+
+  const move = (subjectId: number, id: number, dir: -1 | 1) => {
+    const list = bySubject.get(subjectId) ?? [];
+    const plan = planReorder(list, list, id, dir);
+    if (plan.length && !reorderTopics.isPending) reorderTopics.mutate(plan);
   };
 
-  return <div><SectionHeader eyebrow="Curriculum operations" title="Topics" action={<select value={subjectFilter} onChange={(e) => setSubjectFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))} className="h-10 rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-topics-subject-filter"><option value="all">All subjects</option>{subjects.map((s) => <option key={s.id} value={s.id}>{subjectLabel(s.id)}</option>)}</select>} />
-    {!groupIds.length && <EmptyState icon={CircleHelp} title="No topics yet" body="Add one below — every topic belongs to a subject." />}
-    <div className="space-y-6">{yearGroups.map(({ programLabel, yearLabel, groups }) => {
-      const yearKey = `${programLabel}-${yearLabel}`;
-      const yearCount = groups.reduce((n, g) => n + (grouped.get(g.key)?.length ?? 0), 0);
-      return <CollapsibleGroup key={yearKey} defaultOpen={false} icon={<GraduationCap size={14} className="mr-0.5 text-primary" />} count={yearCount} title={`${programLabel} · ${yearLabel}`} testId={`topics-year-${yearKey}`}>
-        <div className="space-y-4">{groups.map(({ key: subjectId }) => { const list = grouped.get(subjectId)!; return <CollapsibleGroup key={subjectId} nested defaultOpen count={list.length} title={subjectLabel(subjectId)} testId={`topics-subject-${subjectId}`}>
-          <div className="space-y-1.5">{list.map((t, i) => <div key={t.id} className="rounded-lg bg-muted px-2.5 py-1.5 text-xs" data-testid={`row-topic-${t.id}`}>
-            {editingTopicId === t.id
-              ? <form onSubmit={(e) => { e.preventDefault(); if (editTopicName.trim()) updateTopic.mutate({ id: t.id, body: { name: editTopicName.trim() } }); }} className="flex items-center gap-1.5">
-                  <input autoFocus value={editTopicName} onChange={(e) => setEditTopicName(e.target.value)} className="h-7 min-w-0 flex-1 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`input-rename-topic-${t.id}`} />
-                  <button type="submit" disabled={updateTopic.isPending} className="rounded-lg bg-primary px-2 py-1 text-[10px] font-bold text-primary-foreground" data-testid={`button-save-topic-${t.id}`}>Save</button>
-                  <button type="button" onClick={() => setEditingTopicId(null)} className="rounded-lg border border-border px-2 py-1 text-[10px] font-bold" data-testid={`button-cancel-edit-topic-${t.id}`}>Cancel</button>
-                </form>
-              : <div className="flex items-center justify-between gap-2">
-                  <div className="flex flex-1 items-center gap-1.5 min-w-0">
-                    <div className="flex shrink-0 flex-col">
-                      <button type="button" disabled={i === 0 || reorderTopics.isPending} onClick={() => moveTopic(subjectId, i, -1)} className="grid size-3.5 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-30" data-testid={`button-move-up-topic-${t.id}`} aria-label="Move up"><ChevronUp size={11} /></button>
-                      <button type="button" disabled={i === list.length - 1 || reorderTopics.isPending} onClick={() => moveTopic(subjectId, i, 1)} className="grid size-3.5 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-30" data-testid={`button-move-down-topic-${t.id}`} aria-label="Move down"><ChevronDown size={11} /></button>
-                    </div>
-                    <span className="truncate">{t.name}</span>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <button onClick={() => { setEditingTopicId(t.id); setEditTopicName(t.name); }} className="text-muted-foreground hover:text-foreground" data-testid={`button-edit-topic-${t.id}`}><Pencil size={12} /></button>
-                    <button onClick={() => setDeletingTopicId(t.id)} className="text-muted-foreground hover:text-destructive" data-testid={`button-delete-topic-${t.id}`}><Trash2 size={12} /></button>
-                  </div>
-                </div>}
-          </div>)}</div>
-        </CollapsibleGroup>; })}</div>
-      </CollapsibleGroup>;
+  const bulkNames = [...new Set(bulkText.split('\n').map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter(Boolean))];
+  const existingNames = new Set((bySubject.get(Number(bulkSubjectId)) ?? []).map((t) => t.name.toLowerCase()));
+  const bulkFresh = bulkNames.filter((n) => !existingNames.has(n.toLowerCase()));
+  const bulkSkipped = bulkNames.length - bulkFresh.length;
+
+  const emptyTopics = topics.filter((t) => t.questionCount === 0).length;
+  const totalMcqs = topics.reduce((n, t) => n + t.questionCount, 0);
+  const subjectsWithTopics = new Set(topics.map((t) => t.subjectId)).size;
+
+  if (modulesQ.isLoading || subjectsQ.isLoading || topicsQ.isLoading) return <div><SectionHeader eyebrow="Curriculum operations" title="Topics" /><SkeletonPage /></div>;
+
+  return <div>
+    <SectionHeader eyebrow="Curriculum operations" title="Topics" action={<button onClick={() => setBulkOpen((v) => !v)} className="btn-pop inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-toggle-bulk-topics"><ListPlus size={15} /> {bulkOpen ? 'Close bulk add' : 'Bulk add topics'}</button>} />
+    <StatTiles items={[
+      { label: 'Topics', value: topics.length, icon: ListTree, tone: 'green', testId: 'stat-topics' },
+      { label: 'Subjects with topics', value: `${subjectsWithTopics}/${subjects.length}`, icon: Layers, tone: 'blue' },
+      { label: 'MCQs tagged', value: totalMcqs.toLocaleString(), icon: ListChecks, tone: 'violet' },
+      { label: 'Empty topics', value: emptyTopics, icon: CircleSlash, tone: emptyTopics ? 'amber' : 'neutral', hint: 'Topics no MCQ is filed under yet' },
+    ]} />
+
+    {bulkOpen && <form onSubmit={(e) => { e.preventDefault(); if (bulkSubjectId && bulkFresh.length) bulkCreate.mutate({ subjectId: Number(bulkSubjectId), names: bulkFresh, startOrder: (bySubject.get(Number(bulkSubjectId)) ?? []).length }); }} className="mb-5 space-y-3 rounded-2xl border border-primary/30 bg-primary/5 p-4 sm:p-5">
+      <div><div className="text-xs font-extrabold">Bulk add topics</div><p className="mt-0.5 text-[11px] text-muted-foreground">Paste one topic per line — bullets and numbering are stripped, duplicates and topics the subject already has are skipped.</p></div>
+      <select required value={bulkSubjectId} onChange={(e: { target: { value: string } }) => setBulkSubjectId(e.target.value ? Number(e.target.value) : '')} className={inputClass} data-testid="select-bulk-topic-subject"><option value="">Choose a subject…</option>{subjects.map((s) => <option key={s.id} value={s.id}>{moduleOf(s.moduleId)?.name ? `${moduleOf(s.moduleId)!.name} — ` : ''}{s.name}</option>)}</select>
+      <textarea value={bulkText} onChange={(e: { target: { value: string } }) => setBulkText(e.target.value)} rows={6} placeholder={'Brachial plexus\nCarpal tunnel\nCubital fossa'} className={`${inputClass} h-auto py-2.5 font-mono-app`} data-testid="input-bulk-topics" />
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="submit" disabled={bulkCreate.isPending || !bulkSubjectId || !bulkFresh.length} className="btn-pop rounded-xl bg-primary px-4 py-2 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-bulk-add-topics">{bulkCreate.isPending ? 'Adding…' : `Add ${bulkFresh.length || ''} topic${bulkFresh.length === 1 ? '' : 's'}`}</button>
+        {bulkNames.length > 0 && <span className="text-[11px] text-muted-foreground">{bulkFresh.length} new{bulkSkipped ? ` · ${bulkSkipped} skipped (already exist)` : ''}</span>}
+      </div>
+    </form>}
+
+    <div className="mb-4 flex flex-wrap items-center gap-2.5 rounded-2xl border border-border bg-card p-3">
+      <SearchBox value={search} onChange={setSearch} placeholder="Search topics or subjects…" testId="input-search-topics" className="min-w-[14rem] flex-1 sm:max-w-xs" />
+      <select value={subjectFilter} onChange={(e: { target: { value: string } }) => setSubjectFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))} className={`${inputClass} w-auto max-w-[16rem]`} data-testid="select-topics-subject-filter"><option value="all">All subjects</option>{subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+      <Chip active={emptyOnly} onClick={() => setEmptyOnly((v) => !v)} icon={CircleSlash} testId="chip-empty-topics">Empty only</Chip>
+      <div className="ml-auto flex gap-1.5">
+        <button onClick={() => setOpen(new Set(allKeys))} className="rounded-lg px-2.5 py-1.5 text-[11px] font-bold text-muted-foreground hover:bg-muted" data-testid="button-expand-all">Expand all</button>
+        <button onClick={() => setOpen(new Set())} className="rounded-lg px-2.5 py-1.5 text-[11px] font-bold text-muted-foreground hover:bg-muted" data-testid="button-collapse-all">Collapse all</button>
+      </div>
+      {filtering && <p className="basis-full text-[11px] text-muted-foreground">Filtered view — reordering is switched off until you clear the search/filters.</p>}
+    </div>
+
+    {!yearGroups.length && <EmptyState icon={ListTree} title={filtering ? 'Nothing matches' : 'No subjects yet'} body={filtering ? 'No topics fit those filters. Clear them to see everything.' : 'Add a subject first — every topic belongs to a subject.'} />}
+    <div className="space-y-4">{yearGroups.map(({ programLabel, yearLabel, groups }) => {
+      const yKey = `y-${programLabel}-${yearLabel}`;
+      const yearCount = groups.reduce((n, g) => n + (bySubject.get(g.key as number)?.length ?? 0), 0);
+      return <Group key={yKey} open={filtering || open.has(yKey)} onToggle={() => toggle(yKey)} icon={<GraduationCap size={15} className="shrink-0 text-primary" />} title={<>{programLabel} <span className="font-normal text-muted-foreground">· {yearLabel}</span></>} count={`${yearCount} topic${yearCount === 1 ? '' : 's'}`} testId={`topics-year-${programLabel}-${yearLabel}`}>
+        <div className="space-y-3">{groups.map(({ key }) => {
+          const subject = subjects.find((s) => s.id === key)!;
+          const all = bySubject.get(subject.id) ?? [];
+          const list = visibleIn(subject.id, subject.name);
+          const sKey = `s-${subject.id}`;
+          return <Group nested key={subject.id} open={filtering || open.has(sKey)} onToggle={() => toggle(sKey)} title={<>{subject.name} <span className="font-normal text-muted-foreground">· {moduleOf(subject.moduleId)?.name ?? ''}</span></>} count={all.length} testId={`topics-subject-${subject.id}`}>
+            <div className="space-y-1.5">{list.map((t) => {
+              const i = all.findIndex((x) => x.id === t.id);
+              return <div key={t.id} className="rounded-xl border border-border bg-card" data-testid={`row-topic-${t.id}`}>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5">
+                  <MoveButtons canUp={!filtering && i > 0 && !reorderTopics.isPending} canDown={!filtering && i >= 0 && i < all.length - 1 && !reorderTopics.isPending} onUp={() => move(subject.id, t.id, -1)} onDown={() => move(subject.id, t.id, 1)} testIdSuffix={`topic-${t.id}`} />
+                  <span className="min-w-[8rem] flex-1 text-xs font-bold">{t.name}</span>
+                  <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${t.questionCount ? 'bg-[#d7eee4] text-[#287058]' : 'bg-muted text-muted-foreground'}`}>{t.questionCount} MCQ{t.questionCount === 1 ? '' : 's'}</span>
+                  <button onClick={() => { setEditingId(t.id); setEditName(t.name); }} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" aria-label="Rename topic" data-testid={`button-edit-topic-${t.id}`}><Pencil size={14} /></button>
+                  <button onClick={() => setDeletingId(t.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Delete topic" data-testid={`button-delete-topic-${t.id}`}><Trash2 size={14} /></button>
+                </div>
+                {editingId === t.id && <form onSubmit={(e) => { e.preventDefault(); if (editName.trim()) updateTopic.mutate({ id: t.id, body: { name: editName.trim() } }); }} className="flex gap-2 border-t border-border p-3">
+                  <input autoFocus value={editName} onChange={(e: { target: { value: string } }) => setEditName(e.target.value)} className={`${inputClass} h-9 flex-1`} data-testid={`input-rename-topic-${t.id}`} />
+                  <button type="submit" disabled={updateTopic.isPending} className="btn-pop rounded-lg bg-primary px-3 text-[11px] font-extrabold text-primary-foreground disabled:opacity-50" data-testid={`button-save-topic-${t.id}`}>Save</button>
+                  <button type="button" onClick={() => setEditingId(null)} className="rounded-lg border border-border px-3 text-[11px] font-bold text-muted-foreground" data-testid={`button-cancel-edit-topic-${t.id}`}>Cancel</button>
+                </form>}
+              </div>;
+            })}{!list.length && <p className="text-xs text-muted-foreground">{all.length ? 'No topics match the filters.' : 'No topics yet — add the first one below.'}</p>}</div>
+            {!filtering && <QuickAdd placeholder={`Add a topic to ${subject.name}…`} pending={createTopic.isPending} testId={`input-quick-add-topic-${subject.id}`} onAdd={(name) => createTopic.mutate({ subjectId: subject.id, name, active: true, displayOrder: all.length })} />}
+          </Group>;
+        })}</div>
+      </Group>;
     })}</div>
-    <form onSubmit={(e) => { e.preventDefault(); if (newSubjectId && newTopicName.trim()) createTopic.mutate({ subjectId: Number(newSubjectId), name: newTopicName.trim(), active: true }); }} className="mt-6 space-y-2 rounded-xl border border-dashed border-border p-4">
-      <div className="text-xs font-bold">Add topic</div>
-      <select required value={newSubjectId} onChange={(e) => setNewSubjectId(e.target.value ? Number(e.target.value) : '')} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-xs" data-testid="select-new-topic-subject"><option value="">Choose a subject…</option>{subjects.map((s) => <option key={s.id} value={s.id}>{subjectLabel(s.id)}</option>)}</select>
-      <div className="flex gap-2"><input value={newTopicName} onChange={(e) => setNewTopicName(e.target.value)} placeholder="Topic name" className="h-9 flex-1 rounded-lg border border-border bg-background px-3 text-xs" data-testid="input-add-topic" /><button disabled={createTopic.isPending || !newSubjectId || !newTopicName.trim()} className="rounded-lg bg-primary px-3 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-add-topic">Add</button></div>
-    </form>
-    {deletingTopicId !== null && <ConfirmDialog title="Delete this topic?" body="MCQs already tagged to it are kept but will need a new home." onCancel={() => setDeletingTopicId(null)} onConfirm={() => removeTopic.mutate(deletingTopicId)} pending={removeTopic.isPending} />}
+    {deletingId !== null && <ConfirmDialog title="Delete this topic?" body="MCQs filed under it are kept but will no longer have a topic." onCancel={() => setDeletingId(null)} onConfirm={() => removeTopic.mutate(deletingId)} pending={removeTopic.isPending} />}
   </div>;
 }
 

@@ -308,3 +308,177 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 
 /* Bottom tab bar (phones) — see MobileTabBar in lib/shared.tsx. */
 .tabbar-safe { padding-bottom: max(env(safe-area-inset-bottom, 0px), 8px); }
+
+/* ==========================================================================
+   v37 — "3D" depth system for the signed-in student app.
+
+   HOW THE DEPTH IS MADE (read before changing): every effect below is a
+   layered box-shadow, a gradient, an inset highlight or a plain 2D
+   translate/scale/skew — NEVER perspective / preserve-3d / rotateX / rotateY /
+   translateZ / backface-visibility. The flip-card note near the top of this
+   file records that real 3D transforms corrupted the whole browser paint on
+   one machine's GPU/driver, so this stays 2D on purpose. It still reads as 3D
+   because the eye reads depth from (1) a lit top edge, (2) a darker bottom
+   "edge" that has thickness, (3) soft contact shadow underneath and (4) things
+   that physically press down when clicked.
+
+   Everything is opt-out with the .no-3d class and switched off for
+   prefers-reduced-motion (motion only — the static depth stays).
+   ========================================================================== */
+:root {
+  /* Thickness colour of raised buttons — a darker mix of the (admin
+     configurable) primary so a re-branded app gets matching edges. */
+  --edge-color: hsl(164 42% 27%);
+  --sheen: hsl(0 0% 100% / .55);
+  --raise-1: inset 0 1px 0 hsl(0 0% 100% / .8), 0 1px 1px hsl(208 35% 19% / .05), 0 8px 16px -8px hsl(208 35% 19% / .16), 0 22px 34px -22px hsl(208 35% 19% / .2);
+  --raise-2: inset 0 1px 0 hsl(0 0% 100% / .9), 0 2px 2px hsl(208 35% 19% / .06), 0 16px 28px -10px hsl(208 35% 19% / .22), 0 34px 50px -26px hsl(208 35% 19% / .28);
+  --well: inset 0 2px 5px hsl(208 35% 19% / .13), inset 0 -1px 0 hsl(0 0% 100% / .75);
+  --gold-1: #fff3bf; --gold-2: #f2c94c; --gold-3: #b98512;
+  --silver-1: #f5f7fa; --silver-2: #c5cdd8; --silver-3: #7c8898;
+  --bronze-1: #fde6cf; --bronze-2: #dc9a5e; --bronze-3: #91541f;
+}
+@supports (color: color-mix(in srgb, red 50%, blue)) {
+  :root { --edge-color: color-mix(in srgb, hsl(var(--primary)) 64%, #000); }
+}
+.dark {
+  --sheen: hsl(0 0% 100% / .045);
+  --raise-1: inset 0 1px 0 hsl(0 0% 100% / .07), 0 1px 1px hsl(0 0% 0% / .4), 0 10px 22px -10px hsl(0 0% 0% / .65), 0 26px 40px -26px hsl(0 0% 0% / .7);
+  --raise-2: inset 0 1px 0 hsl(0 0% 100% / .1), 0 2px 2px hsl(0 0% 0% / .45), 0 18px 32px -12px hsl(0 0% 0% / .7), 0 38px 56px -28px hsl(0 0% 0% / .8);
+  --well: inset 0 2px 6px hsl(0 0% 0% / .5), inset 0 -1px 0 hsl(0 0% 100% / .05);
+}
+
+@layer components {
+  /* Soft ambient light behind every signed-in page so flat cards have
+     something to sit "in front of". Two radial glows, no images. */
+  .student-shell { background-image: radial-gradient(900px 520px at 88% -8%, hsl(var(--primary) / .09), transparent 62%), radial-gradient(760px 460px at -6% 6%, hsl(var(--accent) / .10), transparent 60%); background-repeat: no-repeat; }
+
+  /* Raised cards: lit top edge + two-stage contact shadow + a faint sheen
+     on the upper part of the face. Replaces the hairline resting shadow. */
+  .student-shell :is(.rounded-2xl, .rounded-3xl).border.bg-card:not(.border-dashed):not(.no-3d) {
+    box-shadow: var(--raise-1);
+    background-image: linear-gradient(180deg, var(--sheen), transparent 46%);
+  }
+  .student-shell :is(a, button).rounded-2xl.border.bg-card:not(.no-3d):hover { box-shadow: var(--raise-2); }
+
+  /* Raised filled buttons ("keycap"): a solid darker edge under the face
+     gives real thickness; pressing moves the face down onto the edge. */
+  .student-shell :is(button, a).bg-primary:not(:disabled):not([aria-disabled="true"]):not(.no-3d) {
+    box-shadow: 0 3px 0 var(--edge-color), 0 10px 16px -8px hsl(var(--primary) / .55), inset 0 1px 0 hsl(0 0% 100% / .3);
+    transform: translateY(0);
+  }
+  .student-shell :is(button, a).bg-primary:not(:disabled):not([aria-disabled="true"]):not(.no-3d):hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 0 var(--edge-color), 0 14px 20px -8px hsl(var(--primary) / .6), inset 0 1px 0 hsl(0 0% 100% / .34);
+  }
+  .student-shell :is(button, a).bg-primary:not(:disabled):not([aria-disabled="true"]):not(.no-3d):active {
+    transform: translateY(2px);
+    box-shadow: 0 1px 0 var(--edge-color), 0 3px 6px -3px hsl(var(--primary) / .5), inset 0 1px 0 hsl(0 0% 100% / .2);
+  }
+
+  /* Fields sit slightly recessed. */
+  .student-shell :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]), select, textarea) { box-shadow: inset 0 1px 2px hsl(208 35% 19% / .07); }
+  .dark .student-shell :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]), select, textarea) { box-shadow: inset 0 1px 3px hsl(0 0% 0% / .45); }
+}
+
+@layer utilities {
+  /* .card-lift (used on every dashboard/module/quick-link tile): float
+     higher on hover and cast a longer shadow. */
+  .card-lift { transition: transform .22s cubic-bezier(.2, .8, .2, 1), box-shadow .22s ease, border-color .22s ease; }
+  .card-lift:hover { transform: translateY(-4px); box-shadow: var(--raise-2); border-color: hsl(var(--primary) / .4); }
+  .card-lift:active { transform: translateY(-1px); }
+}
+
+/* ---- 3D building blocks (opt in with the classes below) ------------------ */
+
+/* A raised card. */
+.d3-card { position: relative; border: 1px solid hsl(var(--border)); border-radius: 1.25rem; background: hsl(var(--card)) linear-gradient(180deg, var(--sheen), transparent 46%); box-shadow: var(--raise-1); }
+
+/* Pressed-in track (segmented controls, progress wells, empty day dots). */
+.d3-well { background: hsl(var(--muted)); box-shadow: var(--well); }
+
+/* A small glossy icon tile: gradient body, glass highlight, thick bottom edge. */
+.d3-tile { position: relative; overflow: hidden; box-shadow: 0 3px 0 hsl(0 0% 0% / .16), 0 8px 12px -6px hsl(0 0% 0% / .28), inset 0 1px 0 hsl(0 0% 100% / .7), inset 0 -8px 12px -8px hsl(0 0% 0% / .14); transition: transform .25s cubic-bezier(.34, 1.56, .64, 1); }
+.d3-tile::before { content: ''; position: absolute; inset: 0 0 52% 0; background: linear-gradient(to bottom, hsl(0 0% 100% / .55), hsl(0 0% 100% / 0)); border-radius: inherit; pointer-events: none; }
+.group:hover .d3-tile, .d3-card:hover .d3-tile { transform: translateY(-2px) scale(1.06); }
+
+/* Keycap button that doesn't rely on .bg-primary (segmented thumbs, chips). */
+.d3-key { background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); box-shadow: 0 3px 0 var(--edge-color), 0 8px 14px -8px hsl(var(--primary) / .6), inset 0 1px 0 hsl(0 0% 100% / .32); }
+
+/* Segmented control thumb (raised, slides on the X axis only). */
+.seg-thumb { position: absolute; top: 4px; bottom: 4px; left: 0; border-radius: .8rem; background: hsl(var(--card)); box-shadow: 0 1px 0 hsl(0 0% 100% / .9) inset, 0 2px 0 hsl(208 35% 19% / .08), 0 6px 12px -4px hsl(208 35% 19% / .28); transition: transform .32s cubic-bezier(.3, 1.3, .5, 1), width .32s cubic-bezier(.3, 1.3, .5, 1); }
+.dark .seg-thumb { background: hsl(var(--secondary) / .9); box-shadow: 0 1px 0 hsl(0 0% 100% / .08) inset, 0 6px 12px -4px hsl(0 0% 0% / .7); }
+
+/* ---- Leaderboard ---------------------------------------------------------- */
+
+@keyframes lbRise { from { opacity: 0; transform: translateY(14px) scale(.985); } to { opacity: 1; transform: none; } }
+.lb-rise { animation: lbRise .55s cubic-bezier(.2, .8, .2, 1) both; animation-delay: calc(min(var(--i, 0), 14) * 45ms); }
+
+/* Dark "stage" hero: sidebar-toned so it matches the brand and gives the
+   glass tiles something dark to sit on in both colour modes. */
+.lb-hero { position: relative; overflow: hidden; color: hsl(var(--sidebar-foreground)); background: linear-gradient(150deg, hsl(var(--sidebar)) 0%, hsl(var(--sidebar-accent)) 100%); box-shadow: 0 1px 0 hsl(0 0% 100% / .12) inset, 0 2px 0 hsl(0 0% 0% / .25), 0 24px 46px -22px hsl(206 60% 8% / .75), 0 40px 60px -40px hsl(206 60% 8% / .6); }
+.lb-hero > .hero-grid { opacity: .6; }
+.lb-tile { border-radius: 1rem; background: linear-gradient(160deg, hsl(0 0% 100% / .13), hsl(0 0% 100% / .045)); border: 1px solid hsl(0 0% 100% / .12); box-shadow: inset 0 1px 0 hsl(0 0% 100% / .22), 0 10px 18px -12px hsl(0 0% 0% / .6); }
+
+/* Rank medallion: a glossy disc with a bevelled rim and a thick edge. */
+.medal { position: relative; display: inline-grid; place-items: center; border-radius: 9999px; font-weight: 800; color: var(--medal-ink, #4a3a0a); background: radial-gradient(circle at 32% 26%, var(--medal-1), var(--medal-2) 58%, var(--medal-3) 100%); box-shadow: inset 0 2px 1px hsl(0 0% 100% / .75), inset 0 -3px 4px hsl(0 0% 0% / .22), 0 3px 0 var(--medal-3), 0 9px 14px -5px hsl(0 0% 0% / .5); text-shadow: 0 1px 0 hsl(0 0% 100% / .55); }
+.medal--gold { --medal-1: var(--gold-1); --medal-2: var(--gold-2); --medal-3: var(--gold-3); --medal-ink: #5a3f05; }
+.medal--silver { --medal-1: var(--silver-1); --medal-2: var(--silver-2); --medal-3: var(--silver-3); --medal-ink: #33404f; }
+.medal--bronze { --medal-1: var(--bronze-1); --medal-2: var(--bronze-2); --medal-3: var(--bronze-3); --medal-ink: #4a2a0f; }
+.medal--plain { --medal-1: hsl(var(--card)); --medal-2: hsl(var(--muted)); --medal-3: hsl(var(--border)); --medal-ink: hsl(var(--muted-foreground)); }
+.medal--you { --medal-1: hsl(var(--primary) / .55); --medal-2: hsl(var(--primary)); --medal-3: var(--edge-color); --medal-ink: hsl(var(--primary-foreground)); text-shadow: 0 1px 0 hsl(0 0% 0% / .25); }
+
+/* Avatar with a metallic ring. */
+.avatar-3d { position: relative; display: grid; place-items: center; border-radius: 9999px; font-weight: 800; background: radial-gradient(circle at 30% 24%, hsl(0 0% 100% / .95), hsl(var(--muted)) 70%); color: hsl(var(--foreground)); box-shadow: inset 0 -4px 6px hsl(0 0% 0% / .1), inset 0 2px 2px hsl(0 0% 100% / .8), 0 8px 14px -6px hsl(0 0% 0% / .45); }
+.dark .avatar-3d { background: radial-gradient(circle at 30% 24%, hsl(var(--secondary)), hsl(var(--card)) 75%); }
+.avatar-ring { padding: 4px; border-radius: 9999px; background: conic-gradient(from 210deg, var(--ring-1), var(--ring-2), var(--ring-3), var(--ring-2), var(--ring-1)); box-shadow: 0 10px 18px -8px hsl(0 0% 0% / .55); }
+.avatar-ring--gold { --ring-1: var(--gold-1); --ring-2: var(--gold-2); --ring-3: var(--gold-3); }
+.avatar-ring--silver { --ring-1: var(--silver-1); --ring-2: var(--silver-2); --ring-3: var(--silver-3); }
+.avatar-ring--bronze { --ring-1: var(--bronze-1); --ring-2: var(--bronze-2); --ring-3: var(--bronze-3); }
+
+/* Podium: three faces per block, drawn with clip-path + gradients (2D). The
+   front is a plain rectangle, the top a lighter trapezoid sitting above it,
+   the right side a darker sliver that slopes away — together they read as a
+   solid block seen from slightly above and to the right. */
+.podium-stage { position: relative; isolation: isolate; }
+.podium-stage::before { content: ''; position: absolute; inset: auto 4% 0 4%; height: 62%; z-index: -1; background: radial-gradient(60% 100% at 50% 100%, hsl(var(--primary) / .16), transparent 70%); filter: blur(6px); }
+.podium-col { position: relative; display: flex; flex: 1 1 0; min-width: 0; flex-direction: column; align-items: center; }
+.podium-block { position: relative; width: 100%; margin-right: 10px; border-radius: 6px 6px 0 0; }
+.podium-front { position: absolute; inset: 0; border-radius: 6px 6px 0 0; background: linear-gradient(180deg, var(--pf-1), var(--pf-2) 55%, var(--pf-3)); box-shadow: inset 0 1px 0 hsl(0 0% 100% / .65), inset 0 -18px 22px -18px hsl(0 0% 0% / .28); display: grid; align-content: start; justify-items: center; padding-top: .55rem; overflow: hidden; }
+.podium-front::after { content: ''; position: absolute; inset: 0 auto 0 -30%; width: 30%; background: linear-gradient(90deg, transparent, hsl(0 0% 100% / .32), transparent); transform: skewX(-18deg); animation: shineSweep 5.5s ease-in-out infinite; animation-delay: var(--shine-delay, 0s); }
+.podium-top { position: absolute; left: 0; right: -10px; bottom: 100%; height: 12px; background: linear-gradient(180deg, var(--pt-1), var(--pt-2)); clip-path: polygon(0 100%, 10px 0, 100% 0, calc(100% - 10px) 100%); }
+.podium-side { position: absolute; top: 0; bottom: 0; left: 100%; width: 10px; background: linear-gradient(180deg, var(--ps-1), var(--ps-2)); clip-path: polygon(0 0, 100% 12px, 100% 100%, 0 100%); }
+.podium-block--gold { --pf-1: #ffe27a; --pf-2: #f3c73f; --pf-3: #d9a21c; --pt-1: #fff3bf; --pt-2: #ffe27a; --ps-1: #c58f12; --ps-2: #8f6408; }
+.podium-block--silver { --pf-1: #eef1f6; --pf-2: #cdd4de; --pf-3: #aab4c2; --pt-1: #ffffff; --pt-2: #e8ecf2; --ps-1: #8e9aac; --ps-2: #66748a; }
+.podium-block--bronze { --pf-1: #f6c99e; --pf-2: #dc9a5e; --pf-3: #bd7a3f; --pt-1: #fde6cf; --pt-2: #f3c08f; --ps-1: #9d5f28; --ps-2: #6f3f14; }
+.podium-num { font-family: var(--app-font-serif); font-weight: 600; line-height: 1; color: var(--medal-ink, #5a3f05); text-shadow: 0 1px 0 hsl(0 0% 100% / .6), 0 -1px 0 hsl(0 0% 0% / .12); }
+.crown-float { animation: floatY 3.6s ease-in-out infinite; filter: drop-shadow(0 6px 6px hsl(38 90% 30% / .45)); }
+
+/* Streak flame. Flicker = scaleY + a tiny skew, all 2D. */
+@keyframes flameFlicker { 0%, 100% { transform: scale(1, 1) skewX(0deg); } 20% { transform: scale(.96, 1.05) skewX(-2deg); } 45% { transform: scale(1.03, .97) skewX(1.5deg); } 70% { transform: scale(.98, 1.06) skewX(-1deg); } }
+@keyframes flameCore { 0%, 100% { transform: scale(1); opacity: .95; } 50% { transform: scale(.88, 1.1); opacity: 1; } }
+.flame { transform-origin: 50% 90%; animation: flameFlicker 1.9s ease-in-out infinite; filter: drop-shadow(0 6px 10px hsl(20 95% 50% / .55)); }
+.flame--out { animation: none; filter: grayscale(1) opacity(.5); }
+.flame-core { transform-origin: 50% 90%; animation: flameCore 1.3s ease-in-out infinite; }
+@keyframes streakPulse { 0%, 100% { box-shadow: 0 0 0 0 hsl(38 95% 55% / .5); } 60% { box-shadow: 0 0 0 9px hsl(38 95% 55% / 0); } }
+.streak-alert { animation: streakPulse 2.2s ease-out infinite; }
+
+/* 14-day activity coins */
+.day-coin { display: grid; place-items: center; border-radius: 9999px; }
+.day-coin--on { background: radial-gradient(circle at 30% 24%, #ffd27a, #f08a24 62%, #c4581a); box-shadow: inset 0 1px 1px hsl(0 0% 100% / .7), inset 0 -2px 3px hsl(0 0% 0% / .2), 0 2px 0 #9a3f10, 0 6px 8px -3px hsl(20 90% 20% / .55); }
+.day-coin--off { background: hsl(0 0% 100% / .07); box-shadow: inset 0 2px 3px hsl(0 0% 0% / .35), inset 0 -1px 0 hsl(0 0% 100% / .08); }
+.day-coin--today { outline: 2px solid hsl(0 0% 100% / .75); outline-offset: 2px; }
+
+/* Sticky "your rank" dock (slides up from the bottom while your row is off-screen). */
+.lb-dock { transition: transform .35s cubic-bezier(.3, 1.2, .5, 1), opacity .25s ease; }
+.lb-dock[data-show="false"] { transform: translateY(140%); opacity: 0; pointer-events: none; }
+
+/* Phone tab bar: a floating raised dock; the active tab is a keycap. */
+.tabbar-dock { box-shadow: 0 1px 0 hsl(0 0% 100% / .6) inset, 0 -1px 0 hsl(208 35% 19% / .04), 0 18px 30px -12px hsl(208 35% 19% / .35), 0 4px 10px -2px hsl(208 35% 19% / .12); }
+.dark .tabbar-dock { box-shadow: 0 1px 0 hsl(0 0% 100% / .07) inset, 0 18px 30px -12px hsl(0 0% 0% / .8); }
+.tab-key { background: linear-gradient(180deg, hsl(var(--primary) / .2), hsl(var(--primary) / .1)); box-shadow: inset 0 1px 0 hsl(0 0% 100% / .55), 0 2px 0 hsl(var(--primary) / .35), 0 8px 12px -6px hsl(var(--primary) / .45); }
+
+@media (prefers-reduced-motion: reduce) {
+  .lb-rise, .crown-float, .flame, .flame-core, .streak-alert, .podium-front::after { animation: none !important; }
+  .card-lift, .d3-tile, .seg-thumb, .lb-dock { transition: none; }
+  .student-shell :is(button, a).bg-primary:not(.no-3d):hover, .card-lift:hover { transform: none; }
+}

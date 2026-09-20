@@ -579,14 +579,14 @@ export function ModuleRow({ m, canMoveUp, canMoveDown, onReorder, update, curric
   // so the save button only sends iconPath when it actually changed.
   const [editIcon, setEditIcon] = useState<string | null | undefined>(undefined);
   const [editIconPreview, setEditIconPreview] = useState<string | null>(null);
-  return <div className="border-b border-border p-5 last:border-0" data-testid={`row-content-module-${m.id}`}>
-    <div className="flex items-center gap-4">
+  return <div className="border-b border-border p-4 last:border-0 sm:p-5" data-testid={`row-content-module-${m.id}`}>
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
       <div className="flex flex-col gap-0.5">
         <button onClick={() => onReorder('up')} disabled={!canMoveUp || update.isPending} className="rounded p-0.5 text-muted-foreground disabled:opacity-25 hover:bg-muted" data-testid={`button-module-move-up-${m.id}`}><ChevronUp size={13} /></button>
         <button onClick={() => onReorder('down')} disabled={!canMoveDown || update.isPending} className="rounded p-0.5 text-muted-foreground disabled:opacity-25 hover:bg-muted" data-testid={`button-module-move-down-${m.id}`}><ChevronDown size={13} /></button>
       </div>
-      <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-xl bg-[#d7eee4] text-primary">{m.iconUrl ? <img src={m.iconUrl} alt="" loading="lazy" decoding="async" className="size-full object-cover" /> : <BookOpen size={18} />}</div>
-      <div className="flex-1"><div className="text-sm font-bold">{m.name}</div><div className="mt-1 text-xs text-muted-foreground">{m.subjectCount} subjects · {m.topicCount} topics</div></div>
+      <div className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-xl bg-[#d7eee4] text-primary">{m.iconUrl ? <img src={resolveUploadUrl(m.iconUrl) ?? undefined} alt="" loading="lazy" decoding="async" className="size-full object-cover" /> : <BookOpen size={18} />}</div>
+      <div className="min-w-[8rem] flex-1"><div className="text-sm font-bold">{m.name}</div><div className="mt-1 text-xs text-muted-foreground">{m.subjectCount} subjects · {m.topicCount} topics</div></div>
       <button onClick={() => update.mutate({ id: m.id, body: { active: !m.active } })} disabled={update.isPending} data-testid={`button-toggle-published-${m.id}`}><Badge tone={m.active ? 'green' : 'neutral'}>{m.active ? 'published' : 'draft'}</Badge></button>
       <span className="rounded-full bg-muted px-2.5 py-1 text-[10px] font-bold text-muted-foreground" data-testid={`text-targeting-${m.id}`}>{m.targetingLabel || 'All Programs + All Years'}</span>
       <button onClick={() => setCurriculumId(curriculumId === m.id ? null : m.id)} className={cn('rounded-lg px-3 py-2 text-[11px] font-bold', curriculumId === m.id ? 'bg-[#eef7f1] text-primary' : 'border border-border text-muted-foreground hover:bg-muted')} data-testid={`button-manage-curriculum-${m.id}`}>{curriculumId === m.id ? 'Hide subjects' : 'Subjects & topics'}</button>
@@ -1329,14 +1329,14 @@ export function BackupScopePicker({ blocks, allModules, onChange }: { blocks: Ad
 }
 
 
-export function McqBankTree({ modules, blocks, search, statusFilter, selectedIds, onToggleSelect }: { modules: AdminModule[]; blocks: AdminBlock[]; search?: string; statusFilter?: ExplanationStatus | null; selectedIds: Set<number>; onToggleSelect: (id: number) => void }) {
+export function McqBankTree({ modules, blocks, search, statusFilter, difficultyFilter, publishFilter, selectedIds, onToggleSelect }: { modules: AdminModule[]; blocks: AdminBlock[]; search?: string; statusFilter?: ExplanationStatus | null; difficultyFilter?: string | null; publishFilter?: 'published' | 'draft' | null; selectedIds: Set<number>; onToggleSelect: (id: number) => void }) {
   const treeQ = useQuery({ queryKey: ['admin-mcqs-tree'], queryFn: mcqAdminApi.list });
   const allRows = treeQ.data ?? [];
   // Search box + explanation-status filter (the latter driven by clicking a
   // tile in ExplanationCoverage) — this used to only apply to the flat list;
   // now the tree is the only view, so it filters the rows itself.
   const q = (search ?? '').trim().toLowerCase();
-  const rows = allRows.filter((r) => (!q || r.question.toLowerCase().includes(q)) && (!statusFilter || r.explanationStatus === statusFilter));
+  const rows = allRows.filter((r) => (!q || r.question.toLowerCase().includes(q)) && (!statusFilter || r.explanationStatus === statusFilter) && (!difficultyFilter || r.difficulty === difficultyFilter) && (!publishFilter || (publishFilter === 'published') === (r.status.toLowerCase() === 'published')));
   const mcqsByTopic = new Map<number, AdminMcqRow[]>();
   const trulyUnassigned: AdminMcqRow[] = [];
   for (const row of rows) {

@@ -1,3 +1,17 @@
+# Round 18 (v37) — 3D student UI, leaderboard + streaks, admin curriculum pages
+
+See AI_HANDOFF_NOTE_v37.md and REMAINING_THINGS.md. Student app gets a GPU-safe
+"3D" depth system (no real 3D transforms — see v34); the Leaderboard is rebuilt
+(podium, streak flame + 14-day coins, rank by points/accuracy/streak/questions,
+search, floating "your place" dock). Streaks are now "live" (0 after a missed day)
+and a bug that made the progress-page streak always 0 is fixed. Admin: Academic
+content, Subjects and Topics rebuilt (summary tiles, search, filters, in-place add,
+bulk topic add, reorder that actually works with equal order numbers, thumbnail URL
+fix); MCQ bank gets overview tiles and difficulty/published filters.
+NOTE: written without node_modules — run install/typecheck/build first.
+
+---
+
 # Round 17 — Device limit (2 per account by default, admin-adjustable)
 
 See AI_HANDOFF_NOTE_v33.md. A student account can now be signed in on at most

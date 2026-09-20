@@ -335,7 +335,11 @@ export interface MyFeedbackEntry extends FeedbackEntry { replies: FeedbackReply[
 // api-server routes/student-tools.ts for what's deliberately left out.
 export interface FeaturedTestimonial { id: number; rating: number; message: string; createdAt: string; name: string }
 export interface Analytics { range: string; totalSessions: number; averageScore: number; questionsAnswered: number; timeSpentMinutes: number; currentStreak: number; longestStreak: number }
-export interface LeaderboardRow { rank: number; userId: number; name: string; institution: string | null; sessions: number; questionsAnswered: number; correct: number; points: number; accuracy: number; isYou: boolean }
+export interface LeaderboardRow { rank: number; userId: number; name: string; institution: string | null; sessions: number; questionsAnswered: number; correct: number; points: number; accuracy: number; isYou: boolean;
+  // Live streak fields (server-computed, 0 once a full day is missed). Optional so an older API build still typechecks/renders.
+  currentStreak?: number; longestStreak?: number; practicedToday?: boolean }
+/** The signed-in student's own streak + last 14 days of activity (oldest -> newest). */
+export interface StreakCard { currentStreak: number; longestStreak: number; practicedToday: boolean; atRisk: boolean; days: Array<{ date: string; sessions: number; questions: number }> }
 export interface PaymentDetails { PAYMENT_INSTRUCTIONS: string; PAYMENT_ACCOUNT_HOLDER: string; PAYMENT_ACCOUNT_NUMBER: string; PAYMENT_BANK_NAME: string; PAYMENT_IFSC_OR_ROUTING: string; PAYMENT_UPI_ID: string; PAYMENT_QR_CODE_PATH: string; PAYMENT_QR_CODE_URL?: string; PAYMENT_RAAST_ID: string; PAYMENT_WALLET_PROVIDER: string; PAYMENT_WALLET_NUMBER: string; PAYMENT_WALLET_ACCOUNT_NAME: string; PAYMENT_BANK_ACCOUNTS: string; PAYMENT_METHODS_CONFIG: string; PAYMENT_LATE_FEE_NOTE: string; PAYMENT_REFUND_POLICY: string; DEFAULT_CURRENCY: string; bankAccounts: BankAccount[]; methods: PaymentMethodConfig[] }
 
 // ---------------------------------------------------------------------------
@@ -487,6 +491,7 @@ export const analyticsApi = {
   get: (range: string) => request<Analytics>(`/student/analytics?range=${range}`),
   progress: () => request<ProgressTrend>('/student/progress'),
   leaderboard: (range = '30d') => request<LeaderboardRow[]>(`/leaderboard?range=${range}`),
+  streak: () => request<StreakCard>('/leaderboard/streak'),
   submitSession: (body: { moduleId?: number; subjectId?: number; topicId?: number; mode?: 'timed' | 'untimed'; durationSeconds?: number; answers: { mcqId: number; selectedAnswer: string | null }[] }) =>
     request<{ id: number; scorePercent: number; correctCount: number; totalQuestions: number }>('/practice-sessions', { method: 'POST', body: JSON.stringify(body) }),
   practiceOverview: () => request<{ totalTopics: number; totalQuestions: number; avgQuestions: number; avgDurationMinutes: number; moduleCount: number }>('/student/practice-overview'),

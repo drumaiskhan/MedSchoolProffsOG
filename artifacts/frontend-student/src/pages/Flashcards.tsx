@@ -130,25 +130,23 @@ function Flashcards() {
   const resetDeck = () => { setIndex(0); setKnown({}); setFlipped(false); askAi.reset(); };
   const toggleGridFlip = (id: number) => setFlippedIds((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
 
-  const stats: Array<[string, number]> = [
-    ['Total Available', allCardsQ.data?.length ?? 0],
-    ['Topics', allTopicsQ.data?.length ?? 0],
-    ['Subjects', allSubjectsQ.data?.length ?? 0],
-    ['Modules', modules.length],
-  ];
-
   const header = <SectionHeader eyebrow="Study tools" title="Study Flashcards" description="Master your knowledge with interactive flashcards."
     action={(streakQ.data?.currentStreak ?? 0) > 0 ? <span className="inline-flex items-center gap-1.5 rounded-full bg-[#fff0cb] px-3 py-1.5 text-[11px] font-bold text-[#8d6420] ring-1 ring-inset ring-[#8d6420]/15" data-testid="text-flashcard-streak"><Flame size={13} /> {streakQ.data?.currentStreak} day streak</span> : undefined} />;
 
   const toolbar = <div className="mb-5 flex flex-wrap items-center gap-2">
-    <div className="flex overflow-hidden rounded-xl border border-border bg-card">
-      <button onClick={() => setView('grid')} className={cn('grid size-9 place-items-center', view === 'grid' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')} title="Grid view" data-testid="button-flashcard-view-grid"><LayoutGrid size={15} /></button>
-      <button onClick={() => setView('study')} className={cn('grid size-9 place-items-center border-l border-border', view === 'study' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')} title="Study mode" data-testid="button-flashcard-view-study"><Presentation size={15} /></button>
+    <div className="flex overflow-hidden rounded-xl border border-border bg-card shadow-[var(--shadow-2xs)]">
+      <button onClick={() => setView('grid')} className={cn('grid size-9 place-items-center transition-colors', view === 'grid' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')} title="Grid view" data-testid="button-flashcard-view-grid"><LayoutGrid size={15} /></button>
+      <button onClick={() => setView('study')} className={cn('grid size-9 place-items-center border-l border-border transition-colors', view === 'study' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')} title="Study mode" data-testid="button-flashcard-view-study"><Presentation size={15} /></button>
     </div>
-    <button onClick={() => { resetDeck(); setFlippedIds(new Set()); }} className="grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted" title="Restart" data-testid="button-flashcard-refresh"><RotateCcw size={15} /></button>
+    <button onClick={() => { resetDeck(); setFlippedIds(new Set()); }} className="grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground shadow-[var(--shadow-2xs)] transition-all hover:-translate-y-0.5 hover:bg-muted hover:shadow-[var(--shadow-xs)]" title="Restart" data-testid="button-flashcard-refresh"><RotateCcw size={15} /></button>
   </div>;
 
-  const statCards = <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">{stats.map(([label, value]) => <div key={label} className="rounded-2xl border border-border bg-card p-4 text-center"><div className="font-display text-2xl">{value}</div><div className="mt-1 text-[11px] font-semibold text-muted-foreground">{label}</div></div>)}</div>;
+  const statCards = <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">{[
+    { label: 'Total Available', value: allCardsQ.data?.length ?? 0, icon: Zap, bg: 'bg-[#fdf0d9]', fg: 'text-[#8a5a12]' },
+    { label: 'Topics', value: allTopicsQ.data?.length ?? 0, icon: Target, bg: 'bg-[#d7eee4]', fg: 'text-[#1f7a5c]' },
+    { label: 'Subjects', value: allSubjectsQ.data?.length ?? 0, icon: BookOpen, bg: 'bg-[#dceaf1]', fg: 'text-[#2c6a8f]' },
+    { label: 'Modules', value: modules.length, icon: LayoutGrid, bg: 'bg-[#efe8f7]', fg: 'text-[#6a4c93]' },
+  ].map(({ label, value, icon: Icon, bg, fg }) => <div key={label} className="rounded-2xl border border-border bg-card p-4 text-center shadow-[var(--shadow-2xs)] transition-shadow hover:shadow-[var(--shadow-xs)]"><div className={cn('mx-auto mb-2 grid size-8 place-items-center rounded-lg', bg, fg)}><Icon size={15} /></div><div className="font-display text-2xl">{value}</div><div className="mt-1 text-[11px] font-semibold text-muted-foreground">{label}</div></div>)}</div>;
 
   // Radix's Select can't take an empty-string item value (it reserves ""
   // internally to mean "no selection", and throws if an item uses it), so
@@ -156,7 +154,8 @@ function Flashcards() {
   // here and translated back to '' — the value the rest of the component
   // (moduleId/subjectId/topicId state, the queries keyed off them) already
   // expects — right where each select's value changes.
-  const filterBar = <div className="mb-5 space-y-2 rounded-2xl border border-border bg-card p-4">
+  const filterBar = <div className="mb-5 space-y-2.5 rounded-2xl border border-border bg-gradient-to-br from-card to-muted/30 p-4 shadow-[var(--shadow-2xs)]">
+    <div className="mb-1 flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground"><SlidersHorizontal size={12} /> Filter deck</div>
     {/* Coarsest filter, same level as the Blocks landing page. Optional —
         a deployment with no blocks configured just shows nothing here and
         the Module select below still lists everything, same as before. */}
@@ -210,7 +209,7 @@ function Flashcards() {
         {(topicsQ.data || []).map((t) => <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>)}
       </SelectContent>
     </Select>
-    <div className="relative"><Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><input value={queryText} onChange={(e) => setQueryText(e.target.value)} placeholder="Search flashcards..." className="h-10 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-xs" data-testid="input-flashcard-search" /></div>
+    <div className="relative"><Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><input value={queryText} onChange={(e) => setQueryText(e.target.value)} placeholder="Search flashcards..." className="h-10 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-xs outline-none transition-shadow focus:ring-2 focus:ring-primary/20" data-testid="input-flashcard-search" /></div>
   </div>;
 
   if (!q.isLoading && !cards.length) {
@@ -225,39 +224,39 @@ function Flashcards() {
         <span>Showing {clampedGridPage * GRID_PAGE_SIZE + 1}–{Math.min((clampedGridPage + 1) * GRID_PAGE_SIZE, visibleCards.length)} of {visibleCards.length}</span>
         <span>Page {clampedGridPage + 1} of {gridPageCount}</span>
       </div>}
-      <div className="space-y-5">{pagedCards.map((c, pageI) => {
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{pagedCards.map((c, pageI) => {
         const i = clampedGridPage * GRID_PAGE_SIZE + pageI;
         const isFlipped = flippedIds.has(c.id);
         const accent = topicAccentStyles(c.topic || c.module);
         return <div key={c.id} className="flip-card" data-testid={`card-flashcard-grid-${c.id}`}>
           <button
             onClick={() => toggleGridFlip(c.id)}
-            className={cn('flip-card-inner group block min-h-[220px] rounded-2xl text-left', isFlipped && 'is-flipped')}
+            className={cn('flip-card-inner group block min-h-[240px] rounded-2xl text-left', isFlipped && 'is-flipped')}
             data-testid={`button-flip-flashcard-${c.id}`}
           >
             {/* Front — the question */}
-            <div className="flip-card-face card-lift flex flex-col overflow-hidden rounded-2xl border bg-card p-6" style={{ ...accent.border, ...accent.wash }}>
+            <div className="flip-card-face card-lift flex flex-col overflow-hidden rounded-2xl border bg-card p-5 shadow-[var(--shadow-2xs)] transition-shadow hover:shadow-[var(--shadow-md)]" style={{ ...accent.border, ...accent.wash }}>
               <div aria-hidden className="pointer-events-none absolute -right-6 -top-8 size-24 rotate-12 rounded-2xl border-[8px] border-current opacity-[0.06]" />
-              <div className="flex flex-wrap items-center gap-2"><span className="rounded-full border border-border bg-card px-2.5 py-1 text-[10px] font-bold">Question {i + 1}</span><TopicBadge label={c.topic} /></div>
-              <div className="flex flex-1 min-h-0 items-[safe_center] justify-center overflow-y-auto py-1"><p className="text-center text-base font-bold leading-7">{c.front}</p></div>
+              <div className="flex flex-wrap items-center gap-2"><span className="rounded-full border border-border bg-card px-2.5 py-1 text-[10px] font-bold">Q{i + 1}</span><TopicBadge label={c.topic} /></div>
+              <div className="flex flex-1 min-h-0 items-[safe_center] justify-center overflow-y-auto py-1"><p className="line-clamp-6 text-center text-sm font-bold leading-6">{c.front}</p></div>
               <div className="flex flex-wrap items-center justify-center gap-2"><Badge tone="neutral">{c.module}</Badge></div>
-              <div className="mt-3 text-center text-[11px] font-semibold text-muted-foreground transition-colors group-hover:text-foreground">Click to reveal the answer</div>
+              <div className="mt-3 flex items-center justify-center gap-1 text-center text-[11px] font-semibold text-muted-foreground transition-colors group-hover:text-foreground">Tap to reveal <RotateCcw size={10} /></div>
             </div>
             {/* Back — the answer, distinct tint so flip state is unmistakable */}
-            <div className="flip-card-face flip-card-back flex flex-col overflow-hidden rounded-2xl border p-6 shadow-sm" style={{ ...accent.border, background: 'hsl(var(--card))' }}>
+            <div className="flip-card-face flip-card-back flex flex-col overflow-hidden rounded-2xl border p-5 shadow-[var(--shadow-md)]" style={{ ...accent.border, background: 'hsl(var(--card))' }}>
               <div aria-hidden className="pointer-events-none absolute -bottom-8 -left-6 size-20 rounded-full border-[8px] border-current opacity-[0.06]" />
-              <div className="flex flex-wrap items-center gap-2"><span className="rounded-full px-2.5 py-1 text-[10px] font-bold" style={accent.badge}>Answer {i + 1}</span><TopicBadge label={c.topic} /></div>
-              <div className="flex flex-1 min-h-0 items-[safe_center] justify-center overflow-y-auto py-1"><p className="text-center text-base font-bold leading-7">{c.back}</p></div>
+              <div className="flex flex-wrap items-center gap-2"><span className="rounded-full px-2.5 py-1 text-[10px] font-bold" style={accent.badge}>A{i + 1}</span><TopicBadge label={c.topic} /></div>
+              <div className="flex flex-1 min-h-0 items-[safe_center] justify-center overflow-y-auto py-1"><p className="line-clamp-6 text-center text-sm font-bold leading-6">{c.back}</p></div>
               <div className="flex flex-wrap items-center justify-center gap-2"><Badge tone="neutral">{c.module}</Badge></div>
-              <div className="mt-3 text-center text-[11px] font-semibold text-muted-foreground">Click to flip back</div>
+              <div className="mt-3 text-center text-[11px] font-semibold text-muted-foreground">Tap to flip back</div>
             </div>
           </button>
         </div>;
       })}</div>
-      {gridPageCount > 1 && <div className="mt-5 flex items-center justify-center gap-3">
-        <button onClick={() => setGridPage((p) => Math.max(0, p - 1))} disabled={clampedGridPage === 0} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold text-muted-foreground disabled:opacity-30 disabled:pointer-events-none hover:bg-muted" data-testid="button-flashcard-grid-page-prev"><ArrowLeft size={13} /> Previous</button>
+      {gridPageCount > 1 && <div className="mt-6 flex items-center justify-center gap-3">
+        <button onClick={() => setGridPage((p) => Math.max(0, p - 1))} disabled={clampedGridPage === 0} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold text-muted-foreground shadow-[var(--shadow-2xs)] transition-all disabled:opacity-30 disabled:pointer-events-none hover:-translate-y-0.5 hover:bg-muted" data-testid="button-flashcard-grid-page-prev"><ArrowLeft size={13} /> Previous</button>
         <span className="font-mono-app text-[11px] text-muted-foreground">Page {clampedGridPage + 1} of {gridPageCount}</span>
-        <button onClick={() => setGridPage((p) => Math.min(gridPageCount - 1, p + 1))} disabled={clampedGridPage >= gridPageCount - 1} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold text-muted-foreground disabled:opacity-30 disabled:pointer-events-none hover:bg-muted" data-testid="button-flashcard-grid-page-next">Next <ArrowRight size={13} /></button>
+        <button onClick={() => setGridPage((p) => Math.min(gridPageCount - 1, p + 1))} disabled={clampedGridPage >= gridPageCount - 1} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-4 py-2 text-xs font-bold text-muted-foreground shadow-[var(--shadow-2xs)] transition-all disabled:opacity-30 disabled:pointer-events-none hover:-translate-y-0.5 hover:bg-muted" data-testid="button-flashcard-grid-page-next">Next <ArrowRight size={13} /></button>
       </div>}
       </>}
     </div>;

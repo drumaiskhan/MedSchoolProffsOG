@@ -80,6 +80,7 @@ import { dbErrorMessage } from "../lib/dbErrors";
 import { shuffleMcqOptions } from "../lib/mcqShuffle";
 import { sendEmail, membershipActivatedEmailHtml, trialActivatedEmailHtml, paymentSubmittedEmailHtml, paymentRejectedEmailHtml, accountRejectedEmailHtml } from "../lib/email";
 import { validateCoupon, markCouponUsed, type CouponApplication } from "../lib/coupons";
+import { liveStreak } from "../lib/streak";
 
 const router: IRouter = Router();
 
@@ -220,7 +221,7 @@ router.get("/student/dashboard", requireAuth, async (req, res): Promise<void> =>
       .where(and(eq(practiceAttemptsTable.userId, userId), sql`${mcqsTable.moduleId} IS NOT NULL`)),
     // userView() is a deliberately limited public projection that doesn't
     // include streak fields — fetch separately rather than widen it.
-    db.select({ currentStreak: usersTable.currentStreak }).from(usersTable).where(eq(usersTable.id, userId)),
+    db.select({ currentStreak: usersTable.currentStreak, longestStreak: usersTable.longestStreak, lastPracticeDate: usersTable.lastPracticeDate }).from(usersTable).where(eq(usersTable.id, userId)),
   ]);
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
 
@@ -252,7 +253,7 @@ router.get("/student/dashboard", requireAuth, async (req, res): Promise<void> =>
     membershipExpiry: activeMembership ? activeMembership.expiresAt.toISOString() : null,
     progress: totalQuestions ? Math.round((totalAttemptedQuestions / totalQuestions) * 100) : 0,
     weeklyGoal: Number(weeklyAttempts[0]?.count ?? 0),
-    streak: streakRow?.currentStreak ?? 0,
+    streak: liveStreak(streakRow).current,
     modules,
     recentActivity: [],
     notifications: notificationRows.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() })),

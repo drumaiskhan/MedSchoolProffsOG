@@ -341,11 +341,11 @@ export function MobileTabBar({ user, onMore }: { user: User; onMore: () => void 
   const isLocked = useNavLocks(user);
   const match = (href: string) => location === href || location.startsWith(`${href}/`);
   return <nav aria-label="Quick navigation" className="tabbar-safe fixed inset-x-0 bottom-0 z-20 px-3 md:hidden" data-testid="tabbar-mobile">
-    <div className="mx-auto flex max-w-md items-stretch gap-1 rounded-2xl border border-border bg-card/95 p-1.5 shadow-xl backdrop-blur-md">
+    <div className="tabbar-dock mx-auto flex max-w-md items-stretch gap-1 rounded-2xl border border-border bg-card/95 p-1.5 backdrop-blur-md">
       {TAB_ITEMS.map(({ href, label, icon: Icon, also }) => {
         const active = match(href) || !!also?.some(match);
         const locked = isLocked(href);
-        return <Link key={href} href={locked ? '/payments' : href} aria-current={active ? 'page' : undefined} className={cn('relative flex flex-1 flex-col items-center gap-0.5 rounded-xl py-2 text-[10px] font-bold transition-colors', active ? 'bg-primary/12 text-primary' : 'text-muted-foreground hover:bg-muted/70')} data-testid={`tab-${label.toLowerCase()}`}>
+        return <Link key={href} href={locked ? '/payments' : href} aria-current={active ? 'page' : undefined} className={cn('relative flex flex-1 flex-col items-center gap-0.5 rounded-xl py-2 text-[10px] font-bold transition-colors', active ? 'tab-key text-primary' : 'text-muted-foreground hover:bg-muted/70')} data-testid={`tab-${label.toLowerCase()}`}>
           <Icon size={19} strokeWidth={active ? 2.4 : 2} />{label}
           {locked && <LockKeyhole size={9} className="absolute right-3 top-1.5" />}
         </Link>;
@@ -723,7 +723,7 @@ export function Stat({ label, value }: { label: string; value: string | number }
 
 export function StatTile({ icon: Icon, bg, fg, label, value }: { icon: typeof Clock3; bg: string; fg: string; label: string; value: ReactNode }) {
   return <div className="rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-2xs)] transition-shadow hover:shadow-[var(--shadow-xs)]" data-testid={`stat-tile-${label.toLowerCase().replaceAll(' ', '-')}`}>
-    <div className="flex items-center gap-3"><span className={cn('grid size-10 shrink-0 place-items-center rounded-xl', bg, fg)}><Icon size={18} /></span><div className="text-xs font-semibold text-muted-foreground">{label}</div></div>
+    <div className="flex items-center gap-3"><span className={cn('d3-tile grid size-10 shrink-0 place-items-center rounded-xl', bg, fg)}><Icon size={18} /></span><div className="text-xs font-semibold text-muted-foreground">{label}</div></div>
     <div className="mt-3 font-display text-3xl">{value}</div>
   </div>;
 }

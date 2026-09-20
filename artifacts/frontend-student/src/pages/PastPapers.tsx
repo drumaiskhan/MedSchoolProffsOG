@@ -76,7 +76,12 @@ function PastPapers() {
   const totals = { papers: list.length, questions: list.reduce((s, p) => s + p.mcqCount, 0) };
 
   return <div><SectionHeader eyebrow="Exam practice" title="Past Papers" description="Previous exam papers and practice tests." />
-    <div className="grid grid-cols-2 gap-4"><StatTile icon={FileStack} bg="bg-[#dceaf1]" fg="text-[#2c6a8f]" label="Available papers" value={totals.papers} /><StatTile icon={Target} bg="bg-[#d7eee4]" fg="text-[#1f7a5c]" label="Total questions" value={totals.questions} /></div>
+    <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <StatTile icon={FileStack} bg="bg-[#dceaf1]" fg="text-[#2c6a8f]" label="Available papers" value={totals.papers} />
+      <StatTile icon={Target} bg="bg-[#d7eee4]" fg="text-[#1f7a5c]" label="Total questions" value={totals.questions} />
+      <StatTile icon={GraduationCap} bg="bg-[#efe8f7]" fg="text-[#6a4c93]" label="Colleges" value={colleges.length} />
+      <StatTile icon={Clock3} bg="bg-[#fdf0d9]" fg="text-[#8a5a12]" label="Study hours" value={list.reduce((s, p) => s + pastPaperEstimatedHours(p.mcqCount), 0)} />
+    </div>
 
   {/* Radix Select (same component the Flashcards filters use), not a
       native <select> — the native element's dropdown is rendered by the
@@ -105,23 +110,27 @@ function PastPapers() {
     </Select>
   </div>
 
-  {papers.isLoading ? <SkeletonPage /> : filtered.length ? <div className="mt-5 space-y-3">{filtered.map((paper) => {
+  {papers.isLoading ? <SkeletonPage /> : filtered.length ? <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{filtered.map((paper) => {
     const hours = pastPaperEstimatedHours(paper.mcqCount);
-    return <div key={paper.id} className="card-lift flex items-center gap-4 rounded-2xl border border-border bg-card p-4" data-testid={`card-paper-${paper.id}`}>
-      <PastPaperRowIcon examBoard={paper.examBoard} />
-      <div className="min-w-0 flex-1">
-        {/* Always the paper's own title (the "Block A"/"Block B" name it
-            was given in admin) — previously this fell back to showing the
-            college code instead whenever one was set, so the same list
-            showed a mix of college names and block names depending on the
-            paper. The college + year now sit together on the small line
-            above it instead, consistently, whether or not a college was set. */}
-        <div className="text-[11px] font-bold text-muted-foreground">{[paper.examBoard, paper.year].filter(Boolean).join(' · ')}</div>
-        <div className="truncate text-sm font-extrabold leading-5">{paper.title}</div>
-        <div className="mt-0.5 text-[11px] text-muted-foreground">{paper.mcqCount} Question{paper.mcqCount === 1 ? '' : 's'} · {hours} Hour{hours === 1 ? '' : 's'}</div>
+    return <Link key={paper.id} href={`/practice?pastPaperId=${paper.id}`} className="card-lift group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-2xs)] transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-[var(--shadow-md)]" data-testid={`card-paper-${paper.id}`}>
+      <div className="flex items-start justify-between gap-2">
+        <PastPaperRowIcon examBoard={paper.examBoard} />
+        <ArrowRight size={16} className="mt-2 shrink-0 text-muted-foreground transition-all group-hover:translate-x-0.5 group-hover:text-primary" />
       </div>
-      <Link href={`/practice?pastPaperId=${paper.id}`} className="shrink-0 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground" data-testid={`button-start-paper-${paper.id}`}>View</Link>
-    </div>;
+      {/* Always the paper's own title (the "Block A"/"Block B" name it
+          was given in admin) — previously this fell back to showing the
+          college code instead whenever one was set, so the same list
+          showed a mix of college names and block names depending on the
+          paper. The college + year now sit together on the small line
+          above it instead, consistently, whether or not a college was set. */}
+      <div className="mt-3 text-[10px] font-extrabold uppercase tracking-wide text-primary">{[paper.examBoard, paper.year].filter(Boolean).join(' · ') || 'Past paper'}</div>
+      <div className="mt-1 text-sm font-extrabold leading-5">{paper.title}</div>
+      <div className="mt-3 flex items-center gap-3 border-t border-border pt-3 text-[11px] font-semibold text-muted-foreground">
+        <span className="flex items-center gap-1"><Target size={12} /> {paper.mcqCount} Q{paper.mcqCount === 1 ? '' : 's'}</span>
+        <span className="flex items-center gap-1"><Clock3 size={12} /> ~{hours}h</span>
+      </div>
+      <span className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary py-2 text-xs font-extrabold text-primary-foreground shadow-sm transition-all group-hover:shadow-md" data-testid={`button-start-paper-${paper.id}`}>View paper</span>
+    </Link>;
   })}</div> : <EmptyState icon={FileStack} title="No past papers yet" body="Your admin can add past papers from Admin → Past papers, or none match these filters yet." />}
   </div>;
 }

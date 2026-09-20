@@ -207,10 +207,10 @@ function Practice() {
       sessionStartRef.current = Date.now();
     };
     return <div className="mx-auto max-w-xl">
-      <div className="overflow-hidden rounded-3xl border border-border bg-card">
+      <div className="overflow-hidden rounded-3xl border border-border bg-card shadow-[var(--shadow-md)]">
         {/* Header card — light indigo-tinted band with topic identity + at-a-glance
             counts, replacing the old solid primary-color hero. */}
-        <div className="bg-indigo-50 px-5 pb-5 pt-5 sm:px-7 sm:pt-7">
+        <div className="bg-gradient-to-br from-indigo-50 via-indigo-50 to-blue-50 px-5 pb-5 pt-5 sm:px-7 sm:pt-7">
           <div className="flex items-start gap-3">
             <Link href={pastPaperId ? '/past-papers' : '/blocks'} className="mt-2.5 shrink-0 text-indigo-400 transition-colors hover:text-indigo-600" data-testid="link-practice-back-modules"><ArrowLeft size={18} /></Link>
             <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 text-white shadow-sm"><Target size={20} /></div>
@@ -421,11 +421,14 @@ function Practice() {
         replaces a whole separate "Timer" card that used to sit above the
         question, pushing everything down a full card's height before you
         even reached the question text. */}
-    <div className="mt-2.5 mb-4"><Progress value={percentAnswered} /></div>
+    <div className="mt-2.5 mb-4 flex items-center gap-3"><div className="flex-1"><Progress value={percentAnswered} /></div><span className="shrink-0 text-[10px] font-bold text-muted-foreground">{percentAnswered}% answered</span></div>
     <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
-      <div className="order-1 rounded-3xl border border-border bg-card p-5 sm:p-6">
-        <div className="flex items-center justify-between"><Badge tone={difficultyTone(current.difficulty)}>{current.difficulty}</Badge><button onClick={toggleFlag} className={cn('rounded-lg p-1.5', flaggedIds.has(current.id) ? 'text-[#e5a952]' : 'text-muted-foreground hover:text-foreground')} data-testid="button-flag-question"><Flag size={17} fill={flaggedIds.has(current.id) ? 'currentColor' : 'none'} /></button></div>
-        <h2 className="mt-4 max-w-2xl text-base font-extrabold leading-6 tracking-[-.025em] sm:text-lg sm:leading-7">{current.question}</h2>
+      <div className="order-1 overflow-hidden rounded-3xl border border-border bg-card shadow-[var(--shadow-2xs)]">
+        <div className="bg-gradient-to-br from-indigo-50 via-card to-card px-5 pt-5 sm:px-6 sm:pt-6">
+        <div className="flex items-center justify-between"><Badge tone={difficultyTone(current.difficulty)}>{current.difficulty}</Badge><button onClick={toggleFlag} className={cn('rounded-lg p-1.5 transition-transform hover:scale-110', flaggedIds.has(current.id) ? 'text-[#e5a952]' : 'text-muted-foreground hover:text-foreground')} data-testid="button-flag-question"><Flag size={17} fill={flaggedIds.has(current.id) ? 'currentColor' : 'none'} /></button></div>
+        <h2 className="mt-4 max-w-2xl pb-5 text-base font-extrabold leading-6 tracking-[-.025em] sm:text-lg sm:leading-7">{current.question}</h2>
+        </div>
+        <div className="px-5 pb-5 sm:px-6 sm:pb-6">
         {/* Compact option rows (py-2.5 instead of p-4, tighter gap) so a
             5-option question plus the hint/explain/references row and the
             prev/next buttons fit one viewport on a normal laptop screen
@@ -446,7 +449,7 @@ function Practice() {
             : isSelected && !isCorrectOpt ? 'border-destructive bg-[#fff1ed]'
             : isCorrectOpt ? 'border-[#287058] bg-[#f3fbf7]'
             : 'border-border opacity-70';
-          return <button key={option} onClick={() => selectOption(option)} disabled={selected != null} className={cn('flex w-full items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-left text-sm transition-colors', optionClass, selected != null && 'cursor-default')} data-testid={`button-answer-${i}`}><span className="grid size-6 shrink-0 place-items-center rounded-lg bg-muted font-mono-app text-[11px]">{String.fromCharCode(65 + i)}</span><span className="flex-1">{option}</span>{selected != null && isSelected && !isCorrectOpt && <X size={15} className="shrink-0 text-destructive" />}{selected != null && isCorrectOpt && <CheckCircle2 size={15} className="shrink-0 text-[#287058]" />}</button>;
+          return <button key={option} onClick={() => selectOption(option)} disabled={selected != null} className={cn('flex w-full items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-left text-sm shadow-[var(--shadow-2xs)] transition-all', optionClass, selected == null && 'hover:-translate-y-0.5 hover:shadow-[var(--shadow-xs)]', selected != null && 'cursor-default')} data-testid={`button-answer-${i}`}><span className={cn('grid size-6 shrink-0 place-items-center rounded-lg font-mono-app text-[11px] font-bold transition-colors', selected != null && isSelected && isCorrectOpt && 'bg-[#287058] text-white', selected != null && isSelected && !isCorrectOpt && 'bg-destructive text-white', selected != null && !isSelected && isCorrectOpt && 'bg-[#287058] text-white', (selected == null || (!isSelected && !isCorrectOpt)) && 'bg-muted')}>{String.fromCharCode(65 + i)}</span><span className="flex-1">{option}</span>{selected != null && isSelected && !isCorrectOpt && <X size={15} className="shrink-0 text-destructive" />}{selected != null && isCorrectOpt && <CheckCircle2 size={15} className="shrink-0 text-[#287058]" />}</button>;
         })}</div>
 
         <div className="mt-4 flex flex-wrap gap-2">
@@ -468,7 +471,8 @@ function Practice() {
 
         <div className="mt-5 flex items-center justify-between gap-3">
           <button disabled={index === 0} onClick={() => goTo(index - 1)} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-5 py-2.5 text-xs font-bold disabled:opacity-40" data-testid="button-prev-question"><ArrowLeft size={14} /> Prev</button>
-          {index + 1 >= activeMcqs.length ? <button onClick={finishSession} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-finish-session">Finish session <CheckCircle2 size={14} /></button> : <button onClick={() => goTo(index + 1)} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-next-question">Next <ArrowRight size={14} /></button>}
+          {index + 1 >= activeMcqs.length ? <button onClick={finishSession} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md" data-testid="button-finish-session">Finish session <CheckCircle2 size={14} /></button> : <button onClick={() => goTo(index + 1)} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md" data-testid="button-next-question">Next <ArrowRight size={14} /></button>}
+        </div>
         </div>
       </div>
       <div className="order-2">{controlPanel}</div>

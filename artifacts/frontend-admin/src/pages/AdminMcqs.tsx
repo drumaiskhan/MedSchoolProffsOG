@@ -33,6 +33,8 @@ import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiReq
 // background refetches of data nothing has touched.
 import { DifficultyPicker, ExplanationCoverage, SectionHeader, cn, ConfirmDialog, McqBankTree, groupBlocksForPicker, BackupScopePicker, ProgramYearFilter, filterBlocksByProgramYear, studyYearToNumber, SuggestedPathHint } from '@/lib/shared';
 import { queryClient } from '@/lib/query-client';
+import { EyeOff as IconEyeOff, FolderX as IconFolderX, ListChecks as IconListChecks } from 'lucide-react';
+import { Chip, StatTiles } from '@/lib/admin-ui';
 
 function AdminMcqs() {
   const create = useCreateMcq();
@@ -51,10 +53,28 @@ function AdminMcqs() {
   // exam-/past-paper-owned rows the same way the tree does.
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<ExplanationStatus | null>(null);
+  // v37: difficulty + published/draft filters next to the search box. Applied to
+  // BOTH the tree (McqBankTree props) and `mcqs` below so "Select all" only ever
+  // selects what is on screen.
+  const [difficultyFilter, setDifficultyFilter] = useState<string | null>(null);
+  const [publishFilter, setPublishFilter] = useState<'published' | 'draft' | null>(null);
+  const isPublished = (m: { status: string }) => m.status.toLowerCase() === 'published';
   const mcqs = allMcqs.filter((m) =>
     m.examId === null && m.pastPaperId === null &&
     (!search.trim() || m.question.toLowerCase().includes(search.trim().toLowerCase())) &&
-    (!statusFilter || m.explanationStatus === statusFilter));
+    (!statusFilter || m.explanationStatus === statusFilter) &&
+    (!difficultyFilter || m.difficulty === difficultyFilter) &&
+    (!publishFilter || (publishFilter === 'published') === isPublished(m)));
+  // Bank overview (exam-/past-paper-owned rows are not part of the bank tree).
+  const bankRows = allMcqs.filter((m) => m.examId === null && m.pastPaperId === null);
+  const bankStats = {
+    total: bankRows.length,
+    published: bankRows.filter(isPublished).length,
+    drafts: bankRows.filter((m) => !isPublished(m)).length,
+    unassigned: bankRows.filter((m) => m.topicId === null).length,
+    needExplanation: bankRows.filter((m) => m.explanationStatus === 'PENDING').length,
+  };
+  const anyFilter = !!(search.trim() || statusFilter || difficultyFilter || publishFilter);
   const [manualOpen, setManualOpen] = useState(false);
   // Toggle for the per-option explanation fields on the single-question
   // manual add form below — off by default so the common case (just an
@@ -255,6 +275,13 @@ function AdminMcqs() {
   };
 
   return <div><SectionHeader eyebrow="Assessment bank" title="MCQ management" action={<button onClick={() => setManualOpen((v) => !v)} className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 text-xs font-bold" data-testid="button-toggle-manual-mcq"><Pencil size={14} /> {manualOpen ? 'Hide manual entry' : 'Add one manually'}</button>} />
+    <StatTiles items={[
+      { label: 'In the bank', value: bankStats.total.toLocaleString(), icon: IconListChecks, tone: 'green', testId: 'stat-mcq-total' },
+      { label: 'Published', value: bankStats.published.toLocaleString(), icon: CheckCircle2, tone: 'blue', testId: 'stat-mcq-published' },
+      { label: 'Drafts', value: bankStats.drafts.toLocaleString(), icon: IconEyeOff, tone: bankStats.drafts ? 'amber' : 'neutral', hint: 'Not visible to students', testId: 'stat-mcq-drafts' },
+      { label: 'Unassigned', value: bankStats.unassigned.toLocaleString(), icon: IconFolderX, tone: bankStats.unassigned ? 'amber' : 'neutral', hint: 'No topic yet — students cannot practise these by topic', testId: 'stat-mcq-unassigned' },
+      { label: 'Need explanation', value: bankStats.needExplanation.toLocaleString(), icon: FileText, tone: bankStats.needExplanation ? 'violet' : 'neutral', hint: 'Explanation status: pending', testId: 'stat-mcq-pending' },
+    ]} />
     <div className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl border border-border bg-card p-4"><span className="text-[11px] font-extrabold uppercase tracking-wide text-muted-foreground">Program &amp; year</span><ProgramYearFilter program={programFilter} studyYear={studyYearFilter} onProgramChange={(v) => { setProgramFilter(v); resetPickerBelowProgramYear(); }} onStudyYearChange={(v) => { setStudyYearFilter(v); resetPickerBelowProgramYear(); }} testIdPrefix="mcq-filter" /><span className="text-[11px] text-muted-foreground">Narrows the Block/Module/Subject/Topic pickers below to MBBS or BDS and, optionally, one year.</span></div>
 
     <div className="rounded-3xl border border-primary/30 bg-[#eef7f1] p-6"><div className="flex items-start gap-3"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground"><FileText size={18} /></div><div><h3 className="text-sm font-extrabold">Bulk upload from a file</h3><p className="mt-1 text-xs leading-5 text-muted-foreground">Upload a question bank as .txt, .csv, .xlsx/.xls, .pdf, or .docx. We'll extract the questions automatically — review and fix anything before it's added to the bank.</p></div></div>
@@ -375,7 +402,13 @@ function AdminMcqs() {
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <div className="relative max-w-sm flex-1"><Search className="absolute left-3 top-2.5 text-muted-foreground" size={15} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Find a question by text..." className="h-10 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-xs outline-none" data-testid="input-search-mcqs" /></div>
         {statusFilter && <button onClick={() => setStatusFilter(null)} className="inline-flex items-center gap-1.5 rounded-xl bg-[#eef7f1] px-3 py-2 text-[11px] font-bold text-primary" data-testid="button-clear-explanation-filter">Explanation: {statusFilter.replace('_', ' ')} <X size={12} /></button>}
-        {(search.trim() || statusFilter) && <span className="text-[11px] text-muted-foreground">{mcqs.length} match{mcqs.length === 1 ? '' : 'es'}</span>}
+        <div className="flex flex-wrap items-center gap-1.5" data-testid="filters-mcq-difficulty">
+          {(['easy', 'moderate', 'hard'] as const).map((d) => <Chip key={d} active={difficultyFilter === d} onClick={() => setDifficultyFilter(difficultyFilter === d ? null : d)} testId={`chip-mcq-difficulty-${d}`}><span className="capitalize">{d}</span></Chip>)}
+          <span className="mx-0.5 h-5 w-px bg-border" aria-hidden="true" />
+          {(['published', 'draft'] as const).map((k) => <Chip key={k} active={publishFilter === k} onClick={() => setPublishFilter(publishFilter === k ? null : k)} testId={`chip-mcq-state-${k}`}><span className="capitalize">{k}</span></Chip>)}
+        </div>
+        {anyFilter && <button onClick={() => { setSearch(''); setStatusFilter(null); setDifficultyFilter(null); setPublishFilter(null); }} className="text-[11px] font-bold text-muted-foreground underline-offset-2 hover:underline" data-testid="button-clear-all-mcq-filters">Clear all</button>}
+        {anyFilter && <span className="text-[11px] text-muted-foreground">{mcqs.length} match{mcqs.length === 1 ? '' : 'es'}</span>}
       </div>
 
       {/* Sticky so bulk-selecting deep into a long MBBS/BDS tree (380+
@@ -389,7 +422,7 @@ function AdminMcqs() {
         {selectedIds.size > 0 && <button onClick={() => setBulkDeleteMode('selected')} className="inline-flex items-center gap-1 rounded-lg border border-destructive/30 px-2.5 py-1.5 text-[11px] font-bold text-destructive" data-testid="button-bulk-delete-selected"><Trash2 size={12} /> Delete selected</button>}
       </div>
 
-      <div className="mt-3"><McqBankTree modules={allModules} blocks={blocks} search={search} statusFilter={statusFilter} selectedIds={selectedIds} onToggleSelect={toggleSelected} /></div>
+      <div className="mt-3"><McqBankTree modules={allModules} blocks={blocks} search={search} statusFilter={statusFilter} difficultyFilter={difficultyFilter} publishFilter={publishFilter} selectedIds={selectedIds} onToggleSelect={toggleSelected} /></div>
       {bulkDeleteMode === 'selected' && <ConfirmDialog title={`Delete ${selectedIds.size} selected question${selectedIds.size === 1 ? '' : 's'}?`} body="They'll be removed from the bank and from any draft exams using them." confirmLabel="Delete selected" onCancel={() => setBulkDeleteMode(null)} onConfirm={() => bulkDelete.mutate(Array.from(selectedIds))} pending={bulkDelete.isPending} />}
       </div>
   </div>;

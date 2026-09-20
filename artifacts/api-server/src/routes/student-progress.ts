@@ -5,6 +5,7 @@ import {
   pastPapersTable, examsTable, examAttemptsTable,
 } from "@workspace/db";
 import { requireAuth } from "../middlewares/auth";
+import { liveStreak } from "../lib/streak";
 
 const router: IRouter = Router();
 
@@ -90,8 +91,8 @@ router.get("/student/progress-overview", requireAuth, async (req, res): Promise<
     accuracy: pct(totalCorrect, totalQuestions),
     timeSpentMinutes: Math.round(timeSpentSeconds / 60),
     activeDaysLast30: activeDays,
-    currentStreak: user?.currentStreak ?? 0,
-    longestStreak: user?.longestStreak ?? 0,
+    currentStreak: liveStreak(user).current,
+    longestStreak: liveStreak(user).longest,
   };
 
   // ---- Recent practice sessions --------------------------------------------

@@ -8,8 +8,9 @@
 // border-border, ...) so the admin's own Design & Branding settings keep
 // re-skinning these too.
 import { type ComponentProps, type ReactNode, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Eye, EyeOff, Info, Loader2, Save, Undo2, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, Eye, EyeOff, ImageOff, Info, Loader2, Save, Search, Undo2, X, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { resolveUploadUrl } from '@/lib/api';
 
 type IconType = typeof Info;
 
@@ -204,5 +205,100 @@ export function SaveBar({ dirty, saving, saved, onSave, onDiscard, testId = 'but
         <Button variant="primary" icon={Save} loading={saving} onClick={onSave} data-testid={testId}>{saving ? 'Saving…' : 'Save changes'}</Button>
       </>}
     </div>
+  </div>;
+}
+
+
+// ---------------------------------------------------------------------------
+// Curriculum pages (Academic content, Subjects, Topics, MCQ bank)
+// ---------------------------------------------------------------------------
+
+type StatTone = 'green' | 'amber' | 'blue' | 'violet' | 'neutral';
+const STAT_TONE: Record<StatTone, string> = {
+  green: 'bg-primary/12 text-primary',
+  amber: 'bg-[#fff0cb] text-[#94651c]',
+  blue: 'bg-[#dceaf1] text-[#2c6a8f]',
+  violet: 'bg-[#e6dcf5] text-[#6b3fa0]',
+  neutral: 'bg-muted text-muted-foreground',
+};
+
+/** A row of at-a-glance counters that sits under a page header. */
+export function StatTiles({ items, className }: { items: Array<{ label: string; value: ReactNode; icon: IconType; tone?: StatTone; hint?: string; testId?: string }>; className?: string }) {
+  return <div className={cn('mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))]', className)}>
+    {items.map((it) => <div key={it.label} className="flex items-center gap-3 rounded-2xl border border-border bg-card p-3.5 shadow-[var(--shadow-xs)]" data-testid={it.testId}>
+      <span className={cn('grid size-10 shrink-0 place-items-center rounded-xl shadow-[0_2px_0_hsl(0_0%_0%/.08),inset_0_1px_0_hsl(0_0%_100%/.6)]', STAT_TONE[it.tone ?? 'green'])}><it.icon size={17} /></span>
+      <div className="min-w-0"><div className="font-display text-2xl leading-none tabular-nums">{it.value}</div><div className="mt-1 truncate text-[10px] font-bold uppercase tracking-[.08em] text-muted-foreground" title={it.hint}>{it.label}</div></div>
+    </div>)}
+  </div>;
+}
+
+/** Search field with a clear button — the one every curriculum list uses. */
+export function SearchBox({ value, onChange, placeholder = 'Search…', testId, className }: { value: string; onChange: (value: string) => void; placeholder?: string; testId?: string; className?: string }) {
+  return <div className={cn('relative min-w-0', className)}>
+    <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+    <input value={value} onChange={(e: { target: { value: string } }) => onChange(e.target.value)} placeholder={placeholder} aria-label={placeholder} className={cn(inputClass, 'pl-9 pr-8')} data-testid={testId} />
+    {value && <button type="button" onClick={() => onChange('')} aria-label="Clear search" className="absolute right-1.5 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground hover:bg-muted"><X size={13} /></button>}
+  </div>;
+}
+
+/** Square thumbnail that resolves stored upload paths (so it also works when
+ * the admin app and the API live on different domains) and falls back to an icon. */
+export function Thumb({ url, size = 40, icon: Icon = ImageOff, className }: { url?: string | null; size?: number; icon?: IconType; className?: string }) {
+  const src = resolveUploadUrl(url);
+  return <div className={cn('grid shrink-0 place-items-center overflow-hidden rounded-xl bg-primary/10 text-primary shadow-[inset_0_1px_0_hsl(0_0%_100%/.5)]', className)} style={{ width: size, height: size }}>
+    {src ? <img src={src} alt="" loading="lazy" decoding="async" className="size-full object-cover" /> : <Icon size={Math.round(size * 0.45)} />}
+  </div>;
+}
+
+/** Reorder helper. `all` is EVERY sibling in display order (sort by displayOrder,
+ * then id); `group` is the visible subset being reordered. Moves `id` one step
+ * inside `group`, leaves every other item's slot alone, renumbers `all` as
+ * 0..n-1 and returns only the rows whose displayOrder actually changes.
+ * Renumbering (instead of swapping two displayOrder values) is what makes the
+ * arrows work when two rows share the same order number. */
+export function planReorder<T extends { id: number; displayOrder?: number }>(all: T[], group: T[], id: number, dir: -1 | 1): Array<{ id: number; displayOrder: number }> {
+  const from = group.findIndex((x) => x.id === id);
+  const to = from + dir;
+  if (from < 0 || to < 0 || to >= group.length) return [];
+  const reordered = [...group];
+  [reordered[from], reordered[to]] = [reordered[to], reordered[from]];
+  const inGroup = new Set(group.map((x) => x.id));
+  let k = 0;
+  const merged = all.map((x) => (inGroup.has(x.id) ? reordered[k++] : x));
+  return merged.flatMap((x, i) => ((x.displayOrder ?? -1) === i ? [] : [{ id: x.id, displayOrder: i }]));
+}
+
+export const byOrder = <T extends { id: number; displayOrder?: number }>(a: T, b: T) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0) || a.id - b.id;
+
+/** Controlled disclosure used for the Year → Module / Year → Subject trees.
+ * Controlled (unlike shared.tsx's CollapsibleGroup) so a page can force every
+ * group open while a search is active. Keeps the `button-toggle-<testId>` hook. */
+export function Group({ title, count, icon, open, onToggle, testId, nested, children }: { title: ReactNode; count?: ReactNode; icon?: ReactNode; open: boolean; onToggle: () => void; testId: string; nested?: boolean; children?: ReactNode }) {
+  return <div className={cn('overflow-hidden rounded-2xl border bg-card shadow-[var(--shadow-2xs)]', nested ? 'border-border/70' : 'border-border')}>
+    <button type="button" onClick={onToggle} aria-expanded={open} className={cn('flex w-full items-center gap-2.5 text-left hover:bg-muted/40', nested ? 'px-3.5 py-3' : 'px-4 py-3.5')} data-testid={`button-toggle-${testId}`}>
+      <ChevronRight size={nested ? 14 : 16} className={cn('shrink-0 text-primary transition-transform', open && 'rotate-90')} />
+      {icon}
+      <span className={cn('min-w-0 flex-1 truncate', nested ? 'text-xs font-extrabold' : 'text-sm font-extrabold')}>{title}</span>
+      {count !== undefined && <span className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-[10px] font-bold text-muted-foreground">{count}</span>}
+    </button>
+    {open && <div className="border-t border-border/70 bg-muted/20 p-3 sm:p-4">{children}</div>}
+  </div>;
+}
+
+/** Tiny "type a name, press Enter" row for adding a child in place. */
+export function QuickAdd({ placeholder, onAdd, pending, testId }: { placeholder: string; onAdd: (name: string) => void; pending?: boolean; testId?: string }) {
+  const [value, setValue] = useState('');
+  return <form onSubmit={(e) => { e.preventDefault(); const name = value.trim(); if (name) { onAdd(name); setValue(''); } }} className="mt-3 flex gap-2">
+    <input value={value} onChange={(e: { target: { value: string } }) => setValue(e.target.value)} placeholder={placeholder} className={cn(inputClass, 'h-9 flex-1')} data-testid={testId} />
+    <button type="submit" disabled={pending || !value.trim()} className="btn-pop inline-flex h-9 items-center gap-1 rounded-xl bg-primary px-3.5 text-[11px] font-extrabold text-primary-foreground disabled:opacity-50" data-testid={testId ? `${testId}-submit` : undefined}>Add</button>
+  </form>;
+}
+
+/** Up/down arrow pair used on every reorderable row. */
+export function MoveButtons({ canUp, canDown, onUp, onDown, testIdSuffix }: { canUp: boolean; canDown: boolean; onUp: () => void; onDown: () => void; testIdSuffix: string }) {
+  const cls = 'grid size-5 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-25 disabled:hover:bg-transparent';
+  return <div className="flex shrink-0 flex-col">
+    <button type="button" disabled={!canUp} onClick={onUp} className={cls} aria-label="Move up" data-testid={`button-move-up-${testIdSuffix}`}><ChevronUp size={13} /></button>
+    <button type="button" disabled={!canDown} onClick={onDown} className={cls} aria-label="Move down" data-testid={`button-move-down-${testIdSuffix}`}><ChevronDown size={13} /></button>
   </div>;
 }
