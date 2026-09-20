@@ -942,11 +942,14 @@ export function SubscriptionStatusCard({ plans, payments }: { plans: MembershipP
   </div>;
 }
 
-export function TeamPhoto({ member }: { member: TeamMember }) {
+export function TeamPhoto({ member, size }: { member: TeamMember; size?: number }) {
   const [broken, setBroken] = useState(false);
   const url = member.photoPath ? resolveUploadUrl(member.photoPath) : null;
-  if (!url || broken) return <div className="grid size-14 shrink-0 place-items-center rounded-full bg-[#d7eee4] text-sm font-extrabold text-[#164b4b]">{initials(member.name)}</div>;
-  return <img src={url} alt={member.name} loading="lazy" decoding="async" className="size-14 shrink-0 rounded-full border border-border object-cover" onError={() => setBroken(true)} />;
+  // `size` (px) is optional so the existing 56px avatars are unchanged; the
+  // landing page's team showcase passes a larger one.
+  const dim = size ? { width: size, height: size } : undefined;
+  if (!url || broken) return <div className={cn('grid shrink-0 place-items-center rounded-full bg-[#d7eee4] font-extrabold text-[#164b4b]', !size && 'size-14 text-sm')} style={size ? { ...dim, fontSize: Math.round(size * 0.34) } : undefined}>{initials(member.name)}</div>;
+  return <img src={url} alt={member.name} loading="lazy" decoding="async" className={cn('shrink-0 rounded-full border border-border object-cover', !size && 'size-14')} style={dim} onError={() => setBroken(true)} />;
 }
 
 export function TeamSection() {

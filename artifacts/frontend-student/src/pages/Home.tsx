@@ -16,9 +16,10 @@ import { useGetCurrentUser, getGetCurrentUserQueryKey, useListMembershipPlans } 
 import type { MembershipPlan } from '@workspace/api-client-react';
 import { siteContentApi } from '@/lib/api';
 import { useQuery } from '@tanstack/react-query';
-import { cn, Footer, AnimatedBrandMark, Testimonials, useSeoSync, TeamPhoto } from '@/lib/shared';
+import { cn, Footer, AnimatedBrandMark, Testimonials, useSeoSync } from '@/lib/shared';
 import { Reveal, SpotlightCard } from '@/lib/motion';
 import { Aurora, GlossIcon, HeroStage, SubjectMarquee } from '@/lib/landing-visuals';
+import { TeamShowcase } from '@/components/TeamShowcase';
 
 const WHY_US = [
   { hue: 172, icon: GraduationCap, title: 'Every college, one bank', desc: 'MCQs organised by program, year, subject, and topic — MBBS and BDS, side by side.' },
@@ -174,30 +175,8 @@ export default function Home() {
     </section>
 
     {/* Team — same team data managed in Admin → Site content → Team, also
-        shown on /about; here it's a compact strip rather than the full
-        card grid so it doesn't compete with Pricing/Reviews for space. */}
-    {(siteQ.data?.team ?? []).filter((t) => t.active).length > 0 && <section className="border-b border-border bg-muted/40">
-      <div className="mx-auto max-w-6xl px-5 py-16 md:px-8">
-        <div className="mx-auto max-w-2xl text-center">
-          <div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-primary">Who's behind it</div>
-          <h2 className="mt-3 font-display text-3xl tracking-[-.03em]">The academic team</h2>
-        </div>
-        <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          {/* Same TeamPhoto component the signed-in Profile page's Academic
-              Team section uses (lib/shared.tsx) — imported here so a photo
-              an admin uploads for a team member (Admin → Site content →
-              Team) actually shows on the public landing page too, instead
-              of every card falling back to plain initials regardless of
-              whether a photo is on file. */}
-          {(siteQ.data?.team ?? []).filter((t) => t.active).slice(0, 8).map((member) => <div key={member.id} className="rounded-2xl border border-border bg-card p-5 text-center" data-testid={`card-home-team-${member.id}`}>
-            <div className="mx-auto w-fit"><TeamPhoto member={member} /></div>
-            <h3 className="mt-3 text-sm font-extrabold">{member.name}</h3>
-            <p className="mt-1 text-xs text-muted-foreground">{member.role}</p>
-            {member.achievementBadge && <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-[#fdeecb] px-2.5 py-1 text-[10px] font-bold text-[#8a5a12]">{member.achievementBadge}</span>}
-          </div>)}
-        </div>
-      </div>
-    </section>}
+        shown on /about. v37: dark 3D-style showcase (components/TeamShowcase). */}
+    <TeamShowcase team={siteQ.data?.team ?? []} />
 
     {/* Pricing */}
     <section id="pricing" className="mx-auto max-w-6xl px-5 py-20 md:px-8">

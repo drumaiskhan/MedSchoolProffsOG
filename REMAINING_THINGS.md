@@ -30,3 +30,8 @@
 ## 4. Known small things
 - [ ] `frontend-student` leaderboard metric tabs scroll sideways on very narrow phones (Questions is partly off-screen until scrolled).
 - [ ] The v34 note's warning about 3D transforms stays in force — keep the depth system 2D.
+
+## 5. Added in v37.1
+- [ ] Team showcase shows at most 8 active members (as before); ordering is Owners → Reviewers → Question setters, then admin display order. Verified with mock data only.
+- [ ] The public `/about` page still uses the old plain team cards (only the landing page section was redesigned).
+- [ ] Look for other `position: fixed` elements inside pages that may have been (wrongly) anchored to the page column by the old `.page-enter` transform and now move to the viewport — expected to be an improvement, but eyeball dialogs/toasts.

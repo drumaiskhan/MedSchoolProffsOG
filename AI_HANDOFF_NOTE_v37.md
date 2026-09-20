@@ -81,3 +81,24 @@ New shared pieces in `frontend-admin/src/lib/admin-ui.tsx`: `StatTiles`, `Search
 * No `perspective`/`rotateX/Y`/`translateZ`/`preserve-3d` anywhere.
 * Streak reads go through `liveStreak()`; never return `users.current_streak` raw.
 * Reorders: use `planReorder` (renumber), never swap two `displayOrder` values.
+
+## v37.1 — fixes after first deploy
+* **Blank band at the bottom of the Leaderboard (bug from v37, fixed).** Root cause:
+  `.page-enter` used `animation-fill-mode: both`, so its last keyframe
+  (`transform: translateY(0)`) was held forever. A transformed element becomes the
+  containing block for `position: fixed` children, so the leaderboard's fixed
+  "your place" dock was positioned against the page column, and while hidden
+  (translated 140% down) it stretched the scroll height. Fixes:
+  1. `index.css` `.page-enter` now uses `backwards` (no lingering transform — this also
+     makes any other `fixed` element inside a page viewport-relative, as intended);
+  2. `YouDock` is rendered with `createPortal` into `document.body` and is
+     `visibility: hidden` while off. Reproduced and re-measured in headless Chromium
+     (page height now = last row + normal bottom padding; dock floats at the viewport bottom).
+  If some other page's fixed element (dialog, toast) relied on the old wrong containing
+  block, look at `.page-enter` first.
+* **Landing page "academic team"** rebuilt as `components/TeamShowcase.tsx` (dark stage,
+  glass cards, metallic photo rings with halo + contact shadow, pointer highlight, hover
+  lift + sheen, two columns on phones, staggered rows on desktop, "Read about the team"
+  link to /about). CSS: `.team-*` and `.avatar-ring--teal/--violet` at the end of `index.css`.
+  `TeamPhoto` (student `lib/shared.tsx`) gained an optional `size` prop (default unchanged).
+  Same data as before (Admin → Site content → Team, active members, up to 8).

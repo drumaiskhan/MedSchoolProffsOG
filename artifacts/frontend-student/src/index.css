@@ -56,7 +56,13 @@
 @layer utilities {
   .font-display { font-family: var(--app-font-serif); }
   .font-mono-app { font-family: var(--app-font-mono); }
-  .page-enter { animation: pageIn .45s ease both; }
+  /* `backwards`, not `both`: with `both` the final keyframe (transform:
+     translateY(0)) is held forever, and ANY transform makes this element the
+     containing block for position:fixed descendants — so fixed things inside a
+     page (the leaderboard's "your place" dock, dialogs) were positioned against
+     the page column instead of the viewport, and a hidden, translated-away one
+     stretched the page with a band of blank space at the bottom. */
+  .page-enter { animation: pageIn .45s ease backwards; }
   .card-lift { transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
   .card-lift:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: hsl(var(--primary) / .35); }
   .skeleton { background: linear-gradient(100deg, hsl(var(--muted)) 30%, hsl(var(--card)) 50%, hsl(var(--muted)) 70%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
@@ -469,8 +475,8 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 .day-coin--today { outline: 2px solid hsl(0 0% 100% / .75); outline-offset: 2px; }
 
 /* Sticky "your rank" dock (slides up from the bottom while your row is off-screen). */
-.lb-dock { transition: transform .35s cubic-bezier(.3, 1.2, .5, 1), opacity .25s ease; }
-.lb-dock[data-show="false"] { transform: translateY(140%); opacity: 0; pointer-events: none; }
+.lb-dock { transition: transform .35s cubic-bezier(.3, 1.2, .5, 1), opacity .25s ease, visibility 0s; }
+.lb-dock[data-show="false"] { transform: translateY(140%); opacity: 0; pointer-events: none; visibility: hidden; transition-delay: 0s, 0s, .35s; }
 
 /* Phone tab bar: a floating raised dock; the active tab is a keycap. */
 .tabbar-dock { box-shadow: 0 1px 0 hsl(0 0% 100% / .6) inset, 0 -1px 0 hsl(208 35% 19% / .04), 0 18px 30px -12px hsl(208 35% 19% / .35), 0 4px 10px -2px hsl(208 35% 19% / .12); }
@@ -482,3 +488,24 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
   .card-lift, .d3-tile, .seg-thumb, .lb-dock { transition: none; }
   .student-shell :is(button, a).bg-primary:not(.no-3d):hover, .card-lift:hover { transform: none; }
 }
+
+/* ---- Landing page: academic team showcase (v37) -------------------------- */
+.team-stage { position: relative; overflow: hidden; color: hsl(var(--sidebar-foreground)); background: linear-gradient(160deg, hsl(var(--sidebar)) 0%, hsl(var(--sidebar-accent)) 100%); }
+.team-card { position: relative; overflow: hidden; border-radius: 1.6rem; padding: 1.4rem 1rem 1.2rem; text-align: center; background: linear-gradient(165deg, hsl(0 0% 100% / .15), hsl(0 0% 100% / .04) 60%); border: 1px solid hsl(0 0% 100% / .14); box-shadow: inset 0 1px 0 hsl(0 0% 100% / .28), 0 3px 0 hsl(0 0% 0% / .28), 0 26px 40px -22px hsl(0 0% 0% / .7); transition: transform .3s cubic-bezier(.2, .8, .2, 1), box-shadow .3s ease, border-color .3s ease; }
+.team-card::before { content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .3s ease; background: radial-gradient(240px circle at var(--mx, 50%) var(--my, 0%), hsl(var(--sidebar-primary) / .25), transparent 70%); }
+.team-card::after { content: ''; position: absolute; top: 0; bottom: 0; left: -45%; width: 40%; pointer-events: none; opacity: 0; background: linear-gradient(90deg, transparent, hsl(0 0% 100% / .16), transparent); transform: translateX(0) skewX(-18deg); }
+.team-card:hover { transform: translateY(-10px); border-color: hsl(var(--sidebar-primary) / .5); box-shadow: inset 0 1px 0 hsl(0 0% 100% / .36), 0 4px 0 hsl(0 0% 0% / .3), 0 40px 50px -24px hsl(0 0% 0% / .8), 0 0 0 1px hsl(var(--sidebar-primary) / .18); }
+.team-card:hover::before { opacity: 1; }
+.team-card:hover::after { opacity: 1; animation: teamSheen .9s ease forwards; }
+@keyframes teamSheen { from { transform: translateX(0) skewX(-18deg); } to { transform: translateX(520%) skewX(-18deg); } }
+.team-photo { position: relative; display: inline-grid; place-items: center; }
+.team-photo::before { content: ''; position: absolute; inset: -18%; border-radius: 9999px; background: radial-gradient(circle, var(--halo, hsl(var(--sidebar-primary) / .5)), transparent 68%); filter: blur(8px); opacity: .75; transition: opacity .3s ease, transform .3s ease; }
+.team-card:hover .team-photo::before { opacity: 1; transform: scale(1.12); }
+.team-photo .avatar-ring { position: relative; transition: transform .35s cubic-bezier(.34, 1.56, .64, 1); }
+.team-card:hover .team-photo .avatar-ring { transform: translateY(-4px) scale(1.05); }
+.team-floor { display: block; height: 10px; width: 62%; margin: 10px auto 0; border-radius: 50%; background: radial-gradient(closest-side, hsl(0 0% 0% / .55), transparent); filter: blur(3px); transition: transform .35s ease, opacity .35s ease; }
+.team-card:hover .team-floor { transform: scaleX(.8); opacity: .6; }
+.avatar-ring--teal { --ring-1: #c9f7e5; --ring-2: #4cbf95; --ring-3: #1d7358; }
+.avatar-ring--violet { --ring-1: #eadcff; --ring-2: #a67be0; --ring-3: #5f3aa3; }
+@media (max-width: 639px) { .team-card { padding: 1.1rem .7rem 1rem; border-radius: 1.3rem; } }
+@media (prefers-reduced-motion: reduce) { .team-card:hover::after { animation: none; opacity: 0; } .team-card, .team-photo .avatar-ring { transition: none; } .team-card:hover { transform: none; } }

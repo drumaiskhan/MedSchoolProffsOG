@@ -214,6 +214,14 @@ export const booksApi = {
   updateHighlight: (id: number, hid: number, body: { color?: HighlightColor; note?: string | null }) => request<BookHighlight>(`/books/${id}/highlights/${hid}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteHighlight: (id: number, hid: number) => request<{ ok: true }>(`/books/${id}/highlights/${hid}`, { method: 'DELETE' }),
   saveProgress: (id: number, page: number) => request<{ ok: true }>(`/books/${id}/progress`, { method: 'PUT', body: JSON.stringify({ page }) }),
+  // Same call, but with `keepalive: true` so the browser lets it finish even
+  // though the page is being hidden/closed right now — the normal debounced
+  // save (above) can otherwise lose the last page if the tab is closed
+  // before its 1.2s timer fires. Fire-and-forget on purpose: there's no tab
+  // left to show an error to.
+  saveProgressOnExit: (id: number, page: number): void => {
+    try { void fetch(`${API_BASE}/books/${id}/progress`, { method: 'PUT', credentials: 'include', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ page }) }); } catch { /* best effort */ }
+  },
   list: () => request<AdminBookStudent[]>('/books'),
   purchase: (bookId: number, body: { method: string; reference: string; paymentDate: string; proofPath?: string | null }) => request<BookPurchase>(`/books/${bookId}/purchases`, { method: 'POST', body: JSON.stringify(body) }),
   myPurchases: () => request<BookPurchase[]>('/books/purchases/mine'),

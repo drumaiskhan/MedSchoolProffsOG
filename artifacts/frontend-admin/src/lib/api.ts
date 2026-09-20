@@ -633,11 +633,14 @@ export const couponsAdminApi = {
   remove: (id: number) => request<{ ok: true }>(`/coupons/${id}`, { method: 'DELETE' }),
 };
 
-export interface AdminBookPurchase { id: number; bookId: number; bookTitle: string; amount: number; currency: string; method: string; reference: string; paymentDate: string; proofPath: string | null; status: 'PAYMENT_PENDING_REVIEW' | 'approved' | 'rejected'; rejectionReason: string | null; submittedAt: string; reviewedAt: string | null; user?: { name: string; email: string } }
+export interface AdminBookPurchase { id: number; bookId: number; bookTitle: string; amount: number; currency: string; method: string; reference: string; paymentDate: string; proofPath: string | null; status: 'PAYMENT_PENDING_REVIEW' | 'approved' | 'rejected' | 'suspended'; rejectionReason: string | null; submittedAt: string; reviewedAt: string | null; user?: { name: string; email: string } }
 export const bookPurchasesAdminApi = {
   list: () => request<AdminBookPurchase[]>('/admin/book-purchases'),
   approve: (id: number) => request<AdminBookPurchase>(`/admin/book-purchases/${id}/approve`, { method: 'POST' }),
   reject: (id: number, reason?: string) => request<AdminBookPurchase>(`/admin/book-purchases/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  suspend: (id: number, reason?: string) => request<AdminBookPurchase>(`/admin/book-purchases/${id}/suspend`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  reactivate: (id: number) => request<AdminBookPurchase>(`/admin/book-purchases/${id}/reactivate`, { method: 'POST' }),
+  remove: (id: number) => request<{ ok: true }>(`/admin/book-purchases/${id}`, { method: 'DELETE' }),
 };
 
 export const booksAdminApi = {

@@ -10,6 +10,8 @@ bulk topic add, reorder that actually works with equal order numbers, thumbnail 
 fix); MCQ bank gets overview tiles and difficulty/published filters.
 NOTE: written without node_modules — run install/typecheck/build first.
 
+v37.1: fixed the blank band at the bottom of the Leaderboard (`.page-enter` transform trapped the fixed dock; dock now portalled), and rebuilt the landing page academic-team section as a 3D-style showcase (components/TeamShowcase.tsx).
+
 ---
 
 # Round 17 — Device limit (2 per account by default, admin-adjustable)

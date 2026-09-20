@@ -47,6 +47,31 @@ function useReaderGuards(veil: (ms?: number) => void) {
   }, [veil]);
 }
 
+/** Best-effort DevTools-open heuristic: an undocked or docked panel shrinks
+ * the viewport relative to the outer window by a wide margin that normal
+ * browser chrome (toolbars, mobile address bar) doesn't. Polled rather than
+ * event-driven since there's no "devtools opened" event. This exists to stop
+ * the easy case — someone opening the console and running
+ * `canvas.toDataURL()` to pull a page straight off the rendered bitmap — not
+ * to detect every inspector; a determined user can still work around a
+ * heuristic. Screen/photo capture of the pixels themselves can never be
+ * blocked from inside the page (see bookReader.ts's header comment) — this
+ * only raises the bar for the console shortcut, and pairs with a watermark
+ * baked into every page so anything that does get out is traceable. */
+function useDevtoolsGuard(): boolean {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const THRESHOLD = 180;
+    const id = window.setInterval(() => {
+      const wide = window.outerWidth - window.innerWidth > THRESHOLD;
+      const tall = window.outerHeight - window.innerHeight > THRESHOLD;
+      setOpen(wide || tall);
+    }, 800);
+    return () => window.clearInterval(id);
+  }, []);
+  return open;
+}
+
 // ---------------------------------------------------------------------------
 
 function PageView({ bookId, pageNo, size, widthPx, highlights, mode, color, onCreate, onOpen, pageRef }: {
@@ -104,6 +129,12 @@ function PageView({ bookId, pageNo, size, widthPx, highlights, mode, color, onCr
     if (!sel) return; const { x, y } = toNorm(e);
     if ('a' in sel) { const i = hitWord(words, x, y); if (i !== null) setSel({ a: sel.a, b: i }); }
     else setSel({ ...sel, rect: { x: Math.min(x, sel.x0), y: Math.min(y, sel.y0), w: Math.abs(x - sel.x0), h: Math.abs(y - sel.y0) } });
+    // Auto-scroll while dragging a highlight near the top/bottom edge of the
+    // viewport, so a selection that runs off-screen doesn't force the reader
+    // to release the drag, scroll manually, then restart it.
+    const EDGE = 64;
+    if (e.clientY < EDGE) window.scrollBy(0, -(EDGE - e.clientY) * 0.5);
+    else if (e.clientY > window.innerHeight - EDGE) window.scrollBy(0, (e.clientY - (window.innerHeight - EDGE)) * 0.5);
   };
   const up = () => {
     if (!sel) return;
@@ -115,7 +146,7 @@ function PageView({ bookId, pageNo, size, widthPx, highlights, mode, color, onCr
   const pct = (n: number) => `${n * 100}%`;
   const rectStyle = (r: Rect, extra: React.CSSProperties = {}): React.CSSProperties => ({ position: 'absolute', left: pct(r.x), top: pct(r.y), width: pct(r.w), height: pct(r.h), ...extra });
 
-  return <div ref={(el) => { boxRef.current = el; pageRef(el); }} data-page={pageNo} className="relative mx-auto mb-4 overflow-hidden rounded-sm bg-white shadow-md" style={{ width: widthPx, height }}>
+  return <div ref={(el) => { boxRef.current = el; pageRef(el); }} data-page={pageNo} className="book-page relative mx-auto mb-4 overflow-hidden rounded-sm bg-white shadow-md" style={{ width: widthPx, height }}>
     <canvas ref={canvasRef} className="pointer-events-none block h-full w-full select-none" style={{ WebkitUserSelect: 'none' }} aria-label={`Page ${pageNo}`} />
     {!drawnWidth && !failed && <div className="absolute inset-0 grid place-items-center text-muted-foreground"><BrandSpinner size={22} /></div>}
     {failed && <div className="absolute inset-0 grid place-items-center p-6 text-center text-xs font-semibold text-destructive">{failed}</div>}
@@ -143,7 +174,10 @@ export default function BookReader() {
   const highlights = useMemo(() => hlQ.data ?? [], [hlQ.data]);
 
   const [mode, setMode] = useState<Mode>('read');
-  const [color, setColor] = useState<HighlightColor>('yellow');
+  // Remembers the last color picked so returning to any book keeps it,
+  // instead of resetting to yellow every time.
+  const [color, setColor] = useState<HighlightColor>(() => { try { const v = localStorage.getItem('reader:color'); return v === 'green' || v === 'pink' || v === 'blue' ? v : 'yellow'; } catch { return 'yellow'; } });
+  useEffect(() => { try { localStorage.setItem('reader:color', color); } catch { /* private mode / storage blocked */ } }, [color]);
   const [zoom, setZoom] = useState(1);
   const [current, setCurrent] = useState(1);
   const [panel, setPanel] = useState(false);
@@ -152,17 +186,36 @@ export default function BookReader() {
   const veilTimer = useRef<number | undefined>(undefined);
   const veil = useCallback((ms?: number) => { setVeiled(true); if (ms) { window.clearTimeout(veilTimer.current); veilTimer.current = window.setTimeout(() => setVeiled(false), ms); } }, []);
   useReaderGuards(veil);
+  const devtoolsOpen = useDevtoolsGuard();
+
+  // Escape backs out of whatever's open, closest-first: the highlight editor
+  // sheet, then the highlights list panel — same as tapping outside them.
+  useEffect(() => {
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setActive((a) => { if (a) return null; setPanel((p) => (p ? false : p)); return a; });
+    };
+    window.addEventListener('keydown', onEsc);
+    return () => window.removeEventListener('keydown', onEsc);
+  }, []);
 
   const pageEls = useRef<Array<HTMLDivElement | null>>([]);
   const [viewportW, setViewportW] = useState(() => Math.min(window.innerWidth - 24, 1100));
   useEffect(() => { const f = () => setViewportW(Math.min(window.innerWidth - 24, 1100)); window.addEventListener('resize', f); return () => window.removeEventListener('resize', f); }, []);
   const widthPx = Math.round(Math.min(viewportW, 900) * zoom);
 
+  // lastSavedRef / pendingRef track what's on screen vs. what's confirmed
+  // saved, so a tab-close mid-debounce still gets flushed (see below) instead
+  // of silently losing up to 1.2s of reading progress.
+  const pendingRef = useRef(1);
+  const lastSavedRef = useRef(1);
+  const [justSaved, setJustSaved] = useState(false);
+
   // Jump to the saved page once the layout exists.
   const resumed = useRef(false);
   useEffect(() => {
     if (!info.data || resumed.current) return; resumed.current = true;
-    const p = info.data.resumePage; setCurrent(p);
+    const p = info.data.resumePage; setCurrent(p); pendingRef.current = p; lastSavedRef.current = p;
     requestAnimationFrame(() => pageEls.current[p - 1]?.scrollIntoView({ block: 'start' }));
   }, [info.data]);
 
@@ -170,17 +223,31 @@ export default function BookReader() {
   useEffect(() => {
     if (!info.data) return;
     let raf = 0, saveT: number | undefined;
+    const commit = (page: number) => {
+      lastSavedRef.current = page;
+      void booksApi.saveProgress(bookId, page).then(() => { setJustSaved(true); window.setTimeout(() => setJustSaved(false), 1500); }).catch(() => {});
+    };
     const onScroll = () => {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
         const mid = window.innerHeight / 2; let best = 1, bestD = Infinity;
         pageEls.current.forEach((el, i) => { if (!el) return; const r = el.getBoundingClientRect(); const d = r.top <= mid && r.bottom >= mid ? 0 : Math.min(Math.abs(r.top - mid), Math.abs(r.bottom - mid)); if (d < bestD) { bestD = d; best = i + 1; } });
-        setCurrent(best);
-        window.clearTimeout(saveT); saveT = window.setTimeout(() => { void booksApi.saveProgress(bookId, best).catch(() => {}); }, 1200);
+        setCurrent(best); pendingRef.current = best;
+        window.clearTimeout(saveT); saveT = window.setTimeout(() => commit(best), 1200);
       });
     };
+    // Flush immediately (not the 1.2s debounce) the moment the tab is hidden,
+    // backgrounded, or closed — `keepalive` lets the request outlive the page.
+    const flushNow = () => { if (pendingRef.current !== lastSavedRef.current) { lastSavedRef.current = pendingRef.current; booksApi.saveProgressOnExit(bookId, pendingRef.current); } };
+    const onHide = () => { if (document.visibilityState === 'hidden') flushNow(); };
     window.addEventListener('scroll', onScroll, { passive: true });
-    return () => { window.removeEventListener('scroll', onScroll); cancelAnimationFrame(raf); window.clearTimeout(saveT); };
+    document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('pagehide', flushNow);
+    return () => {
+      window.removeEventListener('scroll', onScroll); cancelAnimationFrame(raf); window.clearTimeout(saveT);
+      document.removeEventListener('visibilitychange', onHide); window.removeEventListener('pagehide', flushNow);
+      flushNow();
+    };
   }, [info.data, bookId]);
 
   const add = useMutation({
@@ -214,11 +281,15 @@ export default function BookReader() {
   }
   const d = info.data;
 
-  return <div className="book-reader-root select-none" data-veil={veiled} style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none' } as React.CSSProperties}>
-    <style>{`@media print{.book-reader-root{display:none!important}} .book-reader-root[data-veil="true"] canvas{visibility:hidden}`}</style>
+  return <div className="book-reader-root select-none" data-veil={veiled || devtoolsOpen} style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none' } as React.CSSProperties}>
+    {/* Veiling hides the whole page box — canvas, highlight overlays, page
+       number — not just the canvas, so a blurred/backgrounded/devtools-open
+       window doesn't still leak highlight positions or layout through the
+       overlay layers sitting on top of it. */}
+    <style>{`@media print{.book-reader-root{display:none!important}} .book-reader-root[data-veil="true"] .book-page{visibility:hidden}`}</style>
     <div className="sticky top-0 z-30 -mx-4 mb-4 flex flex-wrap items-center gap-2 border-b border-border bg-background/95 px-4 py-2.5 backdrop-blur sm:-mx-6 sm:px-6">
       <Link href="/books" className="grid size-9 place-items-center rounded-xl border border-border bg-card" aria-label="Back to books" data-testid="link-reader-back"><ArrowLeft size={16} /></Link>
-      <div className="min-w-0 flex-1"><div className="truncate text-sm font-extrabold">{d.title}</div><div className="flex items-center gap-1 text-[10px] font-semibold text-muted-foreground"><ShieldCheck size={11} /> Protected reading · highlights are saved to your account</div></div>
+      <div className="min-w-0 flex-1"><div className="truncate text-sm font-extrabold">{d.title}</div><div className="flex items-center gap-1 text-[10px] font-semibold text-muted-foreground"><ShieldCheck size={11} /> Protected reading · highlights are saved to your account{justSaved && <span className="text-primary"> · Progress saved</span>}</div></div>
       <label className="flex items-center gap-1 text-xs font-bold">Page <input type="number" min={1} max={d.pageCount} value={current} onChange={(e) => jump(Number(e.target.value))} className="h-8 w-14 rounded-lg border border-border bg-card px-2 text-center" data-testid="input-reader-page" /> / {d.pageCount}</label>
       <div className="flex items-center gap-1 rounded-xl border border-border bg-card p-1">
         {([['read', MousePointer2, 'Read'], ['text', Highlighter, 'Highlight text'], ['area', BoxSelect, 'Highlight area']] as const).map(([m, Icon, label]) =>
@@ -251,6 +322,13 @@ export default function BookReader() {
         <ul className="space-y-2">{[...highlights].sort((a, b) => a.page - b.page || a.id - b.id).map((h) => <li key={h.id}><button type="button" onClick={() => { jump(h.page); setActive(h); }} className="flex w-full items-start gap-2 rounded-xl border border-border p-3 text-left hover:bg-muted/60"><span className="mt-0.5 size-3 shrink-0 rounded-full" style={{ background: COLORS[h.color] }} /><span className="min-w-0 text-xs"><span className="font-bold">Page {h.page}</span> <span className="text-muted-foreground">· {h.kind === 'area' ? 'area' : 'text'}</span>{h.note && <span className="mt-1 block truncate text-muted-foreground">{h.note}</span>}</span></button></li>)}</ul>}
     </aside>}
 
-    {veiled && <div className="fixed inset-0 z-50 grid place-items-center bg-background/85 backdrop-blur-2xl" onClick={() => setVeiled(false)} data-testid="veil-reader"><div className="text-center"><EyeOff className="mx-auto text-muted-foreground" size={26} /><div className="mt-3 text-sm font-extrabold">Reader paused</div><p className="mt-1 text-xs text-muted-foreground">Pages are hidden while this window isn't in focus.</p><button type="button" className="mt-4 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground">Resume reading</button></div></div>}
+    {(veiled || devtoolsOpen) && <div className="fixed inset-0 z-50 grid place-items-center bg-background/85 backdrop-blur-2xl" onClick={() => !devtoolsOpen && setVeiled(false)} data-testid="veil-reader">
+      <div className="text-center">
+        <EyeOff className="mx-auto text-muted-foreground" size={26} />
+        <div className="mt-3 text-sm font-extrabold">{devtoolsOpen ? 'Developer tools detected' : 'Reader paused'}</div>
+        <p className="mt-1 text-xs text-muted-foreground">{devtoolsOpen ? "Pages are hidden while developer tools are open. Close them to keep reading." : "Pages are hidden while this window isn't in focus."}</p>
+        {!devtoolsOpen && <button type="button" onClick={() => setVeiled(false)} className="mt-4 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground">Resume reading</button>}
+      </div>
+    </div>}
   </div>;
 }

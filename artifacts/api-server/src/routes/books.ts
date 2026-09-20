@@ -285,6 +285,7 @@ router.post("/books/:id/purchases", requireAuth, async (req, res): Promise<void>
   const existing = await db.select().from(bookPurchasesTable).where(and(eq(bookPurchasesTable.userId, req.user!.id), eq(bookPurchasesTable.bookId, bookId)));
   if (existing.some((p) => p.status === "approved")) { res.status(400).json({ error: "You already own this book" }); return; }
   if (existing.some((p) => p.status === "PAYMENT_PENDING_REVIEW")) { res.status(400).json({ error: "You already have a submission for this book awaiting review" }); return; }
+  if (existing.some((p) => p.status === "suspended")) { res.status(400).json({ error: "Access to this book was suspended. Please contact support instead of submitting a new purchase." }); return; }
   const [row] = await db.insert(bookPurchasesTable).values({
     userId: req.user!.id, bookId: book.id, bookTitle: book.title,
     amount: book.price ?? "0", currency: book.currency ?? "PKR",
@@ -324,6 +325,48 @@ router.post("/admin/book-purchases/:id/reject", requireAdmin, async (req, res): 
   if (!row) { res.status(404).json({ error: "Purchase not found" }); return; }
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "BOOK_PURCHASE_REJECTED", entity: "book_purchase", entityId: row.id });
   res.json(serializeBookPurchase(row));
+});
+
+// Suspend: cuts the student's access to the book (resolveBookAccess only
+// treats status "approved" as owned) without losing the payment record —
+// use this for a chargeback, a shared-account concern, etc. Reactivate
+// undoes it. Both only apply to a purchase that was actually approved.
+router.post("/admin/book-purchases/:id/suspend", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const parsed = z.object({ reason: z.string().max(500).optional() }).safeParse(req.body);
+  if (!parsed.success || Number.isNaN(id)) { res.status(400).json({ error: "Invalid request" }); return; }
+  const [existing] = await db.select().from(bookPurchasesTable).where(eq(bookPurchasesTable.id, id));
+  if (!existing) { res.status(404).json({ error: "Purchase not found" }); return; }
+  if (existing.status !== "approved") { res.status(400).json({ error: "Only an approved purchase can be suspended." }); return; }
+  const [row] = await db.update(bookPurchasesTable).set({ status: "suspended", reviewedBy: req.user!.id, reviewedAt: new Date(), rejectionReason: parsed.data.reason ?? null }).where(eq(bookPurchasesTable.id, id)).returning();
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "BOOK_PURCHASE_SUSPENDED", entity: "book_purchase", entityId: row.id });
+  res.json(serializeBookPurchase(row));
+});
+
+router.post("/admin/book-purchases/:id/reactivate", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) { res.status(400).json({ error: "Invalid purchase id" }); return; }
+  const [existing] = await db.select().from(bookPurchasesTable).where(eq(bookPurchasesTable.id, id));
+  if (!existing) { res.status(404).json({ error: "Purchase not found" }); return; }
+  if (existing.status !== "suspended") { res.status(400).json({ error: "Only a suspended purchase can be reactivated." }); return; }
+  const [row] = await db.update(bookPurchasesTable).set({ status: "approved", reviewedBy: req.user!.id, reviewedAt: new Date(), rejectionReason: null }).where(eq(bookPurchasesTable.id, id)).returning();
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "BOOK_PURCHASE_REACTIVATED", entity: "book_purchase", entityId: row.id });
+  res.json(serializeBookPurchase(row));
+});
+
+// Hard delete — removes the row entirely (e.g. a test/duplicate/fraudulent
+// submission that shouldn't remain in the queue at all). Unlike suspend this
+// can't be undone, so it's logged with a snapshot of what was deleted.
+router.delete("/admin/book-purchases/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) { res.status(400).json({ error: "Invalid purchase id" }); return; }
+  const [deleted] = await db.delete(bookPurchasesTable).where(eq(bookPurchasesTable.id, id)).returning();
+  if (!deleted) { res.status(404).json({ error: "Purchase not found" }); return; }
+  await db.insert(auditLogsTable).values({
+    actorId: req.user!.id, action: "BOOK_PURCHASE_DELETED", entity: "book_purchase", entityId: id,
+    metadata: JSON.stringify({ userId: deleted.userId, bookId: deleted.bookId, bookTitle: deleted.bookTitle, status: deleted.status, amount: deleted.amount, currency: deleted.currency }),
+  });
+  res.json({ ok: true });
 });
 
 export default router;
