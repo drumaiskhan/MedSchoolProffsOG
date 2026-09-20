@@ -105,7 +105,7 @@ function Payments() {
     }
   };
 
-  return <div className="max-w-5xl"><SectionHeader eyebrow="Membership" title="Access that fits your semester" />
+  return <div className="max-w-5xl"><SectionHeader eyebrow="Membership" title="Access that fits your semester" description="Choose a plan, pay, and upload your proof — we activate your account after review." />
   <div className="mb-6"><SubscriptionStatusCard plans={plans} payments={payments} /></div>
   {!showForm ? <div className="rounded-2xl border border-dashed border-border bg-card p-6 text-center"><p className="text-xs text-muted-foreground">{isActive ? "Your access is active. Renewing early? You can submit a new payment any time." : 'Choose a plan and submit your payment to activate access.'}</p><button onClick={() => setShowForm(true)} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-show-payment-form">{isActive ? 'Renew / change plan' : 'Choose a plan & pay'}</button></div> : <div className="grid gap-6 lg:grid-cols-[1.1fr_1fr]"><div>
     <div className="mb-3 text-xs font-bold text-muted-foreground">Choose your access</div>

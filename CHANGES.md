@@ -5,6 +5,11 @@ See AI_HANDOFF_NOTE_v33.md. A student account can now be signed in on at most
 Security) and override it per student, see the signed-in devices, and sign
 one or all of them out (Students → student drawer → Devices).
 
+Also: student app UI modernisation (admin-style sidebar/header, unified
+headers, card/button/focus polish) — see the note's last section.
+
+Also (v34): automatic per-subject icons, animated landing/sign-in visuals, real dark mode for the student app, phone bottom tab bar — see AI_HANDOFF_NOTE_v34.md.
+
 ---
 
 # Round 16 — Shuffle bug fix, My Progress, secure paid-book reader

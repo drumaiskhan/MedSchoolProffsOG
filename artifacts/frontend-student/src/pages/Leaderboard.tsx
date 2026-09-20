@@ -72,10 +72,10 @@ function Leaderboard() {
   // errors explicitly; this brings Leaderboard in line with that, using the
   // same SectionHeader page-header convention every other page uses too
   // (this page previously built its own one-off header inside the card).
-  if (board.isLoading) return <div><SectionHeader eyebrow="Community" title="Leaderboard" /><SkeletonPage /></div>;
+  if (board.isLoading) return <div><SectionHeader eyebrow="Community" title="Leaderboard" description="See how you rank against other students." /><SkeletonPage /></div>;
 
   return <div>
-    <SectionHeader eyebrow="Community" title="Leaderboard" action={<span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1.5 text-[10px] font-bold text-muted-foreground"><span className="relative flex size-1.5"><span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-75" /><span className="relative inline-flex size-1.5 rounded-full bg-primary" /></span>Live</span>} />
+    <SectionHeader eyebrow="Community" title="Leaderboard" description="See how you rank against other students." action={<span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1.5 text-[10px] font-bold text-muted-foreground"><span className="relative flex size-1.5"><span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-75" /><span className="relative inline-flex size-1.5 rounded-full bg-primary" /></span>Live</span>} />
 
     {board.isError ? <EmptyState
       icon={AlertTriangle}

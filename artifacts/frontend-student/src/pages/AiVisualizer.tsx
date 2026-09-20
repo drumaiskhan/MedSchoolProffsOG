@@ -52,7 +52,7 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // invalidateQueries after a save) already set their own options, which
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
-import { AI_VISUALIZER_EXAMPLES, BrandSpinner, EmptyState, SkeletonPage } from '@/lib/shared';
+import { AI_VISUALIZER_EXAMPLES, BrandSpinner, EmptyState, SectionHeader, SkeletonPage } from '@/lib/shared';
 
 function AiVisualizer() {
   const [prompt, setPrompt] = useState('');
@@ -80,10 +80,7 @@ function AiVisualizer() {
   if (!siteContentQ.isLoading && !aiVisualizerEnabled) return <EmptyState icon={Wand2} title="AI Visualizer is turned off" body="This feature isn't available right now — check back later." />;
 
   return <div className="mx-auto max-w-3xl">
-    <div className="mb-5 flex items-start gap-3">
-      <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-[#164b4b] text-white"><Wand2 size={20} /></div>
-      <div><h2 className="text-[22px] font-extrabold tracking-[-.03em]">AI Visualizer</h2><p className="mt-0.5 text-xs text-muted-foreground">Describe a process, cycle, equation, or comparison and see it come to life</p></div>
-    </div>
+    <SectionHeader eyebrow="Study tools" title="AI Visualizer" description="Describe a process, cycle, equation, or comparison and see it come to life." />
 
     {!spec && (
       <div className="rounded-2xl border border-border bg-card p-5">

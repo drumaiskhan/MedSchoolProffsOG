@@ -53,7 +53,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 // invalidateQueries after a save) already set their own options, which
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
-import { Badge, EmptyState, Progress, SkeletonPage, TopicBadge, cn, topicAccentStyles, topicColorVar, useModulesGrouping } from '@/lib/shared';
+import { Badge, EmptyState, Progress, SectionHeader, SkeletonPage, TopicBadge, cn, topicAccentStyles, topicColorVar, useModulesGrouping } from '@/lib/shared';
 
 function Flashcards() {
   const search = useSearch();
@@ -137,10 +137,8 @@ function Flashcards() {
     ['Modules', modules.length],
   ];
 
-  const header = <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
-    <div className="flex items-start gap-3"><div className="grid size-11 shrink-0 place-items-center rounded-xl bg-[#164b4b] text-white"><Zap size={20} /></div><div><h2 className="text-[22px] font-extrabold tracking-[-.03em]">Study Flashcards</h2><p className="mt-0.5 text-xs text-muted-foreground">Master your knowledge with interactive flashcards</p></div></div>
-    {(streakQ.data?.currentStreak ?? 0) > 0 && <span className="inline-flex items-center gap-1.5 rounded-full bg-[#fff0cb] px-3 py-1.5 text-[11px] font-bold text-[#8d6420]" data-testid="text-flashcard-streak"><Flame size={13} /> {streakQ.data?.currentStreak} day streak</span>}
-  </div>;
+  const header = <SectionHeader eyebrow="Study tools" title="Study Flashcards" description="Master your knowledge with interactive flashcards."
+    action={(streakQ.data?.currentStreak ?? 0) > 0 ? <span className="inline-flex items-center gap-1.5 rounded-full bg-[#fff0cb] px-3 py-1.5 text-[11px] font-bold text-[#8d6420] ring-1 ring-inset ring-[#8d6420]/15" data-testid="text-flashcard-streak"><Flame size={13} /> {streakQ.data?.currentStreak} day streak</span> : undefined} />;
 
   const toolbar = <div className="mb-5 flex flex-wrap items-center gap-2">
     <div className="flex overflow-hidden rounded-xl border border-border bg-card">

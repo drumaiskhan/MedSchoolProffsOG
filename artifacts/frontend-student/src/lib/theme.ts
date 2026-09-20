@@ -84,6 +84,16 @@ export function readableForegroundHsl(hex: string | undefined | null): string {
   return luminance > 0.6 ? '213 35% 12%' : '0 0% 100%';
 }
 
+// Raises an "H S% L%" triple's lightness to at least `min` (keeps hue/sat).
+// Used in dark mode so a dark brand primary (navy) stays readable as text and
+// button colour on a dark surface.
+function ensureMinLightness(hsl: string, min: number): string {
+  const m = /^(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)%\s+(-?\d+(?:\.\d+)?)%$/.exec(hsl.trim());
+  if (!m) return hsl;
+  const [, h, sat, l] = m;
+  return Number(l) >= min ? hsl : `${h} ${sat}% ${min}%`;
+}
+
 export interface ThemeSettings {
   THEME_PRIMARY?: string;
   THEME_SECONDARY?: string;
@@ -116,10 +126,25 @@ export function applyThemeVars(settings: ThemeSettings | null | undefined): void
   const cardHsl = hexToHslTriple(card);
   const textHsl = hexToHslTriple(text);
 
+  // Dark mode: the shipped surface colours (background / card / text) are the
+  // LIGHT defaults, and inline styles beat the stylesheet's `.dark` block — so
+  // applying them here would leave a "dark" site with a light background.
+  // In dark mode we therefore only push surface colours the admin actually
+  // changed from the defaults; otherwise we clear them so `.dark` in index.css
+  // (a proper dark palette) takes over.
+  const dark = (settings?.THEME_MODE || 'light') === 'dark';
+  const custom = (key: ThemeKey) => !!settings?.[key] && String(settings[key]).trim().toLowerCase() !== DEFAULT_THEME[key].toLowerCase();
+  const setOrClear = (props: string[], value: string | null, apply: boolean) => {
+    for (const prop of props) { if (apply && value) root.style.setProperty(prop, value); else root.style.removeProperty(prop); }
+  };
+
   if (primaryHsl) {
-    root.style.setProperty('--primary', primaryHsl);
-    root.style.setProperty('--primary-foreground', readableForegroundHsl(primary));
-    root.style.setProperty('--ring', primaryHsl);
+    // In dark mode a navy primary is unreadable as text/buttons, so lift it.
+    const lifted = dark ? ensureMinLightness(primaryHsl, 58) : primaryHsl;
+    const liftedChanged = lifted !== primaryHsl;
+    root.style.setProperty('--primary', lifted);
+    root.style.setProperty('--primary-foreground', liftedChanged ? '213 35% 10%' : readableForegroundHsl(primary));
+    root.style.setProperty('--ring', lifted);
     // The sidebar shares the primary brand color (matches the reference:
     // the dark-navy "Primary" swatch is the same navy the sidebar uses).
     root.style.setProperty('--sidebar', primaryHsl);
@@ -141,16 +166,9 @@ export function applyThemeVars(settings: ThemeSettings | null | undefined): void
     root.style.setProperty('--secondary-foreground', readableForegroundHsl(secondary));
     root.style.setProperty('--chart-3', secondaryHsl);
   }
-  if (backgroundHsl) root.style.setProperty('--background', backgroundHsl);
-  if (cardHsl) {
-    root.style.setProperty('--card', cardHsl);
-    root.style.setProperty('--popover', cardHsl);
-  }
-  if (textHsl) {
-    root.style.setProperty('--foreground', textHsl);
-    root.style.setProperty('--card-foreground', textHsl);
-    root.style.setProperty('--popover-foreground', textHsl);
-  }
+  setOrClear(['--background'], backgroundHsl, !dark || custom('THEME_BACKGROUND'));
+  setOrClear(['--card', '--popover'], cardHsl, !dark || custom('THEME_CARD'));
+  setOrClear(['--foreground', '--card-foreground', '--popover-foreground'], textHsl, !dark || custom('THEME_TEXT'));
 
   root.classList.toggle('dark', (settings?.THEME_MODE || 'light') === 'dark');
 }

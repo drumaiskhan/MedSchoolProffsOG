@@ -17,23 +17,25 @@ import type { MembershipPlan } from '@workspace/api-client-react';
 import { siteContentApi } from '@/lib/api';
 import { useQuery } from '@tanstack/react-query';
 import { cn, Footer, AnimatedBrandMark, Testimonials, useSeoSync, TeamPhoto } from '@/lib/shared';
+import { Reveal, SpotlightCard } from '@/lib/motion';
+import { Aurora, GlossIcon, HeroStage, SubjectMarquee } from '@/lib/landing-visuals';
 
 const WHY_US = [
-  { icon: GraduationCap, title: 'Every college, one bank', desc: 'MCQs organised by program, year, subject, and topic — MBBS and BDS, side by side.' },
-  { icon: Lightbulb, title: 'Explanations included', desc: "Every question comes with a worked explanation, not just an answer key." },
-  { icon: Target, title: 'Practice, not panic', desc: 'Untimed practice by default. Timed Pre-Proffs exams when you actually want the pressure.' },
-  { icon: TrendingUp, title: 'Analytics that find the gaps', desc: 'Automatic weak-topic tracking so revision time goes where it actually helps.' },
-  { icon: Trophy, title: 'Streaks & leaderboards', desc: 'A little friendly competition to keep daily practice from fizzling out.' },
-  { icon: Bookmark, title: 'Your own review flow', desc: 'Flag tricky MCQs, keep notes, and save sessions to pick up right where you left off.' },
+  { hue: 172, icon: GraduationCap, title: 'Every college, one bank', desc: 'MCQs organised by program, year, subject, and topic — MBBS and BDS, side by side.' },
+  { hue: 45, icon: Lightbulb, title: 'Explanations included', desc: "Every question comes with a worked explanation, not just an answer key." },
+  { hue: 205, icon: Target, title: 'Practice, not panic', desc: 'Untimed practice by default. Timed Pre-Proffs exams when you actually want the pressure.' },
+  { hue: 262, icon: TrendingUp, title: 'Analytics that find the gaps', desc: 'Automatic weak-topic tracking so revision time goes where it actually helps.' },
+  { hue: 28, icon: Trophy, title: 'Streaks & leaderboards', desc: 'A little friendly competition to keep daily practice from fizzling out.' },
+  { hue: 340, icon: Bookmark, title: 'Your own review flow', desc: 'Flag tricky MCQs, keep notes, and save sessions to pick up right where you left off.' },
 ];
 
 const FEATURES = [
-  { icon: BookOpen, title: 'MCQ Bank', desc: 'Thousands of questions across every subject, tagged and ready for focused practice.', href: '/blocks' },
-  { icon: Target, title: 'Practice Mode', desc: 'Untimed, explanation-first practice sessions you can start in a couple of taps.', href: '/practice' },
-  { icon: ClipboardCheck, title: 'Pre-Proffs Exams', desc: 'Timed mock exams built to feel like the real thing, with full result breakdowns.', href: '/exams' },
-  { icon: FileStack, title: 'Past Papers', desc: "Previous years' papers, organised and ready to work through block by block.", href: '/past-papers' },
-  { icon: Zap, title: 'Flashcards', desc: 'Quick-fire spaced review for the facts that need to just stick.', href: '/flashcards' },
-  { icon: Wand2, title: 'AI Visualizer', desc: 'Turn dense concepts into step-by-step visual explanations on demand.', href: '/ai-visualizer' },
+  { hue: 172, icon: BookOpen, title: 'MCQ Bank', desc: 'Thousands of questions across every subject, tagged and ready for focused practice.', href: '/blocks' },
+  { hue: 205, icon: Target, title: 'Practice Mode', desc: 'Untimed, explanation-first practice sessions you can start in a couple of taps.', href: '/practice' },
+  { hue: 262, icon: ClipboardCheck, title: 'Pre-Proffs Exams', desc: 'Timed mock exams built to feel like the real thing, with full result breakdowns.', href: '/exams' },
+  { hue: 340, icon: FileStack, title: 'Past Papers', desc: "Previous years' papers, organised and ready to work through block by block.", href: '/past-papers' },
+  { hue: 38, icon: Zap, title: 'Flashcards', desc: 'Quick-fire spaced review for the facts that need to just stick.', href: '/flashcards' },
+  { hue: 285, icon: Wand2, title: 'AI Visualizer', desc: 'Turn dense concepts into step-by-step visual explanations on demand.', href: '/ai-visualizer' },
 ];
 
 function formatPrice(plan: MembershipPlan) {
@@ -101,47 +103,56 @@ export default function Home() {
       </div>}
     </header>
 
-    {/* Hero */}
+    {/* Hero — animated aurora + floating app preview (2D depth only) */}
     <section className="relative overflow-hidden bg-sidebar text-sidebar-foreground">
-      <div className="pointer-events-none absolute -right-24 -top-24 size-96 rounded-full border-[44px] border-sidebar-accent/40" />
-      <div className="pointer-events-none absolute -bottom-16 left-0 size-64 rounded-full border-[24px] border-sidebar-primary/25" />
-      <div className="relative mx-auto max-w-6xl px-5 py-20 text-center md:px-8 md:py-28">
-        <div className="mx-auto inline-flex items-center gap-2 rounded-full border border-sidebar-border bg-sidebar-accent/60 px-4 py-1.5 font-mono-app text-[10px] uppercase tracking-[.16em] text-sidebar-foreground/80">
-          Built for MBBS &amp; BDS students
+      <Aurora />
+      <div className="relative mx-auto grid max-w-6xl items-center gap-10 px-5 py-16 md:px-8 md:py-24 lg:grid-cols-[1.02fr_.98fr] lg:gap-6">
+        <div className="text-center lg:text-left">
+          <div className="pop-in inline-flex items-center gap-2 rounded-full border border-sidebar-border bg-sidebar-accent/60 px-4 py-1.5 font-mono-app text-[10px] uppercase tracking-[.16em] text-sidebar-foreground/80">
+            <span className="pulse-dot size-1.5 rounded-full bg-sidebar-primary" /> Built for MBBS &amp; BDS students
+          </div>
+          <h1 className="pop-in mt-7 font-display text-5xl leading-[1.02] tracking-[-.03em] md:text-7xl" style={{ animationDelay: '.08s' }}>
+            Every MCQ<br />
+            <em className="text-shimmer not-italic" style={{ backgroundImage: 'linear-gradient(100deg, hsl(var(--sidebar-primary)) 10%, #b9f5ea 40%, hsl(var(--sidebar-primary)) 70%)' }}>you'll need.</em>
+          </h1>
+          <p className="pop-in mx-auto mt-6 max-w-xl text-sm leading-6 text-sidebar-foreground/80 md:text-base lg:mx-0" style={{ animationDelay: '.16s' }}>
+            {tagline || 'One MCQ bank across every college, subject, and topic — built for steady daily practice, not exam pressure.'}
+          </p>
+          <div className="pop-in mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row lg:justify-start" style={{ animationDelay: '.24s' }}>
+            <Link href="/register" className="btn-pop shine-btn inline-flex items-center gap-2 rounded-xl bg-sidebar-primary px-7 py-3.5 text-xs font-extrabold text-sidebar-primary-foreground shadow-lg" data-testid="link-hero-signup">
+              Start practicing free <ArrowRight size={15} />
+            </Link>
+            <a href="#features" className="btn-pop rounded-xl border border-sidebar-border bg-white/5 px-7 py-3.5 text-xs font-extrabold text-sidebar-foreground backdrop-blur hover:bg-sidebar-accent/60" data-testid="link-hero-features">
+              Explore features
+            </a>
+          </div>
+          <div className="pop-in mx-auto mt-8 flex max-w-md items-center justify-center gap-2 text-xs font-bold text-sidebar-foreground/80 lg:mx-0 lg:justify-start" style={{ animationDelay: '.32s' }}>
+            <span className="grid size-6 place-items-center rounded-full bg-sidebar-primary text-sidebar-primary-foreground"><Check size={13} /></span>
+            Instant explanations on every question
+          </div>
         </div>
-        <h1 className="mx-auto mt-7 max-w-3xl font-display text-5xl leading-[1.02] tracking-[-.03em] md:text-7xl">
-          Every MCQ<br /><em className="text-sidebar-primary not-italic">you'll need.</em>
-        </h1>
-        <p className="mx-auto mt-6 max-w-xl text-sm leading-6 text-sidebar-foreground/80 md:text-base">
-          {tagline || 'One MCQ bank across every college, subject, and topic — built for steady daily practice, not exam pressure.'}
-        </p>
-        <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
-          <Link href="/register" className="btn-pop inline-flex items-center gap-2 rounded-xl bg-sidebar-primary px-7 py-3.5 text-xs font-extrabold text-sidebar-primary-foreground shadow-sm" data-testid="link-hero-signup">
-            Start practicing free <ArrowRight size={15} />
-          </Link>
-          <a href="#features" className="btn-pop rounded-xl border border-sidebar-border px-7 py-3.5 text-xs font-extrabold text-sidebar-foreground hover:bg-sidebar-accent/60" data-testid="link-hero-features">
-            Explore features
-          </a>
-        </div>
-        <div className="mx-auto mt-8 flex max-w-md items-center justify-center gap-2 text-xs font-bold text-sidebar-foreground/80">
-          <span className="grid size-6 place-items-center rounded-full bg-sidebar-primary text-sidebar-primary-foreground"><Check size={13} /></span>
-          Instant explanations on every question
-        </div>
+        <HeroStage />
       </div>
+    </section>
+
+    {/* Every subject gets its own icon (see lib/subject-icons.tsx) */}
+    <section className="border-b border-border bg-background py-7" aria-label="Subjects covered">
+      <div className="mx-auto mb-4 max-w-6xl px-5 text-center font-mono-app text-[10px] uppercase tracking-[.16em] text-muted-foreground md:px-8">Every subject, one question bank</div>
+      <SubjectMarquee />
     </section>
 
     {/* Why choose us */}
     <section className="mx-auto max-w-6xl px-5 py-20 md:px-8">
-      <div className="mx-auto max-w-2xl text-center">
+      <Reveal className="mx-auto max-w-2xl text-center">
         <div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-primary">Why choose us</div>
         <h2 className="mt-3 font-display text-4xl tracking-[-.03em]">Built for how you actually study</h2>
-      </div>
+      </Reveal>
       <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {WHY_US.map((item) => <div key={item.title} className="card-lift rounded-2xl border border-border bg-card p-6">
-          <div className="grid size-11 place-items-center rounded-xl bg-[#eef7f1] text-primary"><item.icon size={20} /></div>
+        {WHY_US.map((item, i) => <Reveal key={item.title} delay={(i % 3) * 90}><SpotlightCard className="h-full rounded-2xl border border-border bg-card p-6">
+          <GlossIcon icon={item.icon} hue={item.hue} />
           <h3 className="mt-4 text-sm font-extrabold">{item.title}</h3>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.desc}</p>
-        </div>)}
+        </SpotlightCard></Reveal>)}
       </div>
     </section>
 
@@ -190,17 +201,17 @@ export default function Home() {
 
     {/* Pricing */}
     <section id="pricing" className="mx-auto max-w-6xl px-5 py-20 md:px-8">
-      <div className="mx-auto max-w-2xl text-center">
+      <Reveal className="mx-auto max-w-2xl text-center">
         <div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-primary">Pricing</div>
         <h2 className="mt-3 font-display text-4xl tracking-[-.03em]">Simple, affordable plans</h2>
         <p className="mt-3 text-sm text-muted-foreground">No hidden fees. Cancel anytime.</p>
-      </div>
+      </Reveal>
       {plansQ.isLoading ? <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {[0, 1, 2].map((i) => <div key={i} className="skeleton h-64 rounded-2xl" />)}
       </div> : plans.length === 0 ? <div className="mt-12 rounded-2xl border border-dashed border-border bg-card p-10 text-center text-sm text-muted-foreground">
         <Link href="/register" className="font-bold text-primary hover:underline" data-testid="link-pricing-fallback">Create a free account</Link> to see current plans and pricing.
       </div> : <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {plans.map((plan, i) => <div key={plan.id} className={cn('relative flex flex-col rounded-2xl border p-7', i === 1 ? 'border-primary bg-[#eef7f1] shadow-md' : 'border-border bg-card')} data-testid={`card-plan-${plan.id}`}>
+        {plans.map((plan, i) => <div key={plan.id} className={cn('relative flex flex-col rounded-2xl border p-7', i === 1 ? 'border-primary bg-[#eef7f1] shadow-lg' : 'border-border bg-card', 'card-lift')} data-testid={`card-plan-${plan.id}`}>
           {plan.discountLabel && <span className="absolute -top-3 right-6 rounded-full bg-accent px-3 py-1 text-[10px] font-extrabold text-accent-foreground">{plan.discountLabel}</span>}
           <h3 className="text-sm font-extrabold">{plan.name}</h3>
           <p className="mt-2 text-xs leading-5 text-muted-foreground">{plan.description}</p>
@@ -218,29 +229,36 @@ export default function Home() {
     {/* Features */}
     <section id="features" className="border-y border-border bg-muted/40">
       <div className="mx-auto max-w-6xl px-5 py-20 md:px-8">
-        <div className="mx-auto max-w-2xl text-center">
+        <Reveal className="mx-auto max-w-2xl text-center">
           <div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-primary">Platform features</div>
           <h2 className="mt-3 font-display text-4xl tracking-[-.03em]">Everything you need in one place</h2>
-        </div>
+        </Reveal>
         <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {FEATURES.map((f) => <div key={f.title} className="card-lift rounded-2xl border border-border bg-card p-6">
-            <div className="grid size-11 place-items-center rounded-xl bg-[#eef7f1] text-primary"><f.icon size={20} /></div>
+          {FEATURES.map((f, i) => <Reveal key={f.title} delay={(i % 3) * 90}><SpotlightCard className="h-full rounded-2xl border border-border bg-card p-6">
+            <GlossIcon icon={f.icon} hue={f.hue} />
             <h3 className="mt-4 text-sm font-extrabold">{f.title}</h3>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">{f.desc}</p>
-          </div>)}
+          </SpotlightCard></Reveal>)}
         </div>
       </div>
     </section>
 
     {/* Final CTA */}
-    <section className="mx-auto max-w-4xl px-5 py-20 text-center md:px-8">
-      <h2 className="font-display text-4xl tracking-[-.03em]">Ready to start studying smarter?</h2>
-      <p className="mx-auto mt-4 max-w-md text-sm leading-6 text-muted-foreground">
-        Create a free account and see the question bank for your program and year right away.
-      </p>
-      <Link href="/register" className="btn-pop mt-8 inline-flex items-center gap-2 rounded-xl bg-primary px-8 py-3.5 text-xs font-extrabold text-primary-foreground shadow-sm" data-testid="link-cta-signup">
-        Create your free account <ArrowRight size={15} />
-      </Link>
+    <section className="mx-auto max-w-6xl px-5 py-16 md:px-8 md:py-20">
+      <Reveal>
+        <div className="relative overflow-hidden rounded-[2rem] bg-sidebar px-6 py-14 text-center text-sidebar-foreground shadow-xl md:px-12 md:py-16">
+          <Aurora />
+          <div className="relative">
+            <h2 className="mx-auto max-w-xl font-display text-4xl tracking-[-.03em] md:text-5xl">Ready to start studying smarter?</h2>
+            <p className="mx-auto mt-4 max-w-md text-sm leading-6 text-sidebar-foreground/80">
+              Create a free account and see the question bank for your program and year right away.
+            </p>
+            <Link href="/register" className="btn-pop shine-btn mt-8 inline-flex items-center gap-2 rounded-xl bg-sidebar-primary px-8 py-3.5 text-xs font-extrabold text-sidebar-primary-foreground shadow-lg" data-testid="link-cta-signup">
+              Create your free account <ArrowRight size={15} />
+            </Link>
+          </div>
+        </div>
+      </Reveal>
     </section>
 
     <div className="mx-auto max-w-6xl px-5 pb-16 md:px-8"><Footer variant="full" /></div>

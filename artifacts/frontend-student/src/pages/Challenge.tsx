@@ -263,7 +263,7 @@ function Challenge() {
   const received = mine.data?.received ?? [];
 
   return <div>
-    <SectionHeader eyebrow="Compete" title="Challenge a friend" />
+    <SectionHeader eyebrow="Compete" title="Challenge a friend" description="Set a quiz, send the code to a classmate and see who scores higher." />
     <div className="grid gap-5 lg:grid-cols-[360px_1fr]">
       <FindFriend onChallenged={() => qc.invalidateQueries({ queryKey: ['challenges-mine'] })} />
 

@@ -72,7 +72,7 @@ function Exams() {
     },
   });
   const exams = q.data || [];
-  return <div><SectionHeader eyebrow="Assessment" title="Pre-Proffs Exams" action={<span className="text-[10px] text-muted-foreground">Timed · results follow your admin's release settings</span>} />
+  return <div><SectionHeader eyebrow="Assessment" title="Pre-Proffs Exams" description="Timed exams. Results are released according to your admin's settings." />
     <div className="grid gap-3 sm:grid-cols-2">{exams.map((exam) => <ExamCard key={exam.id} exam={exam} onStart={() => start.mutate(exam.id)} />)}{!exams.length && <EmptyState icon={ClipboardCheck} title="No exams scheduled" body="Your admin hasn't published an exam for your program and year yet." />}</div>
   </div>;
 }

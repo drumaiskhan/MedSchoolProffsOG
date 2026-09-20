@@ -114,7 +114,7 @@ function Profile() {
     }
   };
 
-  return <div className="max-w-4xl"><SectionHeader eyebrow="Your account" title="Profile & access" /><div className="grid gap-5 md:grid-cols-[220px_1fr]"><div className="rounded-2xl border border-border bg-card p-6">
+  return <div className="max-w-4xl"><SectionHeader eyebrow="Your account" title="Profile & access" description="Your details, password and membership status." /><div className="grid gap-5 md:grid-cols-[220px_1fr]"><div className="rounded-2xl border border-border bg-card p-6">
       {avatarUrl ? <img src={avatarUrl} alt="" className="size-16 rounded-2xl border border-border object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} /> : <div className="grid size-16 place-items-center rounded-2xl bg-[#d7eee4] text-xl font-extrabold text-[#164b4b]">{initials(u.name)}</div>}
       <h2 className="mt-5 font-display text-2xl text-foreground">{u.name}</h2><div className="mt-1 text-xs text-muted-foreground">{programYearLabel}</div><Badge tone={dashboard.data?.membershipStatus === 'ACTIVE' ? 'green' : 'amber'}>{dashboard.data?.membershipStatus === 'ACTIVE' ? 'Active member' : 'Pending activation'}</Badge></div>
     <div className="rounded-2xl border border-border bg-card p-6"><div className="flex items-center justify-between"><h3 className="font-bold">Personal details</h3><button onClick={() => { setEditing((v) => !v); setPendingPicture(null); setPictureError(null); }} className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:opacity-80" data-testid="button-edit-profile"><Pencil size={13} /> {editing ? 'Cancel' : 'Edit'}</button></div>

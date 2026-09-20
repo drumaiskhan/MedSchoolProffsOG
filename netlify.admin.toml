@@ -40,7 +40,7 @@
 
 [[redirects]]
   from = "/api/*"
-  to = "https://medschoolproffsog-production-d573.up.railway.app/api/:splat"
+  to = "https://medschoolproffsog-production.up.railway.app/api/:splat"
   status = 200
   force = true
 

@@ -65,7 +65,7 @@ function Blocks() {
     {!filtered.length && <EmptyState icon={BookOpen} title="No modules yet" body="Your academic team hasn't published any modules yet." />}
   </div>;
   return <>{isLoading ? <SkeletonPage /> : <div>
-    <SectionHeader eyebrow="Curriculum map" title="Blocks" />
+    <SectionHeader eyebrow="Curriculum map" title="Blocks" description="Pick a block to see its modules, subjects and practice questions." />
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {blocks.map((b) => <BlockHeroCard key={b.id} href={`/blocks/${b.id}`} name={b.name} iconUrl={b.iconUrl} moduleCount={(modulesByBlock.get(b.id) ?? []).length} />)}
       {unassigned.length > 0 && <BlockHeroCard href="/blocks/other" name="Other modules" moduleCount={unassigned.length} muted />}

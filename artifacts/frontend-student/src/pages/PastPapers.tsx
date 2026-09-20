@@ -52,7 +52,7 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // invalidateQueries after a save) already set their own options, which
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
-import { EmptyState, PastPaperRowIcon, SkeletonPage, Stat, pastPaperEstimatedHours } from '@/lib/shared';
+import { EmptyState, PastPaperRowIcon, SectionHeader, SkeletonPage, StatTile, pastPaperEstimatedHours } from '@/lib/shared';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 function PastPapers() {
@@ -75,9 +75,8 @@ function PastPapers() {
   const filtered = list.filter((p) => (!collegeFilter || p.examBoard === collegeFilter) && (!yearFilter || p.year === yearFilter));
   const totals = { papers: list.length, questions: list.reduce((s, p) => s + p.mcqCount, 0) };
 
-  return <div><div className="rounded-2xl border border-border bg-[#eef2fb] p-6"><div className="flex items-start gap-4"><div className="grid size-11 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground"><FileStack size={20} /></div><div><h1 className="font-display text-2xl tracking-[-.03em]">Past Papers</h1><p className="mt-1 text-sm text-muted-foreground">Previous exam papers and practice tests.</p></div></div>
-    <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-2"><Stat label="Available Papers" value={totals.papers} /><Stat label="Total Questions" value={totals.questions} /></div>
-  </div>
+  return <div><SectionHeader eyebrow="Exam practice" title="Past Papers" description="Previous exam papers and practice tests." />
+    <div className="grid grid-cols-2 gap-4"><StatTile icon={FileStack} bg="bg-[#dceaf1]" fg="text-[#2c6a8f]" label="Available papers" value={totals.papers} /><StatTile icon={Target} bg="bg-[#d7eee4]" fg="text-[#1f7a5c]" label="Total questions" value={totals.questions} /></div>
 
   {/* Radix Select (same component the Flashcards filters use), not a
       native <select> — the native element's dropdown is rendered by the

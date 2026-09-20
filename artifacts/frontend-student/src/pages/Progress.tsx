@@ -12,6 +12,7 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip as ChartTo
 import { Activity, ArrowRight, CheckCircle2, ClipboardCheck, Clock3, FileStack, Flame, Hourglass, LineChart, Minus, Sparkles, Target, TrendingDown, TrendingUp, Trophy } from 'lucide-react';
 import { analyticsApi, type ProgressOverview, type ProgressTopic } from '@/lib/api';
 import { Badge, EmptyState, ErrorState, Progress, SectionHeader, SkeletonPage, StatTile, cn } from '@/lib/shared';
+import { SubjectIcon } from '@/lib/subject-icons';
 
 type Tab = 'overview' | 'mcqs' | 'papers' | 'improvement' | 'exams';
 
@@ -75,7 +76,7 @@ function McqTab({ d }: { d: ProgressOverview }) {
     <div><h3 className="mb-3 text-sm font-extrabold">Accuracy by subject</h3>
       <div className="rounded-2xl border border-border bg-card p-5">{d.bySubject.length === 0 ? <p className="text-xs text-muted-foreground">Subject breakdown appears once your practice includes subject-tagged questions.</p> : <ul className="space-y-4">
         {d.bySubject.map((s) => <li key={s.id}>
-          <div className="flex items-baseline justify-between gap-3"><span className="min-w-0 truncate text-xs font-bold">{s.name}</span><span className="shrink-0 text-xs font-extrabold">{pctText(s.accuracy)}</span></div>
+          <div className="flex items-center justify-between gap-3"><span className="flex min-w-0 items-center gap-2.5"><SubjectIcon name={s.name} size="xs" /><span className="min-w-0 truncate text-xs font-bold">{s.name}</span></span><span className="shrink-0 text-xs font-extrabold">{pctText(s.accuracy)}</span></div>
           <div className="mt-1.5"><Progress value={s.accuracy ?? 0} color={barColor(s.accuracy)} /></div>
           <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground"><span>{s.answered} answered</span><DeltaChip delta={s.delta} /></div>
         </li>)}
@@ -163,7 +164,7 @@ function Progress_() {
     { id: 'improvement', label: 'Improvement', icon: LineChart }, { id: 'exams', label: 'Pre-Proffs', icon: ClipboardCheck },
   ];
   return <div className="space-y-6">
-    <SectionHeader eyebrow="Where you stand" title="My progress" />
+    <SectionHeader eyebrow="Where you stand" title="My progress" description="Your accuracy, past papers and improvement over time — visible only to you." />
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
       <StatTile icon={CheckCircle2} bg="bg-[#d7eee4]" fg="text-[#1f7a5c]" label="Questions answered" value={d.summary.questionsAnswered} />
       <StatTile icon={Target} bg="bg-[#dceaf1]" fg="text-[#2c6a8f]" label="Accuracy" value={pctText(d.summary.accuracy)} />

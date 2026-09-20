@@ -69,7 +69,7 @@ function FlaggedMcqs() {
     onError: (err: unknown) => toast({ title: 'Could not remove this', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
   return <div>
-    <SectionHeader eyebrow="Your tools" title="Flagged MCQs" action={<span className="text-[10px] text-muted-foreground">Questions you bookmarked or flagged for review</span>} />
+    <SectionHeader eyebrow="Your tools" title="Flagged MCQs" description="Questions you bookmarked or flagged for review." />
     <div className="space-y-3">
       {(flags.data || []).map((flag: FlaggedMcq) => <div key={flag.id} className="rounded-2xl border border-border bg-card p-4" data-testid={`card-flag-${flag.id}`}>
         <div className="flex flex-wrap items-start justify-between gap-3">

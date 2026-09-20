@@ -65,7 +65,7 @@ function Feedback() {
   const submit = useMutation({ mutationFn: feedbackApi.create, onSuccess: () => { setMessage(''); setRating(0); queryClient.invalidateQueries({ queryKey: ['my-feedback'] }); } });
   const site = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get, staleTime: 5 * 60 * 1000 });
   const whatsapp = site.data?.SUPPORT_WHATSAPP?.trim();
-  return <div className="max-w-xl"><SectionHeader eyebrow="Community" title="Feedback" />
+  return <div className="max-w-xl"><SectionHeader eyebrow="Community" title="Feedback" description="Tell us what is working, what is broken, or what you would like to see next." />
     {whatsapp && <a href={`https://wa.me/${whatsapp.replace(/[^\d]/g, '')}`} target="_blank" rel="noreferrer" className="mb-5 flex items-center gap-3 rounded-2xl border border-[#25D366]/30 bg-[#25D366]/10 p-4 transition hover:border-[#25D366]/60" data-testid="link-whatsapp-contact">
       <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-[#25D366] text-white"><MessageSquare size={20} /></div>
       <div className="flex-1"><div className="text-sm font-bold text-[#146c43]">Chat with us on WhatsApp</div><div className="mt-0.5 text-xs text-muted-foreground">Faster than a ticket for quick questions — opens a chat with the academic team.</div></div>

@@ -400,7 +400,7 @@ function Practice() {
   </div>;
 
   if (paused) {
-    return <div className="max-w-6xl"><SectionHeader eyebrow="Daily practice" title="Practice with purpose" />
+    return <div className="max-w-6xl"><SectionHeader eyebrow="Daily practice" title="Practice with purpose" description="Choose how you want to work through these questions." />
       <div className="grid gap-6 lg:grid-cols-[1fr_280px]"><div className="order-2 rounded-3xl border border-border bg-card p-9 text-center lg:order-1"><Clock3 size={28} className="mx-auto text-muted-foreground" /><h2 className="mt-4 font-display text-xl">Session paused</h2><p className="mt-2 text-xs text-muted-foreground">Your progress and timer are on hold. Hit Resume in the panel to keep going.</p></div><div className="order-1 lg:order-2">{controlPanel}</div></div>
     </div>;
   }

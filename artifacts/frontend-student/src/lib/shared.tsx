@@ -16,6 +16,8 @@ import {
   LayoutGrid, Presentation, Wand2, Crown, Globe, Star, Megaphone, Swords
 } from 'lucide-react';
 import { applyThemeVars } from '@/lib/theme';
+import { Aurora, AuthShowcase } from '@/lib/landing-visuals';
+import { SubjectIcon, resolveSubjectIcon } from '@/lib/subject-icons';
 import { queryClient } from '@/lib/query-client';
 import {
   getListMembershipPlansQueryKey, getListPaymentsQueryKey, getListMcqsQueryKey, getListModulesQueryKey, getListStudentsQueryKey, getListNotificationsQueryKey, getGetCurrentUserQueryKey,
@@ -208,8 +210,8 @@ export function PracticeResultCard({ mcqs, answers, backHref, backLabel, onResta
 // Small reusable confirm-before-delete dialog, used by every admin list's
 // delete action (task: real confirm modal, not window.confirm).
 
-export function ConfirmDialog({ title, body, confirmLabel = 'Delete', onConfirm, onCancel, pending }: { title: string; body: string; confirmLabel?: string; onConfirm: () => void; onCancel: () => void; pending?: boolean }) {
-  return <div className="fixed inset-0 z-[60] grid place-items-center bg-black/40 p-4" onClick={onCancel}><div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-2xl"><h3 className="font-bold">{title}</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">{body}</p><div className="mt-5 flex gap-2"><button onClick={onCancel} className="flex-1 rounded-xl border border-border py-2.5 text-xs font-bold" data-testid="button-confirm-cancel">Cancel</button><button onClick={onConfirm} disabled={pending} className="flex-1 rounded-xl bg-destructive py-2.5 text-xs font-extrabold text-destructive-foreground disabled:opacity-50" data-testid="button-confirm-delete">{pending ? 'Deleting…' : confirmLabel}</button></div></div></div>;
+export function ConfirmDialog({ title, body, confirmLabel = 'Delete', pendingLabel, onConfirm, onCancel, pending }: { title: string; body: string; confirmLabel?: string; pendingLabel?: string; onConfirm: () => void; onCancel: () => void; pending?: boolean }) {
+  return <div className="fixed inset-0 z-[60] grid place-items-center bg-black/40 p-4 backdrop-blur-[2px] animate-in fade-in duration-200" onClick={onCancel}><div role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-2xl animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-200"><h3 className="font-extrabold">{title}</h3><p className="mt-2 text-xs leading-5 text-muted-foreground">{body}</p><div className="mt-5 flex gap-2"><button onClick={onCancel} className="flex-1 rounded-xl border border-border py-2.5 text-xs font-bold transition-transform active:scale-95" data-testid="button-confirm-cancel">Cancel</button><button onClick={onConfirm} disabled={pending} className="flex-1 rounded-xl bg-destructive py-2.5 text-xs font-extrabold text-destructive-foreground transition-transform active:scale-95 disabled:opacity-50" data-testid="button-confirm-delete">{pending ? (pendingLabel ?? 'Deleting…') : confirmLabel}</button></div></div></div>;
 }
 
 // The wordmark used to only shimmer on :hover (group-hover:[background-
@@ -253,6 +255,14 @@ export const navGroups: Array<{ label: string; items: NavItem[] }> = [
   ] },
 ];
 
+// Tinted icon tiles per nav group (same idea as the admin sidebar) so the
+// three groups are recognisable at a glance instead of one uniform column.
+const NAV_GROUP_TONE: Record<string, string> = {
+  'Study desk': 'bg-[#2dd9c4]/15 text-[#2dd9c4]',
+  'Your tools': 'bg-[#b79cff]/15 text-[#b79cff]',
+  'Your account': 'bg-[#e5a952]/15 text-[#e5a952]',
+};
+
 export function SideNav({ user, onClose }: { user: User; onClose: () => void }) {
   const [location] = useLocation();
   // AI_VISUALIZER_ENABLED off removes the nav link entirely — see the
@@ -275,15 +285,74 @@ export function SideNav({ user, onClose }: { user: User; onClose: () => void }) 
   const notifQ = useListNotifications();
   const unreadCount = (notifQ.data ?? []).filter((n) => !n.read).length;
   const logout = useMutation({ mutationFn: authApi.logout, onSuccess: () => { queryClient.clear(); window.location.href = '/login'; } });
-  return <aside className="fixed inset-y-0 left-0 z-40 flex w-[240px] flex-col overflow-y-auto bg-sidebar px-3 py-5 text-sidebar-foreground shadow-xl md:sticky md:top-0 md:h-[100dvh] md:shadow-none">
-    <div className="mb-8 flex items-center justify-between px-2"><Logo dark href="/dashboard" /><button className="rounded-lg p-2 text-sidebar-foreground/60 hover:bg-sidebar-accent md:hidden" onClick={onClose} data-testid="button-close-menu"><X size={18} /></button></div>
-    <nav className="space-y-5">
-       {groups.map((group) => <div key={group.label}><div className="mb-1.5 px-3.5 font-mono-app text-[9px] font-bold uppercase tracking-[.14em] text-sidebar-foreground/40">{group.label}</div><div className="space-y-1">{group.items.map(([href, label, Icon]) => { const locked = isLockedByTrial(href); return <Link key={href} href={locked ? '/payments' : href} onClick={onClose} title={locked ? `${label} isn't part of the free trial — see Membership` : undefined} className={cn('group flex items-center gap-3 rounded-xl px-3.5 py-3 text-[13px] font-semibold transition-colors', location === href ? 'nav-active bg-white text-sidebar shadow-sm' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground', locked && 'opacity-60')} data-testid={`link-nav-${label.toLowerCase().replaceAll(' ', '-')}`}><Icon size={18} strokeWidth={location === href ? 2.2 : 1.8} /><span>{label}</span>{locked && <LockKeyhole size={12} className="ml-auto" data-testid={`icon-nav-locked-${label.toLowerCase().replaceAll(' ', '-')}`} />}{label === 'Notifications' && unreadCount > 0 && <span className="ml-auto grid size-5 place-items-center rounded-full bg-[#e5a952] text-[10px] font-bold text-[#183844]">{unreadCount > 9 ? '9+' : unreadCount}</span>}</Link>; })}</div></div>)}
+  return <aside className="student-sidebar fixed inset-y-0 left-0 z-40 flex w-[256px] flex-col overflow-y-auto bg-sidebar px-3.5 py-5 text-sidebar-foreground shadow-xl md:sticky md:top-0 md:h-[100dvh] md:shadow-none">
+    <div className="mb-6 flex items-center justify-between px-2"><Logo dark href="/dashboard" /><button className="rounded-lg p-2 text-sidebar-foreground/60 hover:bg-sidebar-accent md:hidden" onClick={onClose} aria-label="Close menu" data-testid="button-close-menu"><X size={18} /></button></div>
+    <nav className="space-y-6" aria-label="Student navigation">
+      {groups.map((group) => <div key={group.label}>
+        <div className="mb-2 px-3 font-mono-app text-[9px] font-bold uppercase tracking-[.16em] text-sidebar-foreground/40">{group.label}</div>
+        <div className="space-y-0.5">{group.items.map(([href, label, Icon]) => {
+          const locked = isLockedByTrial(href);
+          const active = location === href || (href !== '/dashboard' && location.startsWith(`${href}/`));
+          const slug = label.toLowerCase().replaceAll(' ', '-');
+          return <Link key={href} href={locked ? '/payments' : href} onClick={onClose} aria-current={active ? 'page' : undefined} title={locked ? `${label} isn't part of the free trial — see Membership` : undefined}
+            className={cn('group relative flex items-center gap-3 rounded-xl px-2.5 py-2 text-[13px] font-semibold transition-all', active ? 'bg-sidebar-accent text-sidebar-accent-foreground shadow-sm' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground', locked && 'opacity-60')}
+            data-testid={`link-nav-${slug}`}>
+            {active && <span className="absolute -left-3.5 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-sidebar-primary" />}
+            <span className={cn('grid size-8 shrink-0 place-items-center rounded-lg transition-colors', active ? 'bg-sidebar-primary text-sidebar-primary-foreground' : NAV_GROUP_TONE[group.label] ?? 'bg-white/5')}><Icon size={16} strokeWidth={active ? 2.3 : 1.9} /></span>
+            <span className="min-w-0 flex-1 truncate">{label}</span>
+            {locked && <LockKeyhole size={12} className="shrink-0" data-testid={`icon-nav-locked-${slug}`} />}
+            {label === 'Notifications' && unreadCount > 0 && <span className="grid size-5 place-items-center rounded-full bg-[#e5a952] text-[10px] font-bold text-[#183844]">{unreadCount > 9 ? '9+' : unreadCount}</span>}
+          </Link>;
+        })}</div>
+      </div>)}
     </nav>
-    <div className="mt-auto pt-5">
-      <div className="flex items-center gap-3 rounded-xl px-2.5 py-2.5"><div className="grid size-9 shrink-0 place-items-center rounded-full bg-sidebar-primary text-xs font-extrabold text-sidebar-primary-foreground">{initials(user.name)}</div><div className="min-w-0 flex-1"><div className="truncate text-xs font-bold text-sidebar-foreground">{user.name}</div><div className="truncate text-[10px] text-sidebar-foreground/45">{user.institution || 'Medical student'}</div></div><button onClick={() => logout.mutate()} disabled={logout.isPending} className="text-sidebar-foreground/50 hover:text-sidebar-foreground disabled:opacity-50" data-testid="button-signout" title="Sign out"><LogOut size={15} /></button></div>
+    <div className="mt-auto pt-6">
+      <div className="flex items-center gap-3 rounded-xl border border-sidebar-border/70 bg-sidebar-accent/40 px-3 py-2.5"><div className="grid size-9 shrink-0 place-items-center rounded-full bg-sidebar-primary text-xs font-extrabold text-sidebar-primary-foreground">{initials(user.name)}</div><div className="min-w-0 flex-1"><div className="truncate text-xs font-bold text-sidebar-foreground">{user.name}</div><div className="truncate text-[10px] text-sidebar-foreground/50">{user.institution || 'Medical student'}</div></div><button onClick={() => logout.mutate()} disabled={logout.isPending} className="grid size-8 place-items-center rounded-lg text-sidebar-foreground/60 transition-colors hover:bg-white/10 hover:text-sidebar-foreground disabled:opacity-50" data-testid="button-signout" title="Sign out" aria-label="Sign out"><LogOut size={15} /></button></div>
     </div>
   </aside>;
+}
+
+// Trial-lock check shared by the phone tab bar (SideNav keeps its own copy of
+// the same rule): while a feature-limited trial is live, a student without a
+// paid membership sees locked sections marked and sent to Membership.
+function useNavLocks(user: User) {
+  const siteContentQ = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get });
+  const dashboardQ = useGetStudentDashboard();
+  const trial = siteContentQ.data?.trial;
+  const paidMember = dashboardQ.data?.membershipStatus === 'ACTIVE';
+  return (href: string) => {
+    const feature = NAV_FEATURE[href];
+    return !!(trial?.active && feature && user.role !== 'admin' && !paidMember && dashboardQ.data && !trial.features.includes(feature));
+  };
+}
+
+// Phone-only bottom tab bar: the four most-used study areas + "More" (opens
+// the full sidebar menu). Hidden on md+ (sidebar is always visible there) and
+// in focus mode (practice / exams / reader) — Shell decides that.
+const TAB_ITEMS: Array<{ href: string; label: string; icon: typeof LayoutDashboard; also?: string[] }> = [
+  { href: '/dashboard', label: 'Home', icon: LayoutDashboard },
+  { href: '/blocks', label: 'Blocks', icon: BookOpen, also: ['/modules', '/subjects', '/practice'] },
+  { href: '/exams', label: 'Exams', icon: ClipboardCheck },
+  { href: '/flashcards', label: 'Cards', icon: Zap },
+];
+
+export function MobileTabBar({ user, onMore }: { user: User; onMore: () => void }) {
+  const [location] = useLocation();
+  const isLocked = useNavLocks(user);
+  const match = (href: string) => location === href || location.startsWith(`${href}/`);
+  return <nav aria-label="Quick navigation" className="tabbar-safe fixed inset-x-0 bottom-0 z-20 px-3 md:hidden" data-testid="tabbar-mobile">
+    <div className="mx-auto flex max-w-md items-stretch gap-1 rounded-2xl border border-border bg-card/95 p-1.5 shadow-xl backdrop-blur-md">
+      {TAB_ITEMS.map(({ href, label, icon: Icon, also }) => {
+        const active = match(href) || !!also?.some(match);
+        const locked = isLocked(href);
+        return <Link key={href} href={locked ? '/payments' : href} aria-current={active ? 'page' : undefined} className={cn('relative flex flex-1 flex-col items-center gap-0.5 rounded-xl py-2 text-[10px] font-bold transition-colors', active ? 'bg-primary/12 text-primary' : 'text-muted-foreground hover:bg-muted/70')} data-testid={`tab-${label.toLowerCase()}`}>
+          <Icon size={19} strokeWidth={active ? 2.4 : 2} />{label}
+          {locked && <LockKeyhole size={9} className="absolute right-3 top-1.5" />}
+        </Link>;
+      })}
+      <button type="button" onClick={onMore} className="relative flex flex-1 flex-col items-center gap-0.5 rounded-xl py-2 text-[10px] font-bold text-muted-foreground hover:bg-muted/70" aria-label="More — open full menu" data-testid="tab-more"><Menu size={19} />More</button>
+    </div>
+  </nav>;
 }
 
 export function QuickJump({ open, value, onChange, onClose }: { open: boolean; value: string; onChange: (value: string) => void; onClose: () => void }) {
@@ -447,6 +516,10 @@ export function Shell({ children }: { children: ReactNode }) {
   // before its "General trial mode" comment, which now sits just above
   // where it's actually used further down).
   const siteContentQ = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get });
+  // Same query SideNav already runs (shared key, no extra request) — drives the
+  // unread dot on the header bell. Must stay up here with the other hooks.
+  const headerNotifQ = useListNotifications();
+  const headerUnread = (headerNotifQ.data ?? []).filter((n) => !n.read).length;
 
   useEffect(() => {
     // The topbar search button has always shown a "⌘K" hint — this is the
@@ -544,7 +617,7 @@ export function Shell({ children }: { children: ReactNode }) {
   // conditionally rendered), and {children} always sits inside the same
   // `<main><header/><div>{children}</div></main>` position; only the
   // header's *content* differs between focus and normal mode.
-  return <div className="flex min-h-[100dvh] bg-background">
+  return <div className="student-shell flex min-h-[100dvh] bg-background">
     <div className={cn(!focusMode && menuOpen ? 'block' : 'hidden', 'fixed inset-0 z-30 bg-[#071e2b]/45 md:hidden')} onClick={() => setMenuOpen(false)} />
     <div className={cn(focusMode ? 'hidden' : (menuOpen || !isMobile) ? 'block' : 'hidden')}><SideNav user={user} onClose={() => setMenuOpen(false)} /></div>
     <main className="min-w-0 flex-1">
@@ -568,8 +641,9 @@ export function Shell({ children }: { children: ReactNode }) {
       </div>}
       {focusMode
         ? <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border/70 bg-background/90 px-4 backdrop-blur-md md:px-8">{strictFocusMode ? <span className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold text-muted-foreground" data-testid="text-exam-locked"><LockKeyhole size={13} /> Exam in progress</span> : <button onClick={() => setLocation('/dashboard')} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold text-muted-foreground hover:bg-muted" data-testid="button-exit-focus-mode"><ArrowLeft size={15} /> Exit</button>}<span className="text-xs font-bold capitalize text-foreground">{title}</span></header>
-        : <header className="sticky top-0 z-20 flex h-[66px] items-center justify-between border-b border-border/70 bg-background/92 px-4 backdrop-blur-md md:px-8"><div className="flex min-w-0 items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} data-testid="button-open-menu"><Menu size={20} /></button><div className="min-w-0"><div className="font-mono-app text-[9px] uppercase tracking-[.16em] text-muted-foreground">{today}</div><h1 className="mt-1 truncate text-[16px] font-bold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="relative flex items-center gap-2"><button onClick={() => { setQuickJumpOpen((current) => !current); setQuickJumpValue(''); }} className="hidden h-9 w-[220px] items-center gap-2 rounded-lg border border-border bg-card px-3 text-left text-[11px] text-muted-foreground shadow-sm hover:border-primary/50 sm:flex md:w-[340px]" data-testid="button-open-quick-jump"><Search size={14} /><span className="truncate">Search modules, topics, MCQs...</span><span className="ml-auto rounded border border-border px-1 text-[9px]">⌘K</span></button><Link href="/notifications" className="relative grid size-9 place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:bg-muted" data-testid="link-notifications"><Bell size={16} /></Link><Link href="/profile" className="ml-1 grid size-8 place-items-center rounded-full bg-[#cdebf0] text-[10px] font-extrabold text-[#0d5267]" data-testid="link-header-profile">{initials(user.name)}</Link><QuickJump open={quickJumpOpen} value={quickJumpValue} onChange={setQuickJumpValue} onClose={() => setQuickJumpOpen(false)} /></div></header>}
-      <div className={cn('page-enter', focusMode ? 'px-5 py-6 md:px-10 md:py-8' : 'px-4 py-6 md:px-8 md:py-8')}>{children}</div>
+        : <header className="student-header sticky top-0 z-20 flex h-[68px] items-center justify-between border-b border-border/70 bg-background/90 px-4 backdrop-blur-md md:px-8"><div className="flex min-w-0 items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} aria-label="Open menu" data-testid="button-open-menu"><Menu size={20} /></button><div className="min-w-0"><div className="font-mono-app text-[9px] uppercase tracking-[.16em] text-muted-foreground">{today}</div><h1 className="mt-1 truncate text-[17px] font-extrabold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="relative flex items-center gap-2"><button onClick={() => { setQuickJumpOpen((current) => !current); setQuickJumpValue(''); }} className="hidden h-9 w-[220px] items-center gap-2 rounded-xl border border-border bg-card px-3 text-left text-[11px] text-muted-foreground shadow-sm hover:border-primary/50 sm:flex md:w-[340px]" data-testid="button-open-quick-jump"><Search size={14} /><span className="truncate">Search modules, topics, MCQs...</span><span className="ml-auto rounded border border-border px-1 text-[9px]">⌘K</span></button><button onClick={() => { setQuickJumpOpen((current) => !current); setQuickJumpValue(''); }} className="grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted sm:hidden" aria-label="Search" data-testid="button-open-quick-jump-mobile"><Search size={16} /></button><Link href="/notifications" className="relative grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label="Notifications" data-testid="link-notifications"><Bell size={16} />{headerUnread > 0 && <span className="absolute -right-1 -top-1 grid min-w-4 place-items-center rounded-full bg-[#e5a952] px-1 text-[9px] font-bold leading-4 text-[#183844] ring-2 ring-background" data-testid="badge-header-unread">{headerUnread > 9 ? '9+' : headerUnread}</span>}</Link><Link href="/profile" className="ml-1 grid size-9 place-items-center rounded-full bg-[#cdebf0] text-[11px] font-extrabold text-[#0d5267] ring-2 ring-transparent transition-shadow hover:ring-primary/30" aria-label="Profile" data-testid="link-header-profile">{initials(user.name)}</Link><QuickJump open={quickJumpOpen} value={quickJumpValue} onChange={setQuickJumpValue} onClose={() => setQuickJumpOpen(false)} /></div></header>}
+      <div className={cn('page-enter student-content', focusMode ? 'px-5 py-6 md:px-10 md:py-8' : 'mx-auto w-full max-w-[1320px] px-4 py-6 pb-28 md:px-8 md:py-9')}>{children}</div>
+      {!focusMode && <MobileTabBar user={user} onMore={() => setMenuOpen(true)} />}
     </main>
   </div>;
 }
@@ -622,11 +696,11 @@ export function AnimatedBrandMark({ size = 22, className = '' }: { size?: number
 
 export function SkeletonPage() { return <div className="space-y-5"><div className="flex items-center gap-2 text-primary"><BrandSpinner size={22} /><span className="text-[11px] font-bold uppercase tracking-[.1em]">Loading</span></div><div className="skeleton h-8 w-56 rounded-lg" /><div className="grid gap-4 md:grid-cols-3"><div className="skeleton h-32 rounded-2xl" /><div className="skeleton h-32 rounded-2xl" /><div className="skeleton h-32 rounded-2xl" /></div><div className="skeleton h-72 rounded-2xl" /></div>; }
 
-export function EmptyState({ icon: Icon = FolderOpen, title, body, action }: { icon?: typeof FolderOpen; title: string; body: string; action?: ReactNode }) { return <div className="grid min-h-[260px] place-items-center rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center"><div><div className="mx-auto mb-4 grid size-12 place-items-center rounded-2xl bg-muted text-primary"><Icon size={22} /></div><h3 className="font-bold">{title}</h3><p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted-foreground">{body}</p>{action && <div className="mt-5">{action}</div>}</div></div>; }
+export function EmptyState({ icon: Icon = FolderOpen, title, body, action }: { icon?: typeof FolderOpen; title: string; body: string; action?: ReactNode }) { return <div className="grid min-h-[260px] place-items-center rounded-2xl border border-dashed border-border bg-card/50 p-8 text-center"><div><div className="mx-auto mb-4 grid size-14 place-items-center rounded-2xl bg-gradient-to-br from-primary/15 to-primary/5 text-primary ring-1 ring-primary/15"><Icon size={24} /></div><h3 className="text-[15px] font-extrabold">{title}</h3><p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-muted-foreground">{body}</p>{action && <div className="mt-5">{action}</div>}</div></div>; }
 
 export function ErrorState({ retry }: { retry?: () => void }) { return <div className="rounded-2xl border border-[#efc7bc] bg-[#fff5f0] p-6 text-sm text-[#9e4c39]"><div className="flex items-center gap-2 font-bold"><CircleHelp size={17} /> We couldn't load this view.</div><p className="mt-2 text-[#a96a5b]">Check your connection, then try again.</p>{retry && <button onClick={retry} className="mt-4 rounded-lg bg-[#a9533f] px-3 py-2 text-xs font-bold text-white" data-testid="button-retry">Try again</button>}</div>; }
 
-export function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'green' | 'amber' | 'red' | 'blue' }) { return <span className={cn('inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold capitalize', tone === 'green' && 'bg-[#d7eee4] text-[#287058]', tone === 'amber' && 'bg-[#fff0cb] text-[#8d6420]', tone === 'red' && 'bg-[#f9ddd6] text-[#a34c3e]', tone === 'blue' && 'bg-[#dceaf1] text-[#32647b]', tone === 'neutral' && 'bg-muted text-muted-foreground')}>{children}</span>; }
+export function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'green' | 'amber' | 'red' | 'blue' }) { return <span className={cn('inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold capitalize ring-1 ring-inset', tone === 'green' && 'bg-[#d7eee4] text-[#287058] ring-[#287058]/15', tone === 'amber' && 'bg-[#fff0cb] text-[#8d6420] ring-[#8d6420]/15', tone === 'red' && 'bg-[#f9ddd6] text-[#a34c3e] ring-[#a34c3e]/15', tone === 'blue' && 'bg-[#dceaf1] text-[#32647b] ring-[#32647b]/15', tone === 'neutral' && 'bg-muted text-muted-foreground ring-border')}>{children}</span>; }
 
 // easy -> green, moderate -> blue, hard -> red — was a hardcoded blue
 // regardless of value.
@@ -637,18 +711,18 @@ export function difficultyTone(difficulty?: string | null): 'green' | 'blue' | '
   return 'blue';
 }
 
-export function Progress({ value, color = 'bg-primary' }: { value: number; color?: string }) { return <div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className={cn('h-full rounded-full transition-all', color)} style={{ width: `${Math.min(100, Math.max(0, value))}%` }} /></div>; }
+export function Progress({ value, color = 'bg-primary' }: { value: number; color?: string }) { return <div className="h-2 overflow-hidden rounded-full bg-muted"><div className={cn('h-full rounded-full transition-all duration-500', color)} style={{ width: `${Math.min(100, Math.max(0, value))}%` }} /></div>; }
 
-export function SectionHeader({ eyebrow, title, action }: { eyebrow?: string; title: string; action?: ReactNode }) { return <div className="mb-5 flex items-end justify-between gap-4"><div>{eyebrow && <div className="font-mono-app text-[10px] uppercase tracking-[.16em] text-primary">{eyebrow}</div>}<h2 className="mt-1 text-[22px] font-extrabold tracking-[-.04em]">{title}</h2></div>{action}</div>; }
+export function SectionHeader({ eyebrow, title, description, action }: { eyebrow?: string; title: string; description?: ReactNode; action?: ReactNode }) { return <div className="mb-5 flex flex-wrap items-end justify-between gap-x-4 gap-y-2"><div className="flex items-stretch gap-3"><span className="w-1 shrink-0 rounded-full bg-gradient-to-b from-primary to-primary/30" /><div>{eyebrow && <div className="font-mono-app text-[10px] font-bold uppercase tracking-[.16em] text-primary">{eyebrow}</div>}<h2 className="mt-0.5 text-[22px] font-extrabold leading-tight tracking-[-.03em]">{title}</h2>{description && <p className="mt-1 max-w-xl text-xs leading-5 text-muted-foreground">{description}</p>}</div></div>{action}</div>; }
 
-export function Stat({ label, value }: { label: string; value: string | number }) { return <div className="rounded-xl bg-card/70 p-3 text-center"><div className="font-display text-2xl">{value}</div><div className="mt-0.5 text-[10px] text-muted-foreground">{label}</div></div>; }
+export function Stat({ label, value }: { label: string; value: string | number }) { return <div className="rounded-xl border border-border/60 bg-card/70 p-3 text-center"><div className="font-display text-2xl">{value}</div><div className="mt-0.5 text-[10px] text-muted-foreground">{label}</div></div>; }
 
 // The student-facing half of the same progress-trend data the practice
 // result card uses — so a student can check "am I improving?" any time,
 // not just right after finishing a session.
 
 export function StatTile({ icon: Icon, bg, fg, label, value }: { icon: typeof Clock3; bg: string; fg: string; label: string; value: ReactNode }) {
-  return <div className="rounded-2xl border border-border bg-card p-5" data-testid={`stat-tile-${label.toLowerCase().replaceAll(' ', '-')}`}>
+  return <div className="rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-2xs)] transition-shadow hover:shadow-[var(--shadow-xs)]" data-testid={`stat-tile-${label.toLowerCase().replaceAll(' ', '-')}`}>
     <div className="flex items-center gap-3"><span className={cn('grid size-10 shrink-0 place-items-center rounded-xl', bg, fg)}><Icon size={18} /></span><div className="text-xs font-semibold text-muted-foreground">{label}</div></div>
     <div className="mt-3 font-display text-3xl">{value}</div>
   </div>;
@@ -731,7 +805,7 @@ export function ModuleCard({ m, i }: { m: Module; i: number }) {
     </Link>;
   }
   const c = MODULE_TILE_COLORS[i % MODULE_TILE_COLORS.length];
-  return <Link href={`/modules/${m.id}`} key={m.id} className="card-lift group rounded-2xl border border-border bg-card p-6" data-testid={`card-module-${m.id}`}><div className="flex items-start justify-between"><div className={cn('grid size-11 place-items-center rounded-xl', c.bg, c.fg)}><BookOpen size={20} /></div><ChevronRight size={18} className="text-muted-foreground transition-transform group-hover:translate-x-0.5" /></div><h3 className="mt-6 text-lg font-extrabold tracking-[-.03em]">{m.name}</h3><p className="mt-1 text-xs text-muted-foreground">{m.subtitle}</p><div className="mt-7 flex items-center justify-between text-[11px] text-muted-foreground"><span>{m.subjectCount} subject{m.subjectCount === 1 ? '' : 's'} · {m.mcqCount} question{m.mcqCount === 1 ? '' : 's'}</span><span className="font-mono-app text-foreground">{m.progress}%</span></div><div className="mt-2"><Progress value={m.progress} color={i % 2 ? 'bg-[#e5a952]' : 'bg-primary'} /></div><div className="mt-5 flex items-center gap-1 text-xs font-bold text-primary opacity-80 group-hover:opacity-100">Open module <ArrowRight size={14} /></div></Link>;
+  return <Link href={`/modules/${m.id}`} key={m.id} className="card-lift group rounded-2xl border border-border bg-card p-6" data-testid={`card-module-${m.id}`}><div className="flex items-start justify-between">{resolveSubjectIcon(m.name).matched ? <SubjectIcon name={m.name} size="md" /> : <div className={cn('grid size-11 place-items-center rounded-xl', c.bg, c.fg)}><BookOpen size={20} /></div>}<ChevronRight size={18} className="text-muted-foreground transition-transform group-hover:translate-x-0.5" /></div><h3 className="mt-6 text-lg font-extrabold tracking-[-.03em]">{m.name}</h3><p className="mt-1 text-xs text-muted-foreground">{m.subtitle}</p><div className="mt-7 flex items-center justify-between text-[11px] text-muted-foreground"><span>{m.subjectCount} subject{m.subjectCount === 1 ? '' : 's'} · {m.mcqCount} question{m.mcqCount === 1 ? '' : 's'}</span><span className="font-mono-app text-foreground">{m.progress}%</span></div><div className="mt-2"><Progress value={m.progress} color={i % 2 ? 'bg-[#e5a952]' : 'bg-primary'} /></div><div className="mt-5 flex items-center gap-1 text-xs font-bold text-primary opacity-80 group-hover:opacity-100">Open module <ArrowRight size={14} /></div></Link>;
 }
 
 // Round 3, item 6: Blocks becomes the primary top-level nav item (sidebar
@@ -938,7 +1012,7 @@ export function Footer({ variant = 'compact' }: { variant?: 'compact' | 'full' }
   </div>;
 }
 
-export function AuthLayout({ children, register = false }: { children: ReactNode; register?: boolean }) { return <div className="grid min-h-[100dvh] bg-background lg:grid-cols-[.9fr_1.1fr]"><div className="flex flex-col p-6 md:p-10"><Logo /><div className="mx-auto flex w-full max-w-sm flex-1 items-center py-10">{children}</div><Footer /></div><div className="relative hidden overflow-hidden bg-sidebar p-14 text-sidebar-foreground lg:flex lg:flex-col lg:justify-between"><div className="absolute -right-20 top-20 size-96 rounded-full border-[44px] border-sidebar-accent/50" /><div className="absolute bottom-10 left-10 size-48 rounded-full border-[20px] border-sidebar-primary/25" /><div className="relative"><div className="font-mono-app text-[10px] uppercase tracking-[.18em] text-sidebar-foreground/70">Practice &amp; learn — no exam pressure</div><h2 className="mt-8 max-w-lg font-display text-6xl leading-[.93] tracking-[-.04em]">Every MCQ<br /><em className="text-sidebar-primary not-italic">you'll need.</em></h2></div><div className="relative max-w-sm"><div className="mb-4 h-px bg-sidebar-border" /><p className="text-sm leading-6 text-sidebar-foreground/80">One MCQ bank across every college, subject, and topic for MBBS &amp; BDS students — built for steady daily practice, not timed exams.</p><div className="mt-5 flex items-center gap-2 text-xs font-bold"><span className="grid size-7 place-items-center rounded-full bg-sidebar-primary text-sidebar-primary-foreground"><Check size={14} /></span> Instant explanations on every question</div></div></div></div>; }
+export function AuthLayout({ children, register = false }: { children: ReactNode; register?: boolean }) { return <div className="grid min-h-[100dvh] bg-background lg:grid-cols-[.9fr_1.1fr]"><div className="flex flex-col p-6 md:p-10"><Logo /><div className="mx-auto flex w-full max-w-sm flex-1 items-center py-10">{children}</div><Footer /></div><div className="relative hidden overflow-hidden bg-sidebar p-14 text-sidebar-foreground lg:flex lg:flex-col lg:justify-between"><Aurora /><div className="relative"><div className="font-mono-app text-[10px] uppercase tracking-[.18em] text-sidebar-foreground/70">Practice &amp; learn — no exam pressure</div><h2 className="mt-8 max-w-lg font-display text-6xl leading-[.93] tracking-[-.04em]">Every MCQ<br /><em className="text-shimmer not-italic" style={{ backgroundImage: 'linear-gradient(100deg, hsl(var(--sidebar-primary)) 10%, #b9f5ea 40%, hsl(var(--sidebar-primary)) 70%)' }}>you'll need.</em></h2></div><div className="relative"><AuthShowcase /></div><div className="relative max-w-sm"><div className="mb-4 h-px bg-sidebar-border" /><p className="text-sm leading-6 text-sidebar-foreground/80">One MCQ bank across every college, subject, and topic for MBBS &amp; BDS students — built for steady daily practice, not timed exams.</p><div className="mt-5 flex items-center gap-2 text-xs font-bold"><span className="grid size-7 place-items-center rounded-full bg-sidebar-primary text-sidebar-primary-foreground"><Check size={14} /></span> Instant explanations on every question</div></div></div></div>; }
 
 export function Stepper({ step }: { step: 1 | 2 }) {
   const steps = [{ n: 1, label: 'Your details' }, { n: 2, label: 'Membership & payment' }];

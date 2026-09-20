@@ -49,3 +49,24 @@
   `X-Forwarded-For` when present, else `req.ip`.
 - Not built: student-facing "my devices" page (students at the limit must
   sign out on another device or ask an admin to reset).
+
+## Student UI modernisation (same round)
+Colours unchanged; only depth, spacing, structure and hover/focus behaviour.
+- `frontend-student/src/index.css`: new `.student-shell` polish block (mirrors
+  the admin's `.admin-shell`): card resting shadow, table hover, field focus
+  ring, thin scrollbars, filled-button shadows, icon-button hover, active pill
+  ring. Scoped to the signed-in app; login/register/public pages untouched.
+- `lib/shared.tsx`: sidebar rebuilt in the admin style (tinted icon tiles per
+  group, active accent bar, footer card, `aria-current`); header (rounded
+  icon buttons, mobile search button, unread-count badge on the bell); content
+  centred to max 1320px; `SectionHeader` (accent bar + optional `description`),
+  `EmptyState`, `StatTile`, `Stat`, `Badge`, `Progress`, `ConfirmDialog`
+  restyled. All pages inherit these.
+- Pages: every page header now uses `SectionHeader` with a one-line
+  description; Flashcards/AI Visualizer/Past Papers headers moved onto it
+  (Past Papers' pale-blue hero became header + two stat tiles); Books cards
+  polished.
+- Not built: mobile bottom tab bar; dark-mode pass (many hardcoded pale
+  colours remain); the public/auth pages (Home, Login, Register).
+- NOT looked at in a browser (no node_modules/network here). Syntax-checked
+  only — run `pnpm run build:student` and click through it before shipping.
