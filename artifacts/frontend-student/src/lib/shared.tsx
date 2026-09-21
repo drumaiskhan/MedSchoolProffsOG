@@ -315,14 +315,14 @@ export function SideNav({ user, onClose }: { user: User; onClose: () => void }) 
 // Trial-lock check shared by the phone tab bar (SideNav keeps its own copy of
 // the same rule): while a feature-limited trial is live, a student without a
 // paid membership sees locked sections marked and sent to Membership.
-function useNavLocks(user: User) {
+export function useNavLocks(user: Pick<User, 'role'> | null | undefined) {
   const siteContentQ = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get });
   const dashboardQ = useGetStudentDashboard();
   const trial = siteContentQ.data?.trial;
   const paidMember = dashboardQ.data?.membershipStatus === 'ACTIVE';
   return (href: string) => {
     const feature = NAV_FEATURE[href];
-    return !!(trial?.active && feature && user.role !== 'admin' && !paidMember && dashboardQ.data && !trial.features.includes(feature));
+    return !!(trial?.active && feature && user && user.role !== 'admin' && !paidMember && dashboardQ.data && !trial.features.includes(feature));
   };
 }
 
@@ -340,17 +340,17 @@ export function MobileTabBar({ user, onMore }: { user: User; onMore: () => void 
   const [location] = useLocation();
   const isLocked = useNavLocks(user);
   const match = (href: string) => location === href || location.startsWith(`${href}/`);
-  return <nav aria-label="Quick navigation" className="tabbar-safe fixed inset-x-0 bottom-0 z-20 px-3 md:hidden" data-testid="tabbar-mobile">
-    <div className="tabbar-dock mx-auto flex max-w-md items-stretch gap-1 rounded-2xl border border-border bg-card/95 p-1.5 backdrop-blur-md">
+  return <nav aria-label="Quick navigation" className="tabbar-safe fixed inset-x-0 bottom-0 z-20 w-full max-w-full px-3 md:hidden" data-testid="tabbar-mobile">
+    <div className="tabbar-dock mx-auto flex w-full max-w-md items-stretch gap-1 rounded-2xl border border-border bg-card/95 p-1.5 backdrop-blur-md">
       {TAB_ITEMS.map(({ href, label, icon: Icon, also }) => {
         const active = match(href) || !!also?.some(match);
         const locked = isLocked(href);
-        return <Link key={href} href={locked ? '/payments' : href} aria-current={active ? 'page' : undefined} className={cn('relative flex flex-1 flex-col items-center gap-0.5 rounded-xl py-2 text-[10px] font-bold transition-colors', active ? 'tab-key text-primary' : 'text-muted-foreground hover:bg-muted/70')} data-testid={`tab-${label.toLowerCase()}`}>
+        return <Link key={href} href={locked ? '/payments' : href} aria-current={active ? 'page' : undefined} className={cn('relative flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-xl py-2 text-[10px] font-bold transition-colors', active ? 'tab-key text-primary' : 'text-muted-foreground hover:bg-muted/70')} data-testid={`tab-${label.toLowerCase()}`}>
           <Icon size={19} strokeWidth={active ? 2.4 : 2} />{label}
           {locked && <LockKeyhole size={9} className="absolute right-3 top-1.5" />}
         </Link>;
       })}
-      <button type="button" onClick={onMore} className="relative flex flex-1 flex-col items-center gap-0.5 rounded-xl py-2 text-[10px] font-bold text-muted-foreground hover:bg-muted/70" aria-label="More — open full menu" data-testid="tab-more"><Menu size={19} />More</button>
+      <button type="button" onClick={onMore} className="relative flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-xl py-2 text-[10px] font-bold text-muted-foreground hover:bg-muted/70" aria-label="More — open full menu" data-testid="tab-more"><Menu size={19} />More</button>
     </div>
   </nav>;
 }
@@ -482,6 +482,23 @@ function parseAnnouncements(raw: string | null | undefined): string[] {
   return raw.trim() ? [raw.trim()] : [];
 }
 
+// One-line trial notice. On a phone a 3-line wrapped banner pushed the whole page
+// down; now the text scrolls in a single line (two copies back to back, same
+// technique as the announcement marquee) and md+ shows it static and centred.
+// Motion is off for prefers-reduced-motion, where the text simply wraps.
+function TrialBar({ text }: { text: string }) {
+  const duration = Math.max(14, text.length * 0.16);
+  return <div className="trial-bar" data-testid="banner-global-trial-mode" role="status">
+    <Sparkles size={14} className="trial-bar__icon" aria-hidden="true" />
+    <div className="trial-bar__viewport">
+      <div className="trial-bar__track" style={{ animationDuration: `${duration}s` }}>
+        <span>{text}</span>
+        <span aria-hidden="true">{text}</span>
+      </div>
+    </div>
+  </div>;
+}
+
 export function Shell({ children }: { children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [quickJumpOpen, setQuickJumpOpen] = useState(false);
@@ -591,13 +608,13 @@ export function Shell({ children }: { children: ReactNode }) {
   // seamless) — duration scales with length so a short announcement
   // doesn't fly past and a long one doesn't crawl.
   const marqueeDuration = announcementText ? Math.max(14, announcementText.length * 0.14) : 14;
-  // Was hardcoded to "Good morning" regardless of the time of day — the
-  // Dashboard's own welcome card already computed the correct greeting via
-  // greetingForHour(), so this header text disagreed with it (e.g. showing
-  // "Good morning" in the header while the card underneath said "Good
-  // evening"). Reuse the same helper so both read the same live clock.
-  const title = pageTitle ?? (location === '/dashboard' ? `${greetingForHour(new Date().getHours())}, ${user.name?.split(' ')[0] || 'there'}` : location.slice(1).split('/').map((part) => part.replaceAll('-', ' ')).join(' / '));
-  const today = new Date().toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  // The dashboard's own hero already greets the student by name; repeating the
+  // greeting here got cut off to "Good Morning, U…" beside the search/bell/avatar
+  // buttons on a phone. The header now just names the page.
+  const title = pageTitle ?? (location === '/dashboard' ? 'Dashboard' : location.slice(1).split('/').map((part) => part.replaceAll('-', ' ')).join(' / '));
+  // Full date on md+, compact on phones ("Mon, Sep 21") so it never wraps.
+  const todayLong = new Date().toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const todayShort = new Date().toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' });
 
   // IMPORTANT: focus mode and the normal layout used to be two separate
   // `if (focusMode) return <...>` branches with entirely different JSX
@@ -620,8 +637,8 @@ export function Shell({ children }: { children: ReactNode }) {
   return <div className="student-shell flex min-h-[100dvh] bg-background">
     <div className={cn(!focusMode && menuOpen ? 'block' : 'hidden', 'fixed inset-0 z-30 bg-[#071e2b]/45 md:hidden')} onClick={() => setMenuOpen(false)} />
     <div className={cn(focusMode ? 'hidden' : (menuOpen || !isMobile) ? 'block' : 'hidden')}><SideNav user={user} onClose={() => setMenuOpen(false)} /></div>
-    <main className="min-w-0 flex-1">
-      {!focusMode && (showAnnouncement || globalTrialMode) && <div className="sticky top-0 z-20">
+    <main className="min-w-0 max-w-full flex-1">
+      {!focusMode && (showAnnouncement || globalTrialMode) && <div className="relative z-20">
         {showAnnouncement && <div className="flex items-center gap-2 overflow-hidden bg-primary px-4 py-1.5 text-[11px] font-bold text-primary-foreground" data-testid="banner-announcement">
           <Megaphone size={12} className="shrink-0" />
           <div className="min-w-0 flex-1 overflow-hidden">
@@ -637,11 +654,11 @@ export function Shell({ children }: { children: ReactNode }) {
           </div>
           <button onClick={() => setDismissedAnnouncement(announcementText)} className="ml-1 shrink-0 rounded p-0.5 hover:bg-white/15" aria-label="Dismiss announcement" data-testid="button-dismiss-announcement"><X size={12} /></button>
         </div>}
-        {globalTrialMode && trial && <div className="flex items-center justify-center gap-2 bg-[#e5a952] px-4 py-1.5 text-center text-[11px] font-bold text-[#183844]" data-testid="banner-global-trial-mode"><Sparkles size={12} /> Free trial{globalTrialScope ? ` for ${globalTrialScope} students` : ''}: {trialFeatureSummary(trial.features)} unlocked{trialEndsLabel(trial.endsAt)}.</div>}
+        {globalTrialMode && trial && <TrialBar text={`Free trial${globalTrialScope ? ` for ${globalTrialScope} students` : ''}: ${trialFeatureSummary(trial.features)} unlocked${trialEndsLabel(trial.endsAt)}.`} />}
       </div>}
       {focusMode
         ? <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border/70 bg-background/90 px-4 backdrop-blur-md md:px-8">{strictFocusMode ? <span className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold text-muted-foreground" data-testid="text-exam-locked"><LockKeyhole size={13} /> Exam in progress</span> : <button onClick={() => setLocation('/dashboard')} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold text-muted-foreground hover:bg-muted" data-testid="button-exit-focus-mode"><ArrowLeft size={15} /> Exit</button>}<span className="text-xs font-bold capitalize text-foreground">{title}</span></header>
-        : <header className="student-header sticky top-0 z-20 flex h-[68px] items-center justify-between border-b border-border/70 bg-background/90 px-4 backdrop-blur-md md:px-8"><div className="flex min-w-0 items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} aria-label="Open menu" data-testid="button-open-menu"><Menu size={20} /></button><div className="min-w-0"><div className="font-mono-app text-[9px] uppercase tracking-[.16em] text-muted-foreground">{today}</div><h1 className="mt-1 truncate text-[17px] font-extrabold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="relative flex items-center gap-2"><button onClick={() => { setQuickJumpOpen((current) => !current); setQuickJumpValue(''); }} className="hidden h-9 w-[220px] items-center gap-2 rounded-xl border border-border bg-card px-3 text-left text-[11px] text-muted-foreground shadow-sm hover:border-primary/50 sm:flex md:w-[340px]" data-testid="button-open-quick-jump"><Search size={14} /><span className="truncate">Search modules, topics, MCQs...</span><span className="ml-auto rounded border border-border px-1 text-[9px]">⌘K</span></button><button onClick={() => { setQuickJumpOpen((current) => !current); setQuickJumpValue(''); }} className="grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted sm:hidden" aria-label="Search" data-testid="button-open-quick-jump-mobile"><Search size={16} /></button><Link href="/notifications" className="relative grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label="Notifications" data-testid="link-notifications"><Bell size={16} />{headerUnread > 0 && <span className="absolute -right-1 -top-1 grid min-w-4 place-items-center rounded-full bg-[#e5a952] px-1 text-[9px] font-bold leading-4 text-[#183844] ring-2 ring-background" data-testid="badge-header-unread">{headerUnread > 9 ? '9+' : headerUnread}</span>}</Link><Link href="/profile" className="ml-1 grid size-9 place-items-center rounded-full bg-[#cdebf0] text-[11px] font-extrabold text-[#0d5267] ring-2 ring-transparent transition-shadow hover:ring-primary/30" aria-label="Profile" data-testid="link-header-profile">{initials(user.name)}</Link><QuickJump open={quickJumpOpen} value={quickJumpValue} onChange={setQuickJumpValue} onClose={() => setQuickJumpOpen(false)} /></div></header>}
+        : <header className="student-header sticky top-0 z-20 flex h-[68px] items-center justify-between border-b border-border/70 bg-background/90 px-4 backdrop-blur-md md:px-8"><div className="flex min-w-0 items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} aria-label="Open menu" data-testid="button-open-menu"><Menu size={20} /></button><div className="min-w-0"><div className="font-mono-app whitespace-nowrap text-[9px] uppercase tracking-[.16em] text-muted-foreground"><span className="hidden md:inline">{todayLong}</span><span className="md:hidden">{todayShort}</span></div><h1 className="mt-1 truncate text-[17px] font-extrabold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="relative flex items-center gap-2"><button onClick={() => { setQuickJumpOpen((current) => !current); setQuickJumpValue(''); }} className="hidden h-9 w-[220px] items-center gap-2 rounded-xl border border-border bg-card px-3 text-left text-[11px] text-muted-foreground shadow-sm hover:border-primary/50 sm:flex md:w-[340px]" data-testid="button-open-quick-jump"><Search size={14} /><span className="truncate">Search modules, topics, MCQs...</span><span className="ml-auto rounded border border-border px-1 text-[9px]">⌘K</span></button><button onClick={() => { setQuickJumpOpen((current) => !current); setQuickJumpValue(''); }} className="grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted sm:hidden" aria-label="Search" data-testid="button-open-quick-jump-mobile"><Search size={16} /></button><Link href="/notifications" className="relative grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label="Notifications" data-testid="link-notifications"><Bell size={16} />{headerUnread > 0 && <span className="absolute -right-1 -top-1 grid min-w-4 place-items-center rounded-full bg-[#e5a952] px-1 text-[9px] font-bold leading-4 text-[#183844] ring-2 ring-background" data-testid="badge-header-unread">{headerUnread > 9 ? '9+' : headerUnread}</span>}</Link><Link href="/profile" className="ml-1 grid size-9 place-items-center rounded-full bg-[#cdebf0] text-[11px] font-extrabold text-[#0d5267] ring-2 ring-transparent transition-shadow hover:ring-primary/30" aria-label="Profile" data-testid="link-header-profile">{initials(user.name)}</Link><QuickJump open={quickJumpOpen} value={quickJumpValue} onChange={setQuickJumpValue} onClose={() => setQuickJumpOpen(false)} /></div></header>}
       <div className={cn('page-enter student-content', focusMode ? 'px-5 py-6 md:px-10 md:py-8' : 'mx-auto w-full max-w-[1320px] px-4 py-6 pb-28 md:px-8 md:py-9')}>{children}</div>
       {!focusMode && <MobileTabBar user={user} onMore={() => setMenuOpen(true)} />}
     </main>
@@ -711,7 +728,7 @@ export function difficultyTone(difficulty?: string | null): 'green' | 'blue' | '
   return 'blue';
 }
 
-export function Progress({ value, color = 'bg-primary' }: { value: number; color?: string }) { return <div className="h-2 overflow-hidden rounded-full bg-muted"><div className={cn('h-full rounded-full transition-all duration-500', color)} style={{ width: `${Math.min(100, Math.max(0, value))}%` }} /></div>; }
+export function Progress({ value, color = 'bg-primary' }: { value: number; color?: string }) { return <div className="d3-well h-2.5 overflow-hidden rounded-full"><div className={cn('bar-fill h-full rounded-full transition-all duration-700', color)} style={{ width: `${Math.min(100, Math.max(0, value))}%` }} /></div>; }
 
 export function SectionHeader({ eyebrow, title, description, action }: { eyebrow?: string; title: string; description?: ReactNode; action?: ReactNode }) { return <div className="mb-5 flex flex-wrap items-end justify-between gap-x-4 gap-y-2"><div className="flex items-stretch gap-3"><span className="w-1 shrink-0 rounded-full bg-gradient-to-b from-primary to-primary/30" /><div>{eyebrow && <div className="font-mono-app text-[10px] font-bold uppercase tracking-[.16em] text-primary">{eyebrow}</div>}<h2 className="mt-0.5 text-[22px] font-extrabold leading-tight tracking-[-.03em]">{title}</h2>{description && <p className="mt-1 max-w-xl text-xs leading-5 text-muted-foreground">{description}</p>}</div></div>{action}</div>; }
 
@@ -728,35 +745,19 @@ export function StatTile({ icon: Icon, bg, fg, label, value }: { icon: typeof Cl
   </div>;
 }
 
-export function ProgressProfileCard() {
-  const trend = useQuery({ queryKey: ['progress-trend'], queryFn: analyticsApi.progress });
-  const t = trend.data;
-  if (trend.isLoading) return <div className="skeleton h-40 rounded-2xl" />;
-  const verdict = progressVerdict(null, t);
-  const history = t?.history ?? [];
-  const maxScore = Math.max(100, ...history.map((h) => h.scorePercent));
-  return <div className="rounded-2xl border border-border bg-card p-6" data-testid="card-progress-profile">
-    <div className="flex flex-wrap items-center justify-between gap-3"><div><div className="flex items-center gap-2"><span className="font-display text-3xl">{t?.recentAverage != null ? `${t.recentAverage}%` : '—'}</span><ProgressBadge tone={verdict.tone} label={verdict.label} /></div><p className="mt-1 text-xs text-muted-foreground">Average score, last 7 days{t?.priorAverage != null ? ` (was ${t.priorAverage}% the week before)` : ''}</p></div><div className="flex gap-5 text-center text-xs"><div><div className="font-display text-xl">{t?.currentStreak ?? 0}</div><div className="text-muted-foreground">day streak</div></div><div><div className="font-display text-xl">{t?.recentSessions ?? 0}</div><div className="text-muted-foreground">sessions/wk</div></div></div></div>
-    <p className="mt-4 text-xs leading-5 text-muted-foreground">{verdict.message}</p>
-    {history.length >= 2 ? <div className="mt-5" data-testid="chart-progress-history">
-      <div className="flex h-16 items-end gap-1.5">{history.map((h, i) => <div key={i} className="flex-1 rounded-t bg-gradient-to-t from-primary to-accent" style={{ height: `${Math.max(6, (h.scorePercent / maxScore) * 100)}%` }} title={`${h.scorePercent}%`} />)}</div>
-      <div className="mt-1.5 flex gap-1.5">{history.map((h, i) => <div key={i} className="flex-1 text-center text-[9px] font-semibold text-muted-foreground">{new Date(h.date).toLocaleDateString(undefined, { weekday: 'narrow' })}</div>)}</div>
-    </div> : <p className="mt-5 text-[11px] text-muted-foreground">Complete a few more sessions to see your trend line here.</p>}
-  </div>;
-}
 
-export const QUICK_LINK_TILES: Array<{ href: string; label: string; sub: string; icon: typeof LayoutGrid; bg: string; fg: string }> = [
-  { href: '/blocks', label: 'Modules', sub: 'Explore all modules', icon: LayoutGrid, bg: 'bg-[#dceaf1]', fg: 'text-[#2c6a8f]' },
-  { href: '/practice', label: 'Practice MCQs', sub: 'Test your knowledge', icon: Target, bg: 'bg-[#d7eee4]', fg: 'text-[#1f7a5c]' },
-  { href: '/flashcards', label: 'Flashcards', sub: 'Revise smarter', icon: Sparkles, bg: 'bg-[#e6dcf5]', fg: 'text-[#6b3fa0]' },
-  { href: '/past-papers', label: 'Past Papers', sub: 'Previous exam papers', icon: FileStack, bg: 'bg-[#fbdada]', fg: 'text-[#b8493f]' },
-  { href: '/flagged-mcqs', label: 'Bookmarks', sub: 'Saved content', icon: Bookmark, bg: 'bg-[#fff0cb]', fg: 'text-[#94651c]' },
-  { href: '/progress', label: 'My Progress', sub: 'Track your growth', icon: TrendingUp, bg: 'bg-[#dde4f7]', fg: 'text-[#3b4f8f]' },
+export const QUICK_LINK_TILES: Array<{ href: string; label: string; sub: string; icon: typeof LayoutGrid; bg: string; fg: string; /** HSL hue for the glossy 3D icon tile on the dashboard. */ hue: number }> = [
+  { href: '/blocks', label: 'Modules', sub: 'Explore all modules', icon: LayoutGrid, bg: 'bg-[#dceaf1]', fg: 'text-[#2c6a8f]', hue: 205 },
+  { href: '/practice', label: 'Practice MCQs', sub: 'Test your knowledge', icon: Target, bg: 'bg-[#d7eee4]', fg: 'text-[#1f7a5c]', hue: 158 },
+  { href: '/flashcards', label: 'Flashcards', sub: 'Revise smarter', icon: Sparkles, bg: 'bg-[#e6dcf5]', fg: 'text-[#6b3fa0]', hue: 268 },
+  { href: '/past-papers', label: 'Past Papers', sub: 'Previous exam papers', icon: FileStack, bg: 'bg-[#fbdada]', fg: 'text-[#b8493f]', hue: 4 },
+  { href: '/flagged-mcqs', label: 'Bookmarks', sub: 'Saved content', icon: Bookmark, bg: 'bg-[#fff0cb]', fg: 'text-[#94651c]', hue: 38 },
+  { href: '/progress', label: 'My Progress', sub: 'Track your growth', icon: TrendingUp, bg: 'bg-[#dde4f7]', fg: 'text-[#3b4f8f]', hue: 228 },
   // Special-cased in the render below (href === OPEN_SEARCH_HREF) to open
   // the QuickJump overlay via a custom event instead of navigating — the
   // Shell that owns QuickJump's open/close state lives outside Dashboard's
   // component tree, so a plain <Link> can't reach it directly.
-  { href: '#open-search', label: 'Search', sub: 'Find anything', icon: Search, bg: 'bg-[#dbeafe]', fg: 'text-[#1d4ed8]' },
+  { href: '#open-search', label: 'Search', sub: 'Find anything', icon: Search, bg: 'bg-[#dbeafe]', fg: 'text-[#1d4ed8]', hue: 214 },
 ];
 
 export const OPEN_SEARCH_HREF = '#open-search';

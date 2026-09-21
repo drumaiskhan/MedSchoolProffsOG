@@ -1,10 +1,12 @@
 import { Router, type IRouter } from "express";
-import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
 import {
   db, practiceAttemptsTable, practiceAnswersTable, mcqsTable, usersTable, subjectsTable, topicsTable, modulesTable,
   pastPapersTable, examsTable, examAttemptsTable,
 } from "@workspace/db";
-import { requireAuth } from "../middlewares/auth";
+import { requireAuth, isAdminRole } from "../middlewares/auth";
+import { getStudentTargeting, getVisibleModuleIds } from "../lib/contentVisibility";
+import { resolveFileUrl, THUMBNAIL_TRANSFORM } from "../lib/storage";
 import { liveStreak } from "../lib/streak";
 
 const router: IRouter = Router();
@@ -215,6 +217,163 @@ router.get("/student/progress-overview", requireAuth, async (req, res): Promise<
   });
 
   res.json({ summary, recentSessions, bySubject, pastPapers, improvement, exams });
+});
+
+// ---------------------------------------------------------------------------
+// GET /student/continue-learning — powers the dashboard's "Continue where you
+// left off" card. Nothing here is hardcoded or guessed from list order:
+//
+//  * `resume` is the module the student most recently PRACTISED (latest
+//    practice attempt that can be tied to a module), plus the subject and the
+//    exact topic to carry on with. Old attempts that were saved with only a
+//    topicId (the Practice page has always sent just `topic`) are resolved
+//    topic -> subject -> module here, so history from before this endpoint
+//    still works; new attempts also get moduleId/subjectId filled in at save
+//    time (see POST /practice-sessions).
+//  * the topic is the last one practised if it still has unanswered
+//    questions ("continue"), otherwise the next topic in that subject with
+//    unanswered questions ("next"), otherwise the last topic ("review").
+//  * `upNext` is other modules the student can see, started-but-unfinished
+//    ones first, then untouched ones — real per-module question counts and
+//    progress, using the same "distinct MCQs answered / published MCQs"
+//    rule as GET /student/dashboard.
+//
+// Visibility: same program/year targeting as every other module list, so a
+// student never gets deep-linked into a module they can't open. Read-only,
+// scoped to the signed-in user, not behind requireMembershipFor (a lapsed
+// student can still see where they were).
+// ---------------------------------------------------------------------------
+
+const RESUME_LOOKBACK_ATTEMPTS = 60;
+const UP_NEXT_LIMIT = 3;
+
+router.get("/student/continue-learning", requireAuth, async (req, res): Promise<void> => {
+  const userId = req.user!.id;
+  const visibleModuleIds = isAdminRole(req.user!.role) ? null : await getVisibleModuleIds(await getStudentTargeting(userId));
+  if (visibleModuleIds && visibleModuleIds.length === 0) { res.json({ resume: null, upNext: [] }); return; }
+
+  const [moduleRows, attempts] = await Promise.all([
+    db.select().from(modulesTable)
+      .where(and(eq(modulesTable.active, true), eq(modulesTable.archived, false), visibleModuleIds ? inArray(modulesTable.id, visibleModuleIds) : undefined))
+      .orderBy(asc(modulesTable.displayOrder), asc(modulesTable.id)),
+    db.select().from(practiceAttemptsTable)
+      .where(and(
+        eq(practiceAttemptsTable.userId, userId),
+        or(isNotNull(practiceAttemptsTable.moduleId), isNotNull(practiceAttemptsTable.subjectId), isNotNull(practiceAttemptsTable.topicId)),
+      ))
+      .orderBy(desc(practiceAttemptsTable.createdAt))
+      .limit(RESUME_LOOKBACK_ATTEMPTS),
+  ]);
+  const moduleIds = moduleRows.map((m) => m.id);
+  if (!moduleIds.length) { res.json({ resume: null, upNext: [] }); return; }
+
+  // ---- Per-module numbers (3 grouped queries, not one per module) ----------
+  const [mcqTotals, answered, subjectTotals] = await Promise.all([
+    db.select({ moduleId: mcqsTable.moduleId, total: sql<number>`count(*)::int` }).from(mcqsTable)
+      .where(and(inArray(mcqsTable.moduleId, moduleIds), eq(mcqsTable.status, "published"))).groupBy(mcqsTable.moduleId),
+    db.select({ moduleId: mcqsTable.moduleId, done: sql<number>`count(distinct ${practiceAnswersTable.mcqId})::int` }).from(practiceAnswersTable)
+      .innerJoin(practiceAttemptsTable, eq(practiceAttemptsTable.id, practiceAnswersTable.attemptId))
+      .innerJoin(mcqsTable, eq(mcqsTable.id, practiceAnswersTable.mcqId))
+      .where(and(eq(practiceAttemptsTable.userId, userId), inArray(mcqsTable.moduleId, moduleIds), eq(mcqsTable.status, "published"))).groupBy(mcqsTable.moduleId),
+    db.select({ moduleId: subjectsTable.moduleId, total: sql<number>`count(*)::int` }).from(subjectsTable)
+      .where(and(inArray(subjectsTable.moduleId, moduleIds), eq(subjectsTable.archived, false))).groupBy(subjectsTable.moduleId),
+  ]);
+  const totalByModule = new Map(mcqTotals.map((r) => [r.moduleId as number, r.total]));
+  const doneByModule = new Map(answered.map((r) => [r.moduleId as number, r.done]));
+  const subjectsByModule = new Map(subjectTotals.map((r) => [r.moduleId, r.total]));
+
+  const summarise = (m: typeof moduleRows[number]) => {
+    const mcqCount = totalByModule.get(m.id) ?? 0;
+    const attempted = Math.min(doneByModule.get(m.id) ?? 0, mcqCount);
+    return {
+      id: m.id, name: m.name, subtitle: m.subtitle,
+      iconUrl: resolveFileUrl(m.iconPath, { transform: THUMBNAIL_TRANSFORM }),
+      subjectCount: subjectsByModule.get(m.id) ?? 0,
+      mcqCount, attempted,
+      progress: mcqCount ? Math.round((attempted / mcqCount) * 100) : 0,
+    };
+  };
+  const summaries = new Map(moduleRows.map((m) => [m.id, summarise(m)]));
+
+  // ---- Resolve each attempt to a module (topic -> subject -> module) --------
+  const attemptTopicIds = [...new Set(attempts.map((a) => a.topicId).filter((x): x is number => x != null))];
+  const topicRows = attemptTopicIds.length
+    ? await db.select({ id: topicsTable.id, subjectId: topicsTable.subjectId }).from(topicsTable).where(inArray(topicsTable.id, attemptTopicIds))
+    : [];
+  const topicSubject = new Map(topicRows.map((t) => [t.id, t.subjectId]));
+  const attemptSubjectIds = [...new Set(attempts.map((a) => a.subjectId ?? (a.topicId != null ? topicSubject.get(a.topicId) ?? null : null)).filter((x): x is number => x != null))];
+  const subjectRows = attemptSubjectIds.length
+    ? await db.select({ id: subjectsTable.id, moduleId: subjectsTable.moduleId, name: subjectsTable.name }).from(subjectsTable).where(inArray(subjectsTable.id, attemptSubjectIds))
+    : [];
+  const subjectInfo = new Map(subjectRows.map((s) => [s.id, s]));
+
+  type ResolvedAttempt = { attempt: typeof attempts[number]; moduleId: number; subjectId: number | null };
+  const resolved: ResolvedAttempt[] = [];
+  for (const a of attempts) {
+    const subjectId = a.subjectId ?? (a.topicId != null ? topicSubject.get(a.topicId) ?? null : null);
+    const moduleId = a.moduleId ?? (subjectId != null ? subjectInfo.get(subjectId)?.moduleId ?? null : null);
+    if (moduleId != null && summaries.has(moduleId)) resolved.push({ attempt: a, moduleId, subjectId });
+  }
+
+  let resume: Record<string, unknown> | null = null;
+  const latest = resolved[0];
+  if (latest) {
+    const summary = summaries.get(latest.moduleId)!;
+    const sessionsInModule = resolved.filter((r) => r.moduleId === latest.moduleId).length;
+
+    // Which topic to carry on with, within the subject last practised.
+    let topic: { id: number; name: string; questionCount: number; attempted: number; state: "continue" | "next" | "review" } | null = null;
+    let subject: { id: number; name: string } | null = null;
+    if (latest.subjectId != null) {
+      const info = subjectInfo.get(latest.subjectId);
+      if (info) subject = { id: info.id, name: info.name };
+      const topics = await db.select({ id: topicsTable.id, name: topicsTable.name }).from(topicsTable)
+        .where(and(eq(topicsTable.subjectId, latest.subjectId), eq(topicsTable.active, true), eq(topicsTable.archived, false)))
+        .orderBy(asc(topicsTable.displayOrder), asc(topicsTable.id));
+      const topicIds = topics.map((t) => t.id);
+      if (topicIds.length) {
+        const [totals, done] = await Promise.all([
+          db.select({ topicId: mcqsTable.topicId, total: sql<number>`count(*)::int` }).from(mcqsTable)
+            .where(and(inArray(mcqsTable.topicId, topicIds), eq(mcqsTable.status, "published"))).groupBy(mcqsTable.topicId),
+          db.select({ topicId: mcqsTable.topicId, done: sql<number>`count(distinct ${practiceAnswersTable.mcqId})::int` }).from(practiceAnswersTable)
+            .innerJoin(practiceAttemptsTable, eq(practiceAttemptsTable.id, practiceAnswersTable.attemptId))
+            .innerJoin(mcqsTable, eq(mcqsTable.id, practiceAnswersTable.mcqId))
+            .where(and(eq(practiceAttemptsTable.userId, userId), inArray(mcqsTable.topicId, topicIds), eq(mcqsTable.status, "published"))).groupBy(mcqsTable.topicId),
+        ]);
+        const totalByTopic = new Map(totals.map((r) => [r.topicId as number, r.total]));
+        const doneByTopic = new Map(done.map((r) => [r.topicId as number, r.done]));
+        const view = (t: { id: number; name: string }, state: "continue" | "next" | "review") => {
+          const questionCount = totalByTopic.get(t.id) ?? 0;
+          return { id: t.id, name: t.name, questionCount, attempted: Math.min(doneByTopic.get(t.id) ?? 0, questionCount), state };
+        };
+        const hasQuestionsLeft = (t: { id: number }) => (totalByTopic.get(t.id) ?? 0) > (doneByTopic.get(t.id) ?? 0);
+        const lastIdx = latest.attempt.topicId != null ? topics.findIndex((t) => t.id === latest.attempt.topicId) : -1;
+        if (lastIdx >= 0 && hasQuestionsLeft(topics[lastIdx])) topic = view(topics[lastIdx], "continue");
+        else {
+          const after = topics.slice(lastIdx + 1).find(hasQuestionsLeft) ?? topics.find(hasQuestionsLeft);
+          if (after) topic = view(after, "next");
+          else if (lastIdx >= 0) topic = view(topics[lastIdx], "review");
+        }
+      }
+    }
+
+    const a = latest.attempt;
+    resume = {
+      ...summary,
+      lastPracticedAt: (a.completedAt ?? a.createdAt).toISOString(),
+      lastScorePercent: Number(a.scorePercent),
+      sessionsInModule,
+      subject,
+      topic,
+    };
+  }
+
+  // ---- Up next: started-but-unfinished first, then untouched -----------------
+  const resumeId = latest?.moduleId ?? null;
+  const candidates = moduleRows.map((m) => summaries.get(m.id)!).filter((m) => m.id !== resumeId && m.mcqCount > 0 && m.progress < 100);
+  const upNext = [...candidates.filter((m) => m.progress > 0), ...candidates.filter((m) => m.progress === 0)].slice(0, UP_NEXT_LIMIT);
+
+  res.json({ resume, upNext });
 });
 
 export default router;

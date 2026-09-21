@@ -18,6 +18,7 @@ import { ApiRequestError, booksApi, type BookHighlight, type HighlightColor, typ
 import { BrandSpinner, cn, useFocusMode } from '@/lib/shared';
 import { toast } from '@/hooks/use-toast';
 import { hitWord, lineRects, type Rect } from '@/lib/reader-geometry';
+import { enableScreenshotGuard, disableScreenshotGuard } from '@/lib/nativeScreenshotGuard';
 
 const COLORS: Record<HighlightColor, string> = { yellow: '#ffd93b', green: '#5fd08a', pink: '#ff8fab', blue: '#6fb3ff' };
 type Mode = 'read' | 'text' | 'area';
@@ -187,6 +188,14 @@ export default function BookReader() {
   const veil = useCallback((ms?: number) => { setVeiled(true); if (ms) { window.clearTimeout(veilTimer.current); veilTimer.current = window.setTimeout(() => setVeiled(false), ms); } }, []);
   useReaderGuards(veil);
   const devtoolsOpen = useDevtoolsGuard();
+
+  // Native (iOS/Android app) screenshot/recording block — no-ops on web.
+  // Scoped to this screen only; see nativeScreenshotGuard.ts for the
+  // per-platform caveats.
+  useEffect(() => {
+    void enableScreenshotGuard();
+    return () => void disableScreenshotGuard();
+  }, []);
 
   // Escape backs out of whatever's open, closest-first: the highlight editor
   // sheet, then the highlights list panel — same as tapping outside them.

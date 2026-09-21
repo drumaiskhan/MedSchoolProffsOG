@@ -3,6 +3,7 @@ import { setBaseUrl } from '@workspace/api-client-react';
 
 import App from './App';
 import { ErrorBoundary } from '@/components/error-boundary';
+import { enableGlobalScreenshotGuard } from '@/lib/nativeScreenshotGuard';
 
 import './index.css';
 
@@ -12,6 +13,10 @@ import './index.css';
 if (import.meta.env.VITE_API_BASE_URL) {
   setBaseUrl(import.meta.env.VITE_API_BASE_URL);
 }
+
+// No-op on web; blocks screenshots/recording on Android and hides the
+// app-switcher preview on iOS when running as a native app.
+void enableGlobalScreenshotGuard();
 
 createRoot(document.getElementById('root')!, {
   // Keeps caught errors off reportError(), which would raise the dev overlay.

@@ -478,7 +478,19 @@ export const feedbackApi = {
   reply: (id: number, message: string) => request<FeedbackReply>(`/feedback/${id}/replies`, { method: 'POST', body: JSON.stringify({ message }) }),
 };
 
-export interface ProgressTrend { recentAverage: number | null; priorAverage: number | null; trend: 'up' | 'down' | 'flat' | 'new'; trendDelta: number; recentSessions: number; history: Array<{ date: string; scorePercent: number }>; currentStreak: number; longestStreak: number }
+export interface ProgressDay { date: string; sessions: number; questions: number; scorePercent: number | null }
+export interface ProgressTrend { recentAverage: number | null; priorAverage: number | null; trend: 'up' | 'down' | 'flat' | 'new'; trendDelta: number; recentSessions: number; history: Array<{ date: string; scorePercent: number }>;
+  /** Last 7 calendar days in the student's local time, oldest -> today. Optional so an older API build still renders. */
+  daily?: ProgressDay[]; currentStreak: number; longestStreak: number }
+/** One module as the dashboard's "continue learning" cards show it (GET /student/continue-learning). */
+export interface ContinueModule { id: number; name: string; subtitle: string; iconUrl: string | null; subjectCount: number; mcqCount: number; attempted: number; progress: number }
+export interface ContinueResume extends ContinueModule {
+  lastPracticedAt: string; lastScorePercent: number; sessionsInModule: number;
+  subject: { id: number; name: string } | null;
+  /** The topic to carry on with: 'continue' = last one, still unfinished; 'next' = next unfinished one; 'review' = everything in the subject is done. */
+  topic: { id: number; name: string; questionCount: number; attempted: number; state: 'continue' | 'next' | 'review' } | null;
+}
+export interface ContinueLearning { resume: ContinueResume | null; upNext: ContinueModule[] }
 // GET /student/progress-overview — everything the "My Progress" page shows.
 export interface ProgressOverview {
   summary: { sessions: number; questionsAnswered: number; uniqueMcqsAttempted: number; accuracy: number | null; timeSpentMinutes: number; activeDaysLast30: number; currentStreak: number; longestStreak: number };
@@ -497,7 +509,9 @@ export interface ProgressTopic { id: number; name: string; subject: string | nul
 export const analyticsApi = {
   overview: () => request<ProgressOverview>('/student/progress-overview'),
   get: (range: string) => request<Analytics>(`/student/analytics?range=${range}`),
-  progress: () => request<ProgressTrend>('/student/progress'),
+  // `tz` = the browser's own UTC offset so the server can bucket sessions into the student's LOCAL days.
+  progress: () => request<ProgressTrend>(`/student/progress?tz=${new Date().getTimezoneOffset()}`),
+  continueLearning: () => request<ContinueLearning>('/student/continue-learning'),
   leaderboard: (range = '30d') => request<LeaderboardRow[]>(`/leaderboard?range=${range}`),
   streak: () => request<StreakCard>('/leaderboard/streak'),
   submitSession: (body: { moduleId?: number; subjectId?: number; topicId?: number; mode?: 'timed' | 'untimed'; durationSeconds?: number; answers: { mcqId: number; selectedAnswer: string | null }[] }) =>

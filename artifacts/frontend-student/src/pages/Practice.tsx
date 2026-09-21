@@ -54,7 +54,7 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
 import { Badge, EmptyState, PracticeResultCard, Progress, SectionHeader, SkeletonPage, cn, difficultyTone, useFocusMode } from '@/lib/shared';
-import { queryClient } from '@/lib/query-client';
+import { queryClient, invalidatePracticeQueries } from '@/lib/query-client';
 
 function Practice() {
   const search = useSearch();
@@ -122,6 +122,7 @@ function Practice() {
   // that convention.
   const submitAnswer = useMutation({
     mutationFn: analyticsApi.submitSession,
+    onSuccess: invalidatePracticeQueries,
     onError: (err: unknown) => toast({ title: 'Session not saved', description: err instanceof ApiRequestError ? err.message : "Couldn't record this session — your answers below are still visible, but it won't count toward your stats or the leaderboard.", variant: 'destructive' }),
   });
   const saveNote = useMutation({ mutationFn: notebookApi.create });

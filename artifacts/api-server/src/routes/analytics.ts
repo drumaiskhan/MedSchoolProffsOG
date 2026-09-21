@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { and, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { z } from "zod";
-import { db, practiceAttemptsTable, practiceAnswersTable, mcqsTable, usersTable } from "@workspace/db";
+import { db, practiceAttemptsTable, practiceAnswersTable, mcqsTable, usersTable, topicsTable, subjectsTable } from "@workspace/db";
 import { requireAuth, requireMembershipFor } from "../middlewares/auth";
 import { liveStreak, utcDay } from "../lib/streak";
 
@@ -67,10 +67,25 @@ router.post("/practice-sessions", requireAuth, requireMembershipFor(["mcqs", "pa
   const completedAt = new Date();
   const startedAt = data.durationSeconds != null ? new Date(completedAt.getTime() - data.durationSeconds * 1000) : completedAt;
 
+  // The Practice page only ever sends `topicId`, so moduleId/subjectId used to
+  // be saved as null — which left nothing to tell the dashboard's "continue
+  // where you left off" card which module a session belonged to. Derive both
+  // from the topic (topic -> subject -> module) when the client didn't send
+  // them; explicit values from the client still win.
+  let { moduleId, subjectId } = data;
+  if (data.topicId != null && (moduleId == null || subjectId == null)) {
+    const [placement] = await db
+      .select({ subjectId: topicsTable.subjectId, moduleId: subjectsTable.moduleId })
+      .from(topicsTable)
+      .innerJoin(subjectsTable, eq(topicsTable.subjectId, subjectsTable.id))
+      .where(eq(topicsTable.id, data.topicId));
+    if (placement) { subjectId ??= placement.subjectId; moduleId ??= placement.moduleId; }
+  }
+
   const [attempt] = await db
     .insert(practiceAttemptsTable)
     .values({
-      userId: req.user!.id, moduleId: data.moduleId, subjectId: data.subjectId, topicId: data.topicId,
+      userId: req.user!.id, moduleId, subjectId, topicId: data.topicId,
       mode: data.mode ?? "untimed", totalQuestions: data.answers.length, correctCount, scorePercent,
       startedAt, completedAt,
     })
@@ -128,6 +143,8 @@ router.get("/student/analytics", requireAuth, async (req, res): Promise<void> =>
 // dip actually shows up.
 // ---------------------------------------------------------------------------
 
+const DAILY_WINDOW_DAYS = 7;
+
 function weightedAverage(attempts: { totalQuestions: number; correctCount: number }[]): number | null {
   const totalQuestions = attempts.reduce((sum, a) => sum + a.totalQuestions, 0);
   if (!totalQuestions) return null;
@@ -163,6 +180,37 @@ router.get("/student/progress", requireAuth, async (req, res): Promise<void> => 
 
   const history = allAttempts.slice(0, 10).reverse().map((a) => ({ date: (a.completedAt ?? a.createdAt).toISOString(), scorePercent: Number(a.scorePercent) }));
 
+  // One entry per calendar day for the last 7 days (oldest -> today), bucketed
+  // in the STUDENT's local day. The browser sends its own offset as
+  // `?tz=<Date.getTimezoneOffset()>` (minutes; UTC+5 => -300) — without it a
+  // student in Pakistan who practises at 1 a.m. would see that session on the
+  // "previous" day's bar. Missing/invalid => UTC. `history` above is kept as-is
+  // for existing consumers; the dashboard chart uses `daily` because ten
+  // per-session bars with one-letter weekday labels ("W W T T T T F F S S")
+  // can't tell you WHICH Saturday or how many sessions a day had.
+  const tzRaw = Number(req.query.tz);
+  const tzOffsetMin = Number.isFinite(tzRaw) ? Math.max(-840, Math.min(840, Math.trunc(tzRaw))) : 0;
+  const localDayKey = (t: Date) => new Date(t.getTime() - tzOffsetMin * 60_000).toISOString().slice(0, 10);
+  const todayKey = localDayKey(now);
+  const dayKeys: string[] = [];
+  for (let i = DAILY_WINDOW_DAYS - 1; i >= 0; i--) {
+    const d = new Date(`${todayKey}T00:00:00.000Z`);
+    d.setUTCDate(d.getUTCDate() - i);
+    dayKeys.push(d.toISOString().slice(0, 10));
+  }
+  const buckets = new Map(dayKeys.map((k) => [k, { sessions: 0, questions: 0, correct: 0 }]));
+  for (const a of allAttempts) {
+    const bucket = buckets.get(localDayKey(a.completedAt ?? a.createdAt));
+    if (!bucket) continue;
+    bucket.sessions += 1;
+    bucket.questions += a.totalQuestions;
+    bucket.correct += a.correctCount;
+  }
+  const daily = dayKeys.map((date) => {
+    const b = buckets.get(date)!;
+    return { date, sessions: b.sessions, questions: b.questions, scorePercent: b.questions ? Number(((b.correct / b.questions) * 100).toFixed(1)) : null };
+  });
+
   res.json({
     recentAverage: recentAverage != null ? Number(recentAverage.toFixed(1)) : null,
     priorAverage: priorAverage != null ? Number(priorAverage.toFixed(1)) : null,
@@ -170,6 +218,7 @@ router.get("/student/progress", requireAuth, async (req, res): Promise<void> => 
     trendDelta,
     recentSessions: recentAttempts.length,
     history,
+    daily,
     currentStreak: liveStreak(user).current,
     longestStreak: liveStreak(user).longest,
   });
