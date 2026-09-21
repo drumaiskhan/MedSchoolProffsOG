@@ -1,11 +1,11 @@
 import { Router, type IRouter } from "express";
-import { and, asc, desc, eq, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
 import {
   db, practiceAttemptsTable, practiceAnswersTable, mcqsTable, usersTable, subjectsTable, topicsTable, modulesTable,
-  pastPapersTable, examsTable, examAttemptsTable,
+  pastPapersTable, examsTable, examAttemptsTable, blocksTable,
 } from "@workspace/db";
 import { requireAuth, isAdminRole } from "../middlewares/auth";
-import { getStudentTargeting, getVisibleModuleIds } from "../lib/contentVisibility";
+import { getStudentTargeting, getVisibleBlockIds, getVisibleModuleIds, isTargetVisible } from "../lib/contentVisibility";
 import { resolveFileUrl, THUMBNAIL_TRANSFORM } from "../lib/storage";
 import { liveStreak } from "../lib/streak";
 
@@ -374,6 +374,76 @@ router.get("/student/continue-learning", requireAuth, async (req, res): Promise<
   const upNext = [...candidates.filter((m) => m.progress > 0), ...candidates.filter((m) => m.progress === 0)].slice(0, UP_NEXT_LIMIT);
 
   res.json({ resume, upNext });
+});
+
+// ---------------------------------------------------------------------------
+// GET /student/search?q= — powers the header search palette. The palette used
+// to filter only the sidebar's page names while its placeholder promised
+// "Search modules, topics, MCQs…". This searches real content, and only what
+// THIS student may open: same program/year targeting as the module, block,
+// exam and past-paper lists. MCQ text is deliberately not searched — question
+// stems are the paid product, and a search box shouldn't leak them to lapsed
+// or trial students.
+//
+// At least 2 characters (a single letter matches nearly every row), each group
+// capped at SEARCH_LIMIT and queried independently so one slow table can't
+// hold up the others. LIKE wildcards in the query are escaped so "50%" or
+// "a_b" search for those characters literally.
+// ---------------------------------------------------------------------------
+
+const SEARCH_LIMIT = 5;
+const SEARCH_MIN_CHARS = 2;
+const SEARCH_MAX_CHARS = 60;
+/** Exams / past papers are filtered by targeting in JS after the query, so over-fetch a little before slicing. */
+const SEARCH_OVERFETCH = SEARCH_LIMIT * 3;
+
+interface SearchHit { id: number; title: string; subtitle?: string; moduleId?: number; subjectId?: number }
+const EMPTY_SEARCH = { blocks: [], modules: [], subjects: [], topics: [], exams: [], pastPapers: [] };
+
+router.get("/student/search", requireAuth, async (req, res): Promise<void> => {
+  const raw = typeof req.query.q === "string" ? req.query.q.trim().slice(0, SEARCH_MAX_CHARS) : "";
+  if (raw.length < SEARCH_MIN_CHARS) { res.json(EMPTY_SEARCH); return; }
+  const like = `%${raw.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+
+  const admin = isAdminRole(req.user!.role);
+  const targeting = await getStudentTargeting(req.user!.id);
+  const [visibleModuleIds, visibleBlockIds] = admin ? [null, null] : await Promise.all([getVisibleModuleIds(targeting), getVisibleBlockIds(targeting)]);
+  const modulesScope = visibleModuleIds ? (visibleModuleIds.length ? inArray(modulesTable.id, visibleModuleIds) : sql`false`) : undefined;
+
+  const [blocks, modules, subjects, topics, exams, papers] = await Promise.all([
+    visibleBlockIds && !visibleBlockIds.length ? Promise.resolve([]) :
+      db.select({ id: blocksTable.id, name: blocksTable.name, subtitle: blocksTable.subtitle }).from(blocksTable)
+        .where(and(eq(blocksTable.active, true), eq(blocksTable.archived, false), ilike(blocksTable.name, like), visibleBlockIds ? inArray(blocksTable.id, visibleBlockIds) : undefined))
+        .orderBy(asc(blocksTable.displayOrder)).limit(SEARCH_LIMIT),
+    db.select({ id: modulesTable.id, name: modulesTable.name, subtitle: modulesTable.subtitle }).from(modulesTable)
+      .where(and(eq(modulesTable.active, true), eq(modulesTable.archived, false), ilike(modulesTable.name, like), modulesScope))
+      .orderBy(asc(modulesTable.displayOrder)).limit(SEARCH_LIMIT),
+    db.select({ id: subjectsTable.id, name: subjectsTable.name, moduleId: subjectsTable.moduleId, moduleName: modulesTable.name }).from(subjectsTable)
+      .innerJoin(modulesTable, eq(subjectsTable.moduleId, modulesTable.id))
+      .where(and(eq(subjectsTable.active, true), eq(subjectsTable.archived, false), eq(modulesTable.active, true), eq(modulesTable.archived, false), ilike(subjectsTable.name, like), modulesScope))
+      .limit(SEARCH_LIMIT),
+    db.select({ id: topicsTable.id, name: topicsTable.name, subjectId: topicsTable.subjectId, subjectName: subjectsTable.name, moduleId: subjectsTable.moduleId }).from(topicsTable)
+      .innerJoin(subjectsTable, eq(topicsTable.subjectId, subjectsTable.id))
+      .innerJoin(modulesTable, eq(subjectsTable.moduleId, modulesTable.id))
+      .where(and(eq(topicsTable.active, true), eq(topicsTable.archived, false), eq(subjectsTable.active, true), eq(subjectsTable.archived, false), eq(modulesTable.active, true), eq(modulesTable.archived, false), ilike(topicsTable.name, like), modulesScope))
+      .limit(SEARCH_LIMIT),
+    db.select({ id: examsTable.id, title: examsTable.title, programTargetKind: examsTable.programTargetKind, yearTargetNumber: examsTable.yearTargetNumber }).from(examsTable)
+      .where(and(eq(examsTable.status, "published"), ilike(examsTable.title, like))).limit(SEARCH_OVERFETCH),
+    db.select({ id: pastPapersTable.id, title: pastPapersTable.title, programTargetKind: pastPapersTable.programTargetKind, yearTargetNumber: pastPapersTable.yearTargetNumber }).from(pastPapersTable)
+      .where(and(eq(pastPapersTable.active, true), eq(pastPapersTable.archived, false), ilike(pastPapersTable.title, like))).limit(SEARCH_OVERFETCH),
+  ]);
+
+  const visible = <T extends { programTargetKind: string | null; yearTargetNumber: number | null }>(rows: T[]) =>
+    (admin ? rows : rows.filter((r) => isTargetVisible(r.programTargetKind, r.yearTargetNumber, targeting))).slice(0, SEARCH_LIMIT);
+
+  res.json({
+    blocks: blocks.map<SearchHit>((b) => ({ id: b.id, title: b.name, subtitle: b.subtitle || undefined })),
+    modules: modules.map<SearchHit>((m) => ({ id: m.id, title: m.name, subtitle: m.subtitle || undefined })),
+    subjects: subjects.map<SearchHit>((s) => ({ id: s.id, title: s.name, subtitle: s.moduleName, moduleId: s.moduleId })),
+    topics: topics.map<SearchHit>((t) => ({ id: t.id, title: t.name, subtitle: t.subjectName, subjectId: t.subjectId, moduleId: t.moduleId })),
+    exams: visible(exams).map<SearchHit>((e) => ({ id: e.id, title: e.title })),
+    pastPapers: visible(papers).map<SearchHit>((p) => ({ id: p.id, title: p.title })),
+  });
 });
 
 export default router;

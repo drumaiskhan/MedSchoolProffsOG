@@ -32,6 +32,8 @@ import type {
   Student, Subject, Topic, User
 } from '@workspace/api-client-react';
 import { ErrorBoundary } from '@/components/error-boundary';
+import { CommandPalette, type PalettePage } from '@/components/search/CommandPalette';
+import { BlockPoster, ModulePoster } from '@/components/blocks/BlockCards';
 import { Toaster } from '@/components/ui/toaster';
 import { toast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -355,13 +357,24 @@ export function MobileTabBar({ user, onMore }: { user: User; onMore: () => void 
   </nav>;
 }
 
+// Hues for the glossy page tiles in the search palette (one per nav destination).
+const NAV_HUE: Record<string, number> = {
+  '/dashboard': 214, '/progress': 228, '/blocks': 205, '/exams': 4, '/past-papers': 22, '/flashcards': 268, '/ai-visualizer': 290, '/books': 38,
+  '/notebook': 172, '/saved-sessions': 190, '/flagged-mcqs': 350, '/leaderboard': 45, '/challenge': 12,
+  '/payments': 152, '/notifications': 200, '/feedback': 160, '/profile': 240,
+};
+const NAV_HUE_FALLBACK = 214;
+
+/** Header search. Thin wrapper: works out which pages this student can see/open, the palette does the rest. */
 export function QuickJump({ open, value, onChange, onClose }: { open: boolean; value: string; onChange: (value: string) => void; onClose: () => void }) {
-  if (!open) return null;
-  const options = navGroups.flatMap((group) => group.items.map(([href, label, Icon]) => ({ href, label, Icon }))).filter((item) => item.label.toLowerCase().includes(value.toLowerCase()));
-  return <div className="absolute right-5 top-[58px] z-30 w-[min(360px,calc(100vw-2.5rem))] overflow-hidden rounded-xl border border-border bg-card shadow-xl md:right-10" data-testid="panel-quick-jump">
-    <div className="border-b border-border/70 p-2"><div className="flex items-center gap-2 rounded-lg bg-muted/70 px-2.5"><Search size={14} className="text-muted-foreground" /><input autoFocus value={value} onChange={(event) => onChange(event.target.value)} placeholder="Jump to a study area" className="h-9 min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground" data-testid="input-quick-jump" /><button onClick={onClose} className="rounded p-1 text-muted-foreground hover:bg-card" data-testid="button-close-quick-jump"><X size={14} /></button></div></div>
-    <div className="max-h-72 overflow-y-auto p-1.5">{options.length ? options.map(({ href, label, Icon }) => <Link key={href} href={href} onClick={onClose} className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-xs font-semibold text-foreground hover:bg-muted" data-testid={`link-quick-jump-${label.toLowerCase().replaceAll(' ', '-')}`}><span className="grid size-7 place-items-center rounded-md bg-secondary text-primary"><Icon size={14} /></span>{label}<ChevronRight size={13} className="ml-auto text-muted-foreground" /></Link>) : <div className="px-3 py-5 text-center text-xs text-muted-foreground">No study areas match that search.</div>}</div>
-  </div>;
+  const siteContentQ = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get });
+  const userQ = useGetCurrentUser();
+  const isLocked = useNavLocks(userQ.data as Pick<User, 'role'> | undefined);
+  const aiVisualizerEnabled = siteContentQ.data?.AI_VISUALIZER_ENABLED !== 'false';
+  const pages: PalettePage[] = navGroups.flatMap((group) => group.items)
+    .filter(([href]) => aiVisualizerEnabled || href !== '/ai-visualizer')
+    .map(([href, label, Icon]) => ({ href, label, icon: Icon, hue: NAV_HUE[href] ?? NAV_HUE_FALLBACK, locked: isLocked(href) }));
+  return <CommandPalette open={open} value={value} onChange={onChange} onClose={onClose} pages={pages} />;
 }
 
 // "Focus mode" — hides the sidebar/collapses it to a slim exit bar during an
@@ -658,7 +671,7 @@ export function Shell({ children }: { children: ReactNode }) {
       </div>}
       {focusMode
         ? <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border/70 bg-background/90 px-4 backdrop-blur-md md:px-8">{strictFocusMode ? <span className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold text-muted-foreground" data-testid="text-exam-locked"><LockKeyhole size={13} /> Exam in progress</span> : <button onClick={() => setLocation('/dashboard')} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-bold text-muted-foreground hover:bg-muted" data-testid="button-exit-focus-mode"><ArrowLeft size={15} /> Exit</button>}<span className="text-xs font-bold capitalize text-foreground">{title}</span></header>
-        : <header className="student-header sticky top-0 z-20 flex h-[68px] items-center justify-between border-b border-border/70 bg-background/90 px-4 backdrop-blur-md md:px-8"><div className="flex min-w-0 items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} aria-label="Open menu" data-testid="button-open-menu"><Menu size={20} /></button><div className="min-w-0"><div className="font-mono-app whitespace-nowrap text-[9px] uppercase tracking-[.16em] text-muted-foreground"><span className="hidden md:inline">{todayLong}</span><span className="md:hidden">{todayShort}</span></div><h1 className="mt-1 truncate text-[17px] font-extrabold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="relative flex items-center gap-2"><button onClick={() => { setQuickJumpOpen((current) => !current); setQuickJumpValue(''); }} className="hidden h-9 w-[220px] items-center gap-2 rounded-xl border border-border bg-card px-3 text-left text-[11px] text-muted-foreground shadow-sm hover:border-primary/50 sm:flex md:w-[340px]" data-testid="button-open-quick-jump"><Search size={14} /><span className="truncate">Search modules, topics, MCQs...</span><span className="ml-auto rounded border border-border px-1 text-[9px]">⌘K</span></button><button onClick={() => { setQuickJumpOpen((current) => !current); setQuickJumpValue(''); }} className="grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted sm:hidden" aria-label="Search" data-testid="button-open-quick-jump-mobile"><Search size={16} /></button><Link href="/notifications" className="relative grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label="Notifications" data-testid="link-notifications"><Bell size={16} />{headerUnread > 0 && <span className="absolute -right-1 -top-1 grid min-w-4 place-items-center rounded-full bg-[#e5a952] px-1 text-[9px] font-bold leading-4 text-[#183844] ring-2 ring-background" data-testid="badge-header-unread">{headerUnread > 9 ? '9+' : headerUnread}</span>}</Link><Link href="/profile" className="ml-1 grid size-9 place-items-center rounded-full bg-[#cdebf0] text-[11px] font-extrabold text-[#0d5267] ring-2 ring-transparent transition-shadow hover:ring-primary/30" aria-label="Profile" data-testid="link-header-profile">{initials(user.name)}</Link><QuickJump open={quickJumpOpen} value={quickJumpValue} onChange={setQuickJumpValue} onClose={() => setQuickJumpOpen(false)} /></div></header>}
+        : <header className="student-header sticky top-0 z-20 flex h-[68px] items-center justify-between border-b border-border/70 bg-background/90 px-4 backdrop-blur-md md:px-8"><div className="flex min-w-0 items-center gap-3"><button className="rounded-lg p-2 hover:bg-muted md:hidden" onClick={() => setMenuOpen(true)} aria-label="Open menu" data-testid="button-open-menu"><Menu size={20} /></button><div className="min-w-0"><div className="font-mono-app whitespace-nowrap text-[9px] uppercase tracking-[.16em] text-muted-foreground"><span className="hidden md:inline">{todayLong}</span><span className="md:hidden">{todayShort}</span></div><h1 className="mt-1 truncate text-[17px] font-extrabold capitalize tracking-[-.02em] text-foreground">{title}</h1></div></div><div className="relative flex items-center gap-2"><button onClick={() => { setQuickJumpOpen((current) => !current); setQuickJumpValue(''); }} className="hidden h-9 w-[220px] items-center gap-2 rounded-xl border border-border bg-card px-3 text-left text-[11px] text-muted-foreground shadow-sm hover:border-primary/50 sm:flex md:w-[340px]" data-testid="button-open-quick-jump"><Search size={14} /><span className="truncate">Search modules, topics, exams…</span><span className="ml-auto rounded border border-border px-1 text-[9px]">⌘K</span></button><button onClick={() => { setQuickJumpOpen((current) => !current); setQuickJumpValue(''); }} className="grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted sm:hidden" aria-label="Search" data-testid="button-open-quick-jump-mobile"><Search size={16} /></button><Link href="/notifications" className="relative grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label="Notifications" data-testid="link-notifications"><Bell size={16} />{headerUnread > 0 && <span className="absolute -right-1 -top-1 grid min-w-4 place-items-center rounded-full bg-[#e5a952] px-1 text-[9px] font-bold leading-4 text-[#183844] ring-2 ring-background" data-testid="badge-header-unread">{headerUnread > 9 ? '9+' : headerUnread}</span>}</Link><Link href="/profile" className="ml-1 grid size-9 place-items-center rounded-full bg-[#cdebf0] text-[11px] font-extrabold text-[#0d5267] ring-2 ring-transparent transition-shadow hover:ring-primary/30" aria-label="Profile" data-testid="link-header-profile">{initials(user.name)}</Link><QuickJump open={quickJumpOpen} value={quickJumpValue} onChange={setQuickJumpValue} onClose={() => setQuickJumpOpen(false)} /></div></header>}
       <div className={cn('page-enter student-content', focusMode ? 'px-5 py-6 md:px-10 md:py-8' : 'mx-auto w-full max-w-[1320px] px-4 py-6 pb-28 md:px-8 md:py-9')}>{children}</div>
       {!focusMode && <MobileTabBar user={user} onMore={() => setMenuOpen(true)} />}
     </main>
@@ -793,20 +806,7 @@ export function greetingForHour(hour: number): string {
 }
 
 export function ModuleCard({ m, i }: { m: Module; i: number }) {
-  const iconUrl = (m as Module & { iconUrl?: string | null }).iconUrl;
-  if (iconUrl) {
-    return <Link href={`/modules/${m.id}`} key={m.id} className="card-lift group relative flex min-h-[220px] flex-col justify-end overflow-hidden rounded-2xl border border-border bg-card p-6 text-white" data-testid={`card-module-${m.id}`}>
-      <img src={iconUrl} alt="" loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover transition-transform duration-300 group-hover:scale-105" />
-      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/25 to-transparent" />
-      <div className="relative">
-        <h3 className="text-lg font-extrabold tracking-[-.03em] drop-shadow-sm">{m.name}</h3>
-        <div className="mt-2 flex items-center justify-between text-[11px] text-white/85"><span>{m.subjectCount} subject{m.subjectCount === 1 ? '' : 's'} · {m.mcqCount} question{m.mcqCount === 1 ? '' : 's'}</span><span className="font-mono-app text-white">{m.progress}%</span></div>
-        <div className="mt-2"><Progress value={m.progress} color={i % 2 ? 'bg-[#e5a952]' : 'bg-primary'} /></div>
-      </div>
-    </Link>;
-  }
-  const c = MODULE_TILE_COLORS[i % MODULE_TILE_COLORS.length];
-  return <Link href={`/modules/${m.id}`} key={m.id} className="card-lift group rounded-2xl border border-border bg-card p-6" data-testid={`card-module-${m.id}`}><div className="flex items-start justify-between">{resolveSubjectIcon(m.name).matched ? <SubjectIcon name={m.name} size="md" /> : <div className={cn('grid size-11 place-items-center rounded-xl', c.bg, c.fg)}><BookOpen size={20} /></div>}<ChevronRight size={18} className="text-muted-foreground transition-transform group-hover:translate-x-0.5" /></div><h3 className="mt-6 text-lg font-extrabold tracking-[-.03em]">{m.name}</h3><p className="mt-1 text-xs text-muted-foreground">{m.subtitle}</p><div className="mt-7 flex items-center justify-between text-[11px] text-muted-foreground"><span>{m.subjectCount} subject{m.subjectCount === 1 ? '' : 's'} · {m.mcqCount} question{m.mcqCount === 1 ? '' : 's'}</span><span className="font-mono-app text-foreground">{m.progress}%</span></div><div className="mt-2"><Progress value={m.progress} color={i % 2 ? 'bg-[#e5a952]' : 'bg-primary'} /></div><div className="mt-5 flex items-center gap-1 text-xs font-bold text-primary opacity-80 group-hover:opacity-100">Open module <ArrowRight size={14} /></div></Link>;
+  return <ModulePoster id={m.id} name={m.name} subtitle={m.subtitle} iconUrl={(m as Module & { iconUrl?: string | null }).iconUrl} subjectCount={m.subjectCount} mcqCount={m.mcqCount} progress={m.progress} index={i} />;
 }
 
 // Round 3, item 6: Blocks becomes the primary top-level nav item (sidebar
@@ -840,14 +840,7 @@ export function useModulesGrouping() {
 // than the old small icon-tile + label row.
 
 export function BlockHeroCard({ href, name, iconUrl, moduleCount, muted }: { href: string; name: string; iconUrl?: string | null; moduleCount: number; muted?: boolean }) {
-  return <Link href={href} className="card-lift group relative flex min-h-[180px] flex-col justify-end overflow-hidden rounded-3xl border border-border bg-card p-6 text-white" data-testid={`card-block-${href.split('/').pop()}`}>
-    {iconUrl ? <img src={iconUrl} alt="" loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover transition-transform duration-300 group-hover:scale-105" /> : <div className={cn('absolute inset-0', muted ? 'bg-muted-foreground/30' : 'bg-gradient-to-br from-[#287058] to-[#164b4b]')} />}
-    <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/20 to-transparent" />
-    <div className="relative">
-      <h3 className="font-display text-2xl tracking-[-.02em] drop-shadow-sm">{name}</h3>
-      <div className="mt-2 flex items-center justify-between text-xs text-white/85"><span>{moduleCount} module{moduleCount === 1 ? '' : 's'}</span><ArrowRight size={16} className="transition-transform group-hover:translate-x-0.5" /></div>
-    </div>
-  </Link>;
+  return <BlockPoster href={href} name={name} iconUrl={iconUrl} moduleCount={moduleCount} muted={muted} />;
 }
 
 export function topicColorVar(key: string): string {

@@ -478,6 +478,9 @@ export const feedbackApi = {
   reply: (id: number, message: string) => request<FeedbackReply>(`/feedback/${id}/replies`, { method: 'POST', body: JSON.stringify({ message }) }),
 };
 
+/** One row in the header search palette (GET /student/search). Only content this student may open. */
+export interface SearchHit { id: number; title: string; subtitle?: string; moduleId?: number; subjectId?: number }
+export interface SearchResults { blocks: SearchHit[]; modules: SearchHit[]; subjects: SearchHit[]; topics: SearchHit[]; exams: SearchHit[]; pastPapers: SearchHit[] }
 export interface ProgressDay { date: string; sessions: number; questions: number; scorePercent: number | null }
 export interface ProgressTrend { recentAverage: number | null; priorAverage: number | null; trend: 'up' | 'down' | 'flat' | 'new'; trendDelta: number; recentSessions: number; history: Array<{ date: string; scorePercent: number }>;
   /** Last 7 calendar days in the student's local time, oldest -> today. Optional so an older API build still renders. */
@@ -580,3 +583,6 @@ export const aiVisualizerApi = {
   explainStep: (overallTitle: string, stepTitle: string, stepDescription: string) =>
     request<{ explanation: string }>('/ai/visualizer/explain-step', { method: 'POST', body: JSON.stringify({ overallTitle, stepTitle, stepDescription }) }),
 };
+
+/** Header search palette. */
+export const searchApi = { query: (q: string) => request<SearchResults>(`/student/search?q=${encodeURIComponent(q)}`) };

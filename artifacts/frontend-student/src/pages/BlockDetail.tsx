@@ -52,7 +52,8 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // invalidateQueries after a save) already set their own options, which
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
-import { EmptyState, ModuleCard, SectionHeader, SkeletonPage, useModulesGrouping, usePageTitle } from '@/lib/shared';
+import { EmptyState, SkeletonPage, useModulesGrouping, usePageTitle } from '@/lib/shared';
+import { CurriculumBanner, ModulePoster, weightedProgress } from '@/components/blocks/BlockCards';
 
 function BlockDetail() {
   const params = useParams<{ id: string }>();
@@ -64,11 +65,18 @@ function BlockDetail() {
   // numeric route id ("Blocks / 4") that the default path-derived title falls
   // back to — see usePageTitle / PageTitleContext above.
   usePageTitle(isOther ? 'Blocks / Other modules' : (block ? `Blocks / ${block.name}` : (isLoading ? undefined : 'Blocks')));
-  return <>{isLoading ? <SkeletonPage /> : <div>
-    <SectionHeader eyebrow="Curriculum map" title={isOther ? 'Other modules' : (block?.name ?? 'Block')} action={<Link href="/blocks" className="text-xs font-bold text-primary" data-testid="link-back-blocks"><ArrowLeft size={13} className="mr-1 inline" /> Blocks</Link>} />
-    <div className="grid gap-4 md:grid-cols-2">{list.map((m, i) => <ModuleCard key={m.id} m={m} i={i} />)}</div>
+  if (isLoading) return <SkeletonPage />;
+  const title = isOther ? 'Other modules' : (block?.name ?? 'Block');
+  const questions = list.reduce((n, m) => n + m.mcqCount, 0);
+  return <div className="bk-page" data-testid="page-block-detail">
+    <CurriculumBanner eyebrow="Curriculum map" title={title} description={block?.subtitle || undefined} coverUrl={block?.iconUrl} progress={weightedProgress(list)}
+      back={{ href: '/blocks', label: 'Blocks', testId: 'link-back-blocks' }}
+      stats={[{ label: list.length === 1 ? 'Module' : 'Modules', value: list.length }, { label: 'Subjects', value: list.reduce((n, m) => n + m.subjectCount, 0) }, { label: 'Questions', value: questions }]} />
+    <div className="bk-grid bk-grid--modules">
+      {list.map((m, i) => <ModulePoster key={m.id} index={i} id={m.id} name={m.name} subtitle={m.subtitle} iconUrl={(m as typeof m & { iconUrl?: string | null }).iconUrl} subjectCount={m.subjectCount} mcqCount={m.mcqCount} progress={m.progress} />)}
+    </div>
     {!list.length && <EmptyState icon={BookOpen} title="No modules yet" body="Your academic team hasn't published any modules in this block yet." />}
-  </div>}</>;
+  </div>;
 }
 
 // Kept working as a redirect (item 6: "keep /modules working as a redirect

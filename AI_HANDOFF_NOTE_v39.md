@@ -36,3 +36,23 @@ New `components/dashboard/` (DashHero, DashCards, dash-utils) + `.dash-*` CSS in
 - "Everything 3D" beyond the dashboard = shared primitives only (Progress bar, shell). Other pages were not redesigned.
 - Streak logic still counts UTC days (unchanged); the chart uses local days, so a late-night session can sit on a different day than the streak coins.
 - `POST /practice-sessions` still selects all MCQs to score a session (`db.select().from(mcqsTable)`); should be `inArray(mcqsTable.id, ids)`.
+
+---
+# v40 addendum — search palette + Blocks/Modules redesign
+Same constraint: NO real 3D transforms (v34/v37). Depth = gradients, layered shadows, overlapping plates, pointer glare (mouse only), plain 2D motion; reduced-motion switches it off (`.cp-*`, `.bk-*` at the end of index.css).
+
+## Search (header / Dashboard "Search" tile / ⌘K)
+- `components/search/CommandPalette.tsx` replaces the old QuickJump dropdown (`QuickJump` in lib/shared.tsx is now a thin wrapper that computes pages + trial locks). It renders in a **portal** — the header has backdrop-filter, which would make it the containing block of a fixed panel.
+- Old problems: only filtered sidebar page names (placeholder promised topics/MCQs), dark tiles with near-invisible icons, and the global `input:focus-visible` outline drew a box inside the pill (`.cp-input` now uses `!important` to beat that unlayered rule), list cut off by the phone keyboard (panel height follows `visualViewport`).
+- New `GET /student/search?q=` (routes/student-progress.ts): blocks, modules, subjects, topics, exams, past papers, restricted to what the student may open (same program/year targeting as the lists). ≥2 chars, 5 per group, LIKE wildcards escaped. **MCQ text is deliberately not searched** (question stems are the paid content). Uses `ilike` (Postgres) like the rest of the codebase — relevant if the MySQL port is ever done.
+- Empty state: resume-where-you-left-off (shared `['continue-learning']` query), recent searches (localStorage, try/catch), jump-to pages as glossy hue tiles. Keys: ↑ ↓ Enter Esc; phone "go" key opens the highlighted row. Locked (trial) pages show a lock and go to /payments.
+- Not verified: real lucide icons (harness used placeholder glyphs), real API, real phone keyboard behaviour.
+
+## Blocks / Modules
+- `components/blocks/BlockCards.tsx`: `BlockPoster`, `ModulePoster`, `CurriculumBanner`, `weightedProgress`. Card = cover image untouched on top + raised plate overlapping its lower edge. This fixes the title colliding with text baked into the cover images (e.g. "THE CARDIOVASCULAR MODULE" under "CVS Module") and the white progress bar disappearing on the image.
+- `pages/Blocks.tsx` / `BlockDetail.tsx` rewritten around them (banner with animated stats; block page shows the block cover blurred behind + weighted overall progress ring). `ModuleCard` / `BlockHeroCard` in shared.tsx now delegate to the new components, so any other caller gets the new look.
+- Module state chip: Start / Continue / Completed from real progress; cover-less modules get a stable per-name hue + subject icon.
+- Verified only in headless Chromium with stub data at 360 and 1280 px (no horizontal overflow, no console errors).
+
+## Merge note (v42 applied onto "MedSchoolProffsOG-main")
+This tree already contained the v39 dashboard work; the v40 search palette + Blocks/Modules redesign were applied on top. package.json files (`@capacitor/privacy-screen ^1.1.4`, hover-card `^1.1.23`), `pnpm-lock.yaml` and the `lib/*/dist` folders of this tree were left exactly as provided. The new code adds no dependencies (uses react-dom `createPortal`, existing lucide-react ^0.545 icons).
