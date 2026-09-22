@@ -1,87 +1,104 @@
-// Auto-extracted route page — code-split via React.lazy() in App.tsx.
-import { type ReactNode, type ComponentProps, type TouchEvent, useState, useEffect, useRef, createContext, useContext } from 'react';
-import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, Route, Switch, useLocation, useParams, useSearch, Router as WouterRouter } from 'wouter';
+// Subjects (module → subjects) and Topics (subject → topics).
+// One route component, two views. v43: rebuilt on components/curriculum —
+// tilting 3D subject cards, a hero stage with progress, a learning-path topic
+// list, search/filter, and proper loading placeholders.
+import { useDeferredValue, useMemo, useState } from 'react';
+import { Link, useParams } from 'wouter';
+import { ArrowLeft, BookOpen, SearchX, Target } from 'lucide-react';
 import {
-  ArrowLeft, ArrowRight, BookOpen, Check, CheckCircle2, ChevronRight,
-  CircleHelp, Clock3, CreditCard, FileText, Flame, FolderOpen,
-  LayoutDashboard, Library, LockKeyhole, LogOut, Menu, MoreHorizontal, Pencil, Plus,
-  ReceiptText, Search, Settings, ShieldCheck, Sparkles, Stethoscope, Target, Trash2,
-  TrendingUp, TrendingDown, Minus, Users, X, Zap, Bell, SlidersHorizontal, FileStack, NotebookPen, Bookmark,
-  Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
-  GraduationCap, Eye, EyeOff, Smartphone, UploadCloud, ImageOff,
-  RotateCcw, ThumbsUp, ThumbsDown, CheckCheck, ClipboardCheck, AlertTriangle, Link2 as LinkIcon, Lightbulb,
-  LayoutGrid, Presentation, Wand2, Crown, Globe, Star, Activity
-} from 'lucide-react';
-import { applyThemeVars } from '@/lib/theme';
+  getListModulesQueryKey, getListSubjectsQueryKey, useListModules, useListSubjects, useListTopics,
+} from '@workspace/api-client-react';
+import { EmptyState, SectionHeader, usePageTitle } from '@/lib/shared';
 import {
-  getListMembershipPlansQueryKey, getListPaymentsQueryKey, getListMcqsQueryKey, getListModulesQueryKey, getListStudentsQueryKey, getListNotificationsQueryKey, getGetCurrentUserQueryKey,
-  useApprovePayment, useCreateMembershipPlan, useCreateMcq, useCreateModule, useGetAdminDashboard,
-  useGetCurrentUser, useGetStudentDashboard, useListFlashcards, useListMembershipPlans,
-  useListMcqs, useListModules, useListNotifications, useListPayments, useListResources,
-  useListStudents, useListSubjects, useListTopics, useRejectPayment,
-  useSubmitPayment, useUpdateMembershipPlan,
-} from '@workspace/api-client-react';
-import type {
-  AdminDashboard, Flashcard, Mcq, MembershipPlan, Module, Notification, Payment, Resource,
-  Student, Subject, Topic, User
-} from '@workspace/api-client-react';
-import { ErrorBoundary } from '@/components/error-boundary';
-import { Toaster } from '@/components/ui/toaster';
-import { toast } from '@/hooks/use-toast';
-import { useIsMobile } from '@/hooks/use-mobile';
-import { TooltipProvider } from '@/components/ui/tooltip';
-import NotFound from '@/pages/not-found';
-import { authApi, academicApi, settingsApi, uploadFile, resolveUploadUrl, ApiRequestError, publicApi, pastPapersApi, notebookApi, savedSessionsApi, flaggedMcqsApi, feedbackApi, type MyFeedbackEntry, analyticsApi, type ProgressTrend, mcqImportApi, studentsAdminApi, paymentsAdminApi, membershipPlansAdminApi, mcqAdminApi, notificationsApi, siteContentApi, teamApi, moduleAdminApi, blocksApi, type Block, examsAdminApi, examsApi, explanationsApi, booksApi, type AdminBookStudent, DEFAULT_IMPORT_PATTERNS, STUDENT_STATUSES, type Institution, type Program, type AcademicYear, type Batch, type PastPaper, type NotebookEntry, type SavedSession, type FlaggedMcq, type FeedbackEntry, type McqCandidate, type StudentDetail, type SiteContent, type TeamMember, TEAM_CATEGORIES, TEAM_CATEGORY_LABELS, type AdminModule, type AdminExam, type StudentExam, type ExamAttemptRow, type ExamStartResponse, type ExamResult, type Exam, type ExplanationStatus, type PaymentDetails, type PaymentMethodConfig, aiVisualizerApi, type VisualizationSpec, LeaderboardRow } from '@/lib/api';
-import { VisualizationRenderer, isStepBased } from '@/components/visualizer/VisualizationRenderer';
-import { StepControls } from '@/components/visualizer/StepControls';
-import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
+  CardsSkeleton, FilterBar, RowsSkeleton, SubjectCard, SubjectsHero, TopicRow, TopicSeg, TopicsHero,
+  type SubjectRow, type TopicFilter, type TopicItem,
+} from '@/components/curriculum/Curriculum';
 
-// Round 3, item 10 (performance) — this was `new QueryClient()` with no
-// options, meaning every query defaulted to `staleTime: 0` and refetched
-// on every component mount AND every window refocus. For a study app where
-// most data (modules, subjects, MCQs, progress) doesn't change
-// second-to-second, that's a real over-fetching cost on every navigation
-// and every alt-tab back to the app — exactly the "waterfalls/refetch on
-// every mount" pattern item 10 flagged as a likely culprit. A 30s
-// staleTime means switching between pages you've already visited in the
-// last 30s reuses cached data instead of re-hitting the API, and turning
-// off refetch-on-window-focus stops a background-tab refocus from firing
-// a full page's worth of requests. Individual queries that DO need to
-// react fast (the live leaderboard's refetchInterval, mutations that
-// invalidateQueries after a save) already set their own options, which
-// override these defaults per-query — this only changes the fallback for
-// queries that didn't specify anything.
-import { EmptyState, SectionHeader, cn, usePageTitle } from '@/lib/shared';
-import { SubjectIcon, SubjectWatermark } from '@/lib/subject-icons';
+const norm = (v: string) => v.trim().toLowerCase();
+/** Filters only kick in when a list is long enough for them to be useful. */
+const FILTER_MIN = 6;
+
+function TopicsView({ subjectId }: { subjectId?: number }) {
+  const topicQ = useListTopics(subjectId ? { subjectId } : undefined);
+  const topicsList: TopicItem[] = topicQ.data ?? [];
+  // The subject's name/icon isn't in the topics response — fetch the list
+  // (shares its cache with other pages) and look it up by id.
+  const allSubjectsQ = useListSubjects(undefined, { query: { enabled: subjectId != null, queryKey: getListSubjectsQueryKey() } });
+  const subjectRow = allSubjectsQ.data?.find((s) => s.id === subjectId) as SubjectRow | undefined;
+  const subjectName = subjectRow?.name;
+  usePageTitle(subjectId != null ? `Subjects / ${subjectName ?? '…'}` : undefined);
+
+  const [query, setQuery] = useState('');
+  const [seg, setSeg] = useState<TopicFilter>('all');
+  const deferredQuery = useDeferredValue(query);
+
+  const done = useMemo(() => topicsList.filter((t) => t.completed).length, [topicsList]);
+  const questions = useMemo(() => topicsList.reduce((sum, t) => sum + (t.questionCount || 0), 0), [topicsList]);
+  const next = useMemo(() => topicsList.find((t) => !t.completed) ?? null, [topicsList]);
+  const visible = useMemo(() => {
+    const q = norm(deferredQuery);
+    return topicsList.filter((t) => (seg === 'all' || (seg === 'done') === t.completed) && (!q || t.name.toLowerCase().includes(q)));
+  }, [topicsList, deferredQuery, seg]);
+  const loading = topicQ.isLoading;
+
+  return <div className="cu-page">
+    <SectionHeader eyebrow="Choose a topic" title="Topics" action={<Link href="/blocks" className="text-xs font-bold text-primary" data-testid="link-back-modules"><ArrowLeft size={13} className="mr-1 inline" /> Blocks</Link>} />
+    {subjectName
+      ? <TopicsHero name={subjectName} iconUrl={subjectRow?.iconUrl} total={topicsList.length} done={done} questions={questions} next={next} />
+      : subjectId != null && <div className="skeleton cu-skel-hero" aria-hidden="true" />}
+    {loading ? <RowsSkeleton /> : <>
+      {topicsList.length >= FILTER_MIN && <FilterBar query={query} onQuery={setQuery} placeholder="Search topics">
+        <TopicSeg value={seg} onChange={setSeg} counts={{ all: topicsList.length, todo: topicsList.length - done, done }} />
+      </FilterBar>}
+      {topicsList.length > 0 && visible.length > 0 && <ul className="cu-path" data-testid="list-topics">
+        {visible.map((t, i) => <TopicRow key={t.id} topic={t} index={i} isNext={t.id === next?.id} />)}
+      </ul>}
+      {topicsList.length > 0 && visible.length === 0 && <EmptyState icon={SearchX} title="No matching topics" body="Try a different word, or switch back to All." />}
+      {!topicsList.length && <EmptyState icon={Target} title="No topics yet" body="Your academic team hasn't published topics for this subject yet." />}
+    </>}
+  </div>;
+}
+
+function SubjectsView({ moduleId }: { moduleId?: number }) {
+  const subjectQ = useListSubjects(moduleId ? { moduleId } : undefined);
+  const subjects: SubjectRow[] = (subjectQ.data as SubjectRow[] | undefined) ?? [];
+  const modulesQ = useListModules(undefined, { query: { enabled: moduleId != null, queryKey: getListModulesQueryKey() } });
+  const moduleName = modulesQ.data?.find((m) => m.id === moduleId)?.name;
+  usePageTitle(moduleId != null ? `Modules / ${moduleName ?? '…'}` : undefined);
+
+  const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
+  const totalTopics = useMemo(() => subjects.reduce((sum, s) => sum + (s.topicCount || 0), 0), [subjects]);
+  const visible = useMemo(() => {
+    const q = norm(deferredQuery);
+    return q ? subjects.filter((s) => s.name.toLowerCase().includes(q)) : subjects;
+  }, [subjects, deferredQuery]);
+  const loading = subjectQ.isLoading;
+
+  return <div className="cu-page">
+    <SectionHeader eyebrow="Curriculum map" title="Subjects" action={<Link href="/blocks" className="text-xs font-bold text-primary" data-testid="link-subjects-back"><ArrowLeft size={13} className="mr-1 inline" /> Blocks</Link>} />
+    {!loading && subjects.length > 0 && <SubjectsHero title={moduleName ?? (moduleId != null ? 'This module' : 'All subjects')} subjects={subjects} totalTopics={totalTopics} />}
+    {loading ? <CardsSkeleton /> : <>
+      {subjects.length >= FILTER_MIN && <FilterBar query={query} onQuery={setQuery} placeholder="Search subjects" />}
+      {visible.length > 0 && <div className="cu-grid-cards" data-testid="grid-subjects">
+        {visible.map((s, i) => <SubjectCard key={s.id} subject={s} index={i} />)}
+      </div>}
+      {subjects.length > 0 && visible.length === 0 && <EmptyState icon={SearchX} title="No matching subjects" body="Try a different word." />}
+      {!subjects.length && <EmptyState icon={BookOpen} title="No subjects yet" body="Your academic team hasn't published subjects for this module yet." />}
+    </>}
+  </div>;
+}
 
 function Subjects({ topics = false }: { topics?: boolean }) {
   const params = useParams<{ id?: string }>();
-  // On /subjects/:id the :id in the URL is a subject id (topics view); on
-  // /modules/:id it's a module id (subjects view). Same component, two roles.
+  // On /subjects/:id the :id is a subject id (topics view); on /modules/:id
+  // it's a module id (subjects view). The same route element is reused by the
+  // router, so each view is keyed — its filter/search state must not leak from
+  // one subject (or from Subjects into Topics) into the next.
   const routeId = Number(params.id) || undefined;
-  const moduleId = !topics ? routeId : undefined;
-  const subjectId = topics ? routeId : undefined;
-  const subjectQ = useListSubjects(moduleId ? { moduleId } : undefined);
-  const topicQ = useListTopics(subjectId ? { subjectId } : undefined);
-  const subjects: Subject[] = subjectQ.data ?? [];
-  const topicsList: Topic[] = topicQ.data ?? [];
-  // Friendly header breadcrumbs ("Modules / Foundation I", "Subjects / Anatomy")
-  // instead of the raw numeric route id ("Modules / 13", "Subjects / 7") that
-  // the default path-derived title falls back to. The module/subject name
-  // isn't in the topics/subjects response we already have for this route, so
-  // fetch the unfiltered list (shares its cache with other pages) and look
-  // the name up by id — see usePageTitle / PageTitleContext above.
-  const modulesQ = useListModules(undefined, { query: { enabled: !topics && moduleId != null } });
-  const moduleName = !topics ? modulesQ.data?.find((m) => m.id === moduleId)?.name : undefined;
-  const allSubjectsQ = useListSubjects(undefined, { query: { enabled: topics && subjectId != null } });
-  const subjectRow = topics ? allSubjectsQ.data?.find((s) => s.id === subjectId) : undefined;
-  const subjectName = subjectRow?.name;
-  usePageTitle(topics
-    ? (subjectId != null ? `Subjects / ${subjectName ?? '…'}` : undefined)
-    : (moduleId != null ? `Modules / ${moduleName ?? '…'}` : undefined));
-  if (topics) return <div><SectionHeader eyebrow="Choose a topic" title="Topics" action={<Link href="/blocks" className="text-xs font-bold text-primary" data-testid="link-back-modules"><ArrowLeft size={13} className="mr-1 inline" /> Blocks</Link>} />{subjectName && <div className="relative mb-5 flex items-center gap-4 overflow-hidden rounded-2xl border border-border bg-card p-4" data-testid="banner-subject"><SubjectWatermark name={subjectName} className="-bottom-6 -right-4" /><SubjectIcon name={subjectName} iconUrl={subjectRow?.iconUrl} size="lg" /><div className="relative min-w-0"><div className="truncate font-display text-2xl leading-tight">{subjectName}</div><div className="mt-1 text-xs text-muted-foreground">{topicsList.length} topic{topicsList.length === 1 ? '' : 's'} · pick one to start practising</div></div></div>}<div className="space-y-3">{topicsList.map((t) => <Link href={`/practice?topic=${t.id}`} key={t.id} className="card-lift flex items-center gap-4 rounded-2xl border border-border bg-card p-4" data-testid={`row-topic-${t.id}`}><div className={cn('grid size-10 place-items-center rounded-xl', t.completed ? 'bg-[#d7eee4] text-[#287058]' : 'bg-muted text-muted-foreground')}>{t.completed ? <Check size={17} /> : <Target size={17} />}</div><div className="flex-1"><div className="text-sm font-bold">{t.name}</div><div className="mt-1 text-xs text-muted-foreground">{t.questionCount} practice questions</div></div><span className="text-xs font-bold text-primary">{t.completed ? 'Review' : 'Start'} <ArrowRight size={13} className="ml-1 inline" /></span></Link>)}{!topicsList.length && <EmptyState icon={Target} title="No topics yet" body="Your academic team hasn't published topics for this subject yet." />}</div></div>;
-  return <div><SectionHeader eyebrow="Curriculum map" title="Subjects" action={<Link href="/blocks" className="text-xs font-bold text-primary" data-testid="link-subjects-back"><ArrowLeft size={13} className="mr-1 inline" /> Blocks</Link>} /><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{subjects.map((s) => <Link href={`/subjects/${s.id}`} key={s.id} className="card-lift group relative overflow-hidden rounded-2xl border border-border bg-card p-5" data-testid={`card-subject-${s.id}`}><SubjectWatermark name={s.name} className="-bottom-6 -right-5" /><div className="relative flex items-start justify-between"><SubjectIcon name={s.name} iconUrl={s.iconUrl} size="lg" /><ChevronRight size={16} className="text-muted-foreground transition-transform group-hover:translate-x-0.5" /></div><h3 className="relative mt-6 font-display text-2xl">{s.name}</h3><p className="relative mt-1 text-xs text-muted-foreground">{s.topicCount} topics to explore</p></Link>)}{!subjects.length && <EmptyState icon={BookOpen} title="No subjects yet" body="Your academic team hasn't published subjects for this module yet." />}</div></div>;
+  return topics
+    ? <TopicsView key={`topics-${routeId ?? 'all'}`} subjectId={routeId} />
+    : <SubjectsView key={`subjects-${routeId ?? 'all'}`} moduleId={routeId} />;
 }
 
 export default Subjects;

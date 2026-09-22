@@ -19,6 +19,7 @@ import { applyThemeVars } from '@/lib/theme';
 import { Aurora, AuthShowcase } from '@/lib/landing-visuals';
 import { SubjectIcon, resolveSubjectIcon } from '@/lib/subject-icons';
 import { queryClient } from '@/lib/query-client';
+import { SidebarNav, SidebarProfile, type SidebarGroup } from '@/components/nav/SidebarNav';
 import {
   getListMembershipPlansQueryKey, getListPaymentsQueryKey, getListMcqsQueryKey, getListModulesQueryKey, getListStudentsQueryKey, getListNotificationsQueryKey, getGetCurrentUserQueryKey,
   useApprovePayment, useCreateMembershipPlan, useCreateMcq, useCreateModule, useGetAdminDashboard,
@@ -257,14 +258,6 @@ export const navGroups: Array<{ label: string; items: NavItem[] }> = [
   ] },
 ];
 
-// Tinted icon tiles per nav group (same idea as the admin sidebar) so the
-// three groups are recognisable at a glance instead of one uniform column.
-const NAV_GROUP_TONE: Record<string, string> = {
-  'Study desk': 'bg-[#2dd9c4]/15 text-[#2dd9c4]',
-  'Your tools': 'bg-[#b79cff]/15 text-[#b79cff]',
-  'Your account': 'bg-[#e5a952]/15 text-[#e5a952]',
-};
-
 export function SideNav({ user, onClose }: { user: User; onClose: () => void }) {
   const [location] = useLocation();
   // AI_VISUALIZER_ENABLED off removes the nav link entirely — see the
@@ -287,29 +280,25 @@ export function SideNav({ user, onClose }: { user: User; onClose: () => void }) 
   const notifQ = useListNotifications();
   const unreadCount = (notifQ.data ?? []).filter((n) => !n.read).length;
   const logout = useMutation({ mutationFn: authApi.logout, onSuccess: () => { queryClient.clear(); window.location.href = '/login'; } });
+  const navView: SidebarGroup[] = groups.map((group) => ({
+    label: group.label,
+    items: group.items.map(([href, label, Icon]) => ({
+      href, label, icon: Icon,
+      hue: NAV_HUE[href] ?? NAV_HUE_FALLBACK,
+      locked: isLockedByTrial(href),
+      active: location === href || (href !== '/dashboard' && location.startsWith(`${href}/`)),
+      slug: label.toLowerCase().replaceAll(' ', '-'),
+      badge: label === 'Notifications' ? unreadCount : 0,
+    })),
+  }));
+  // v43: presentation lives in components/nav/SidebarNav.tsx (sliding puck,
+  // pointer spotlight, tilting profile card). Data / trial-lock rules stay here.
   return <aside className="student-sidebar fixed inset-y-0 left-0 z-40 flex w-[256px] flex-col overflow-y-auto bg-sidebar px-3.5 py-5 text-sidebar-foreground shadow-xl md:sticky md:top-0 md:h-[100dvh] md:shadow-none">
-    <div className="mb-6 flex items-center justify-between px-2"><Logo dark href="/dashboard" /><button className="rounded-lg p-2 text-sidebar-foreground/60 hover:bg-sidebar-accent md:hidden" onClick={onClose} aria-label="Close menu" data-testid="button-close-menu"><X size={18} /></button></div>
-    <nav className="space-y-6" aria-label="Student navigation">
-      {groups.map((group) => <div key={group.label}>
-        <div className="mb-2 px-3 font-mono-app text-[9px] font-bold uppercase tracking-[.16em] text-sidebar-foreground/40">{group.label}</div>
-        <div className="space-y-0.5">{group.items.map(([href, label, Icon]) => {
-          const locked = isLockedByTrial(href);
-          const active = location === href || (href !== '/dashboard' && location.startsWith(`${href}/`));
-          const slug = label.toLowerCase().replaceAll(' ', '-');
-          return <Link key={href} href={locked ? '/payments' : href} onClick={onClose} aria-current={active ? 'page' : undefined} title={locked ? `${label} isn't part of the free trial — see Membership` : undefined}
-            className={cn('group relative flex items-center gap-3 rounded-xl px-2.5 py-2 text-[13px] font-semibold transition-all', active ? 'bg-sidebar-accent text-sidebar-accent-foreground shadow-sm' : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground', locked && 'opacity-60')}
-            data-testid={`link-nav-${slug}`}>
-            {active && <span className="absolute -left-3.5 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-sidebar-primary" />}
-            <span className={cn('grid size-8 shrink-0 place-items-center rounded-lg transition-colors', active ? 'bg-sidebar-primary text-sidebar-primary-foreground' : NAV_GROUP_TONE[group.label] ?? 'bg-white/5')}><Icon size={16} strokeWidth={active ? 2.3 : 1.9} /></span>
-            <span className="min-w-0 flex-1 truncate">{label}</span>
-            {locked && <LockKeyhole size={12} className="shrink-0" data-testid={`icon-nav-locked-${slug}`} />}
-            {label === 'Notifications' && unreadCount > 0 && <span className="grid size-5 place-items-center rounded-full bg-[#e5a952] text-[10px] font-bold text-[#183844]">{unreadCount > 9 ? '9+' : unreadCount}</span>}
-          </Link>;
-        })}</div>
-      </div>)}
-    </nav>
-    <div className="mt-auto pt-6">
-      <div className="flex items-center gap-3 rounded-xl border border-sidebar-border/70 bg-sidebar-accent/40 px-3 py-2.5"><div className="grid size-9 shrink-0 place-items-center rounded-full bg-sidebar-primary text-xs font-extrabold text-sidebar-primary-foreground">{initials(user.name)}</div><div className="min-w-0 flex-1"><div className="truncate text-xs font-bold text-sidebar-foreground">{user.name}</div><div className="truncate text-[10px] text-sidebar-foreground/50">{user.institution || 'Medical student'}</div></div><button onClick={() => logout.mutate()} disabled={logout.isPending} className="grid size-8 place-items-center rounded-lg text-sidebar-foreground/60 transition-colors hover:bg-white/10 hover:text-sidebar-foreground disabled:opacity-50" data-testid="button-signout" title="Sign out" aria-label="Sign out"><LogOut size={15} /></button></div>
+    <div className="sb-ambient" aria-hidden="true"><i className="sb-orb sb-orb--a" /><i className="sb-orb sb-orb--b" /></div>
+    <div className="relative z-[1] mb-6 flex items-center justify-between px-2"><Logo dark href="/dashboard" /><button className="rounded-lg p-2 text-sidebar-foreground/60 hover:bg-sidebar-accent md:hidden" onClick={onClose} aria-label="Close menu" data-testid="button-close-menu"><X size={18} /></button></div>
+    <SidebarNav groups={navView} onNavigate={onClose} />
+    <div className="relative z-[1] mt-auto pt-6">
+      <SidebarProfile initials={initials(user.name)} name={user.name} subtitle={user.institution || 'Medical student'} onSignOut={() => logout.mutate()} signingOut={logout.isPending} />
     </div>
   </aside>;
 }
@@ -648,7 +637,7 @@ export function Shell({ children }: { children: ReactNode }) {
   // `<main><header/><div>{children}</div></main>` position; only the
   // header's *content* differs between focus and normal mode.
   return <div className="student-shell flex min-h-[100dvh] bg-background">
-    <div className={cn(!focusMode && menuOpen ? 'block' : 'hidden', 'fixed inset-0 z-30 bg-[#071e2b]/45 md:hidden')} onClick={() => setMenuOpen(false)} />
+    <div className={cn(!focusMode && menuOpen ? 'block' : 'hidden', 'sb-scrim fixed inset-0 z-30 bg-[#071e2b]/45 md:hidden')} onClick={() => setMenuOpen(false)} />
     <div className={cn(focusMode ? 'hidden' : (menuOpen || !isMobile) ? 'block' : 'hidden')}><SideNav user={user} onClose={() => setMenuOpen(false)} /></div>
     <main className="min-w-0 max-w-full flex-1">
       {!focusMode && (showAnnouncement || globalTrialMode) && <div className="relative z-20">

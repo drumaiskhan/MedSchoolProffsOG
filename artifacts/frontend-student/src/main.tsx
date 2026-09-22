@@ -5,6 +5,10 @@ import App from './App';
 import { ErrorBoundary } from '@/components/error-boundary';
 
 import './index.css';
+import { initFx } from '@/lib/fx';
+
+// v43: stamps <html data-fx="full|lite"> before first paint (see lib/fx.ts).
+initFx();
 
 // Split deployments (frontend on Vercel/Netlify, backend on Railway/Render)
 // set VITE_API_BASE_URL to the backend's origin at build time. Same-origin
