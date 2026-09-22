@@ -1,0 +1,73 @@
+# ============================================================================
+# MedSchoolProffs - Shared Netlify Configuration
+# ============================================================================
+#
+# Create TWO Netlify sites using this same repository:
+#
+# Student:
+#   FRONTEND = "student"
+#
+# Admin:
+#   FRONTEND = "admin"
+#
+# Backend:
+#   Railway
+#
+# ============================================================================
+
+
+# ============================================================================
+# Build
+# ============================================================================
+
+[build]
+command = "pnpm install --no-frozen-lockfile && pnpm run build:${FRONTEND:-student} && SRC=artifacts/frontend-${FRONTEND:-student}/dist && if [ -f \"$SRC/public/index.html\" ]; then SRC=\"$SRC/public\"; fi && rm -rf netlify-publish && mkdir -p netlify-publish && cp -r \"$SRC/.\" netlify-publish/"
+publish = "netlify-publish"
+
+
+# ============================================================================
+# Environment
+# ============================================================================
+
+[build.environment]
+NODE_VERSION = "22"
+
+
+# ============================================================================
+# API Proxy
+# ============================================================================
+#
+# IMPORTANT:
+# Keep this BEFORE the SPA catch-all.
+#
+# Frontend requests:
+#
+#   /api/auth/login
+#   /api/auth/me
+#   /api/...
+#
+# are forwarded to Railway.
+#
+# VITE_API_BASE_URL should remain EMPTY/UNSET on Netlify.
+#
+# ============================================================================
+
+[[redirects]]
+from = "/api/*"
+to = "https://medschoolproffsog-production.up.railway.app/api/:splat"
+status = 200
+force = true
+
+
+# ============================================================================
+# SPA Fallback
+# ============================================================================
+#
+# React/Vite client-side routes are sent to index.html.
+#
+# ============================================================================
+
+[[redirects]]
+from = "/*"
+to = "/index.html"
+status = 200

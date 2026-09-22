@@ -1,0 +1,1733 @@
+import { Router, type IRouter } from "express";
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
+import { z } from "zod";
+import {
+  ApprovePaymentParams,
+  ApprovePaymentResponse,
+  CreateMcqBody,
+  CreateMcqResponse,
+  CreateMembershipPlanBody,
+  CreateMembershipPlanResponse,
+  CreateModuleBody,
+  CreateModuleResponse,
+  GetAdminDashboardResponse,
+  GetStudentDashboardResponse,
+  ListFlashcardsResponse,
+  ListFlashcardsQueryParams,
+  ListMcqsQueryParams,
+  ListMcqsResponse,
+  ListMembershipPlansResponse,
+  ListModulesQueryParams,
+  ListModulesResponse,
+  ListNotificationsResponse,
+  ListPaymentsQueryParams,
+  ListPaymentsResponse,
+  ListResourcesQueryParams,
+  ListResourcesResponse,
+  ListStudentsQueryParams,
+  ListStudentsResponse,
+  ListSubjectsQueryParams,
+  ListSubjectsResponse,
+  ListTopicsQueryParams,
+  ListTopicsResponse,
+  RejectPaymentBody,
+  RejectPaymentParams,
+  RejectPaymentResponse,
+  SubmitPaymentBody,
+  UpdateMembershipPlanBody,
+  UpdateMembershipPlanParams,
+  UpdateMembershipPlanResponse,
+} from "@workspace/api-zod";
+import {
+  db,
+  usersTable,
+  membershipPlansTable,
+  paymentsTable,
+  membershipsTable,
+  blocksTable,
+  modulesTable,
+  subjectsTable,
+  practiceAttemptsTable,
+  topicsTable,
+  mcqsTable,
+  flashcardsTable,
+  resourcesTable,
+  notificationsTable,
+  notificationDismissalsTable,
+  auditLogsTable,
+  academicYearsTable,
+  programsTable,
+  batchesTable,
+  emailVerificationTokensTable,
+  passwordResetTokensTable,
+  studentDocumentsTable,
+  studentProgressTable,
+  examAttemptsTable,
+  notebookEntriesTable,
+  savedSessionsTable,
+  flaggedMcqsTable,
+  feedbackTable,
+  practiceAnswersTable,
+  examAnswersTable,
+  examQuestionsTable,
+  userSessionsTable,
+} from "@workspace/db";
+import { requireAuth, requireAdmin, requireMembershipFor, isAdminRole } from "../middlewares/auth";
+import { getDefaultDeviceLimit, getEffectiveDeviceLimit, listActiveSessions, revokeAllForUser, revokeOneForUser, MAX_DEVICES_CEILING } from "../lib/deviceSessions";
+import { getStudentTargeting, getVisibleModuleIds, getVisibleBlockIds, describeModuleTargeting } from "../lib/contentVisibility";
+import { resolveFileUrl, THUMBNAIL_TRANSFORM } from "../lib/storage";
+import { dbErrorMessage } from "../lib/dbErrors";
+import { shuffleMcqOptions } from "../lib/mcqShuffle";
+import { sendEmail, membershipActivatedEmailHtml, trialActivatedEmailHtml, paymentSubmittedEmailHtml, paymentRejectedEmailHtml, accountRejectedEmailHtml } from "../lib/email";
+import { validateCoupon, markCouponUsed, type CouponApplication } from "../lib/coupons";
+import { liveStreak } from "../lib/streak";
+
+const router: IRouter = Router();
+
+// Shared count helpers so module/subject cards never drift out of sync with
+// hardcoded 0s again (see section 4 of the fix notes).
+async function getModuleCounts(moduleId: number): Promise<{ subjectCount: number; topicCount: number; mcqCount: number }> {
+  // Bug fix: neither of these excluded archived (soft-deleted) subjects/
+  // topics, so a module's tile kept showing the count from before any
+  // deletes — e.g. "10 subjects" after the admin deleted down to 4. Same
+  // bug class as the GET /subjects and GET /topics list fix above, just in
+  // the separate count queries these tiles actually use.
+  const [subjectCount] = await db.select({ count: sql<number>`count(*)` }).from(subjectsTable).where(and(eq(subjectsTable.moduleId, moduleId), eq(subjectsTable.archived, false)));
+  const [topicCount] = await db.select({ count: sql<number>`count(*)` }).from(topicsTable).innerJoin(subjectsTable, eq(topicsTable.subjectId, subjectsTable.id)).where(and(eq(subjectsTable.moduleId, moduleId), eq(topicsTable.archived, false), eq(subjectsTable.archived, false)));
+  const [mcqCount] = await db.select({ count: sql<number>`count(*)` }).from(mcqsTable).where(and(eq(mcqsTable.moduleId, moduleId), eq(mcqsTable.status, "published")));
+  return { subjectCount: Number(subjectCount?.count ?? 0), topicCount: Number(topicCount?.count ?? 0), mcqCount: Number(mcqCount?.count ?? 0) };
+}
+
+// Real hard delete (fix-notes section 1) — no DB-level FOREIGN KEY
+// constraints exist on any of these mcqId columns (checked
+// lib/db/ensure-schema.sql — plain integer columns, no REFERENCES), so a
+// bare DELETE FROM med_mcqs would never actually throw an FK error. It would
+// however leave dangling mcqId references sitting around, which is worse
+// (silent orphans instead of a loud failure) — so this still cleans up every
+// referencing table before deleting the MCQ itself, in one transaction:
+//   - practice_answers / exam_answers / exam_questions / flagged_mcqs: the
+//     MCQ is the whole point of these rows, so they're deleted with it. The
+//     parent practiceAttempt/examAttempt rows keep their own stored
+//     aggregate counts (correctCount, score, etc.), so losing the per-
+//     question rows doesn't corrupt a student's overall history — it only
+//     means that one question's row won't show up in a detailed breakdown.
+//   - notebook_entries: mcqId is nullable and the note's own content isn't
+//     about the MCQ id, it's the student's own writing — so this un-links
+//     rather than deletes the note.
+async function hardDeleteMcqs(ids: number[]): Promise<void> {
+  if (!ids.length) return;
+  await db.transaction(async (tx) => {
+    await tx.delete(practiceAnswersTable).where(inArray(practiceAnswersTable.mcqId, ids));
+    await tx.delete(examAnswersTable).where(inArray(examAnswersTable.mcqId, ids));
+    await tx.delete(examQuestionsTable).where(inArray(examQuestionsTable.mcqId, ids));
+    await tx.delete(flaggedMcqsTable).where(inArray(flaggedMcqsTable.mcqId, ids));
+    await tx.update(notebookEntriesTable).set({ mcqId: null }).where(inArray(notebookEntriesTable.mcqId, ids));
+    await tx.delete(mcqsTable).where(inArray(mcqsTable.id, ids));
+  });
+}
+
+async function getSubjectTopicCount(subjectId: number): Promise<number> {
+  const [topicCount] = await db.select({ count: sql<number>`count(*)` }).from(topicsTable).where(and(eq(topicsTable.subjectId, subjectId), eq(topicsTable.archived, false)));
+  return Number(topicCount?.count ?? 0);
+}
+
+// Counts every MCQ (draft + published) attached to a topic — this route is
+// admin-only, so unlike GET /topics (which hides drafts from students) an
+// admin editing a topic should see the true total, not just what's live.
+async function getTopicMcqCount(topicId: number): Promise<number> {
+  const [mcqCount] = await db.select({ count: sql<number>`count(*)` }).from(mcqsTable).where(and(eq(mcqsTable.topicId, topicId), ne(mcqsTable.status, "archived")));
+  return Number(mcqCount?.count ?? 0);
+}
+
+function planView(plan: typeof membershipPlansTable.$inferSelect) {
+  return { ...plan, price: Number(plan.price), originalPrice: plan.originalPrice !== null ? Number(plan.originalPrice) : null };
+}
+
+async function userView(userId: number) {
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
+  if (!user) return null;
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    status: user.status,
+    institution: user.institution,
+    program: user.program,
+  };
+}
+
+async function paymentView(payment: typeof paymentsTable.$inferSelect) {
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, payment.userId));
+  const [academicYear] = user?.academicYearId ? await db.select().from(academicYearsTable).where(eq(academicYearsTable.id, user.academicYearId)) : [];
+  const [batch] = user?.batchId ? await db.select().from(batchesTable).where(eq(batchesTable.id, user.batchId)) : [];
+  return {
+    id: payment.id,
+    studentName: user?.name ?? "Unknown",
+    institution: user?.institution ?? "—",
+    program: user?.program ?? "—",
+    academicYear: academicYear?.label ?? "—",
+    batch: batch?.label ?? "—",
+    rollNumber: user?.rollNumber ?? "—",
+    planName: payment.planName,
+    amount: Number(payment.amount),
+    currency: payment.currency,
+    method: payment.method,
+    reference: payment.reference,
+    paymentDate: payment.paymentDate,
+    proofPath: resolveFileUrl(payment.proofPath),
+    status: payment.status,
+    submittedAt: payment.createdAt.toISOString(),
+  };
+}
+
+router.get("/student/dashboard", requireAuth, async (req, res): Promise<void> => {
+  const userId = req.user!.id;
+  const weekAgo = new Date();
+  weekAgo.setDate(weekAgo.getDate() - 7);
+  // Same program/year targeting used by GET /modules, /blocks, /books,
+  // /past-papers, /exams — was missing here, which is why the dashboard's
+  // "Continue learning"/"Recommended for you" always showed every active
+  // module (e.g. a Year-1 "Foundation I" module) to every student
+  // regardless of their actual registered program (MBBS/BDS/etc) and year.
+  // Nothing hardcoded: a student's targeting is looked up fresh from their
+  // own programId/academicYearId on every request via getStudentTargeting.
+  const isAdmin = isAdminRole(req.user!.role);
+  let visibleModuleIds: number[] | null = null;
+  if (!isAdmin) {
+    const targeting = await getStudentTargeting(userId);
+    visibleModuleIds = await getVisibleModuleIds(targeting);
+  }
+  const [moduleRows, notificationRows, membership, user, weeklyAttempts, questionAttemptRows, [streakRow]] = await Promise.all([
+    db.select().from(modulesTable).where(and(
+      eq(modulesTable.active, true),
+      visibleModuleIds ? inArray(modulesTable.id, visibleModuleIds) : undefined,
+    )).orderBy(modulesTable.displayOrder),
+    db.select().from(notificationsTable).where(or(eq(notificationsTable.userId, userId), sql`${notificationsTable.userId} IS NULL`)).orderBy(desc(notificationsTable.createdAt)).limit(4),
+    db.select().from(membershipsTable).where(and(eq(membershipsTable.userId, userId), eq(membershipsTable.status, "ACTIVE"))).orderBy(desc(membershipsTable.expiresAt)).limit(1),
+    userView(userId),
+    // "Weekly goal" progress: number of practice sessions completed in the
+    // last 7 days (the frontend shows this against a fixed target of 5).
+    db.select({ count: sql<number>`count(*)` }).from(practiceAttemptsTable).where(and(eq(practiceAttemptsTable.userId, userId), gte(practiceAttemptsTable.createdAt, weekAgo))),
+    // Distinct MCQs this student has actually answered at least once, per
+    // module — question-level, not topic-level (see fix-brief section 7: a
+    // module with only 1 topic but 30 questions used to hit 1/1 = 100% the
+    // instant a single question was answered, regardless of how many of the
+    // 30 the student had actually done).
+    db.selectDistinct({ moduleId: mcqsTable.moduleId, mcqId: practiceAnswersTable.mcqId })
+      .from(practiceAnswersTable)
+      .innerJoin(practiceAttemptsTable, eq(practiceAttemptsTable.id, practiceAnswersTable.attemptId))
+      .innerJoin(mcqsTable, eq(mcqsTable.id, practiceAnswersTable.mcqId))
+      .where(and(eq(practiceAttemptsTable.userId, userId), sql`${mcqsTable.moduleId} IS NOT NULL`)),
+    // userView() is a deliberately limited public projection that doesn't
+    // include streak fields — fetch separately rather than widen it.
+    db.select({ currentStreak: usersTable.currentStreak, longestStreak: usersTable.longestStreak, lastPracticeDate: usersTable.lastPracticeDate }).from(usersTable).where(eq(usersTable.id, userId)),
+  ]);
+  if (!user) { res.status(404).json({ error: "User not found" }); return; }
+
+  const attemptedQuestionsByModule = new Map<number, Set<number>>();
+  for (const row of questionAttemptRows) {
+    if (row.moduleId == null) continue;
+    if (!attemptedQuestionsByModule.has(row.moduleId)) attemptedQuestionsByModule.set(row.moduleId, new Set());
+    attemptedQuestionsByModule.get(row.moduleId)!.add(row.mcqId);
+  }
+
+  let totalQuestions = 0;
+  let totalAttemptedQuestions = 0;
+  const modules = await Promise.all(moduleRows.map(async (module) => {
+    const [subjectCount] = await db.select({ count: sql<number>`count(*)` }).from(subjectsTable).where(and(eq(subjectsTable.moduleId, module.id), eq(subjectsTable.archived, false)));
+    const [topicCount] = await db.select({ count: sql<number>`count(*)` }).from(topicsTable).innerJoin(subjectsTable, eq(topicsTable.subjectId, subjectsTable.id)).where(and(eq(subjectsTable.moduleId, module.id), eq(topicsTable.archived, false), eq(subjectsTable.archived, false)));
+    const [mcqCount] = await db.select({ count: sql<number>`count(*)` }).from(mcqsTable).where(and(eq(mcqsTable.moduleId, module.id), eq(mcqsTable.status, "published")));
+    const questions = Number(mcqCount?.count ?? 0);
+    const attempted = attemptedQuestionsByModule.get(module.id)?.size ?? 0;
+    totalQuestions += questions;
+    totalAttemptedQuestions += attempted;
+    return { id: module.id, name: module.name, subtitle: module.subtitle, subjectCount: Number(subjectCount?.count ?? 0), topicCount: Number(topicCount?.count ?? 0), progress: questions ? Math.round((attempted / questions) * 100) : 0, active: module.active };
+  }));
+
+  const activeMembership = membership[0];
+
+  res.json(GetStudentDashboardResponse.parse({
+    user,
+    membershipStatus: activeMembership ? "ACTIVE" : "INACTIVE",
+    membershipExpiry: activeMembership ? activeMembership.expiresAt.toISOString() : null,
+    progress: totalQuestions ? Math.round((totalAttemptedQuestions / totalQuestions) * 100) : 0,
+    weeklyGoal: Number(weeklyAttempts[0]?.count ?? 0),
+    streak: liveStreak(streakRow).current,
+    modules,
+    recentActivity: [],
+    notifications: notificationRows.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() })),
+  }));
+});
+
+router.get("/admin/dashboard", requireAdmin, async (_req, res): Promise<void> => {
+  const now = new Date();
+  const [users, payments, activeMemberships, recent] = await Promise.all([
+    db.select().from(usersTable).where(and(eq(usersTable.role, "student"), ne(usersTable.status, "DELETED"))),
+    db.select().from(paymentsTable),
+    // Membership rows are never flipped to EXPIRED by a background job (see
+    // the note near the student-status handler below), so a plain
+    // status="ACTIVE" count includes memberships whose expiresAt has
+    // already passed — the "subscribed students" number would silently
+    // drift upward and stop reflecting who's actually subscribed right
+    // now. Filtering on expiresAt here keeps it accurate on every refresh.
+    db.select().from(membershipsTable).where(and(eq(membershipsTable.status, "ACTIVE"), gte(membershipsTable.expiresAt, now))),
+    db.select().from(paymentsTable).where(ne(paymentsTable.status, "VOIDED")).orderBy(desc(paymentsTable.createdAt)).limit(5),
+  ]);
+  const revenue = payments.filter((item) => item.status === "APPROVED").reduce((sum, item) => sum + Number(item.amount), 0);
+  // Count distinct students, not membership rows — a student with two
+  // (legacy/duplicate) simultaneously-ACTIVE rows must still only count once,
+  // as a defensive guarantee this can never exceed totalStudents even if a
+  // future bug reintroduces duplicate ACTIVE rows (see section 10 fix notes).
+  const distinctActiveUserIds = new Set(activeMemberships.map((m) => m.userId));
+  res.json(GetAdminDashboardResponse.parse({
+    totalStudents: users.length,
+    activeMembers: distinctActiveUserIds.size,
+    pendingPayments: payments.filter((item) => item.status === "PAYMENT_PENDING_REVIEW").length,
+    monthlyRevenue: revenue,
+    recentPayments: await Promise.all(recent.map(paymentView)),
+    studentsByStatus: users.reduce<Record<string, number>>((result, user) => {
+      result[user.status] = (result[user.status] ?? 0) + 1;
+      return result;
+    }, {}),
+  }));
+});
+
+router.get("/membership-plans", async (req, res): Promise<void> => {
+  const includeInactive = req.user && (isAdminRole(req.user.role));
+  const plans = await db.select().from(membershipPlansTable).where(includeInactive ? undefined : eq(membershipPlansTable.active, true)).orderBy(membershipPlansTable.displayOrder);
+  res.json(ListMembershipPlansResponse.parse(plans.map(planView)));
+});
+
+router.post("/membership-plans", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = CreateMembershipPlanBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const [plan] = await db.insert(membershipPlansTable).values({
+    ...parsed.data,
+    price: String(parsed.data.price),
+    originalPrice: parsed.data.originalPrice != null ? String(parsed.data.originalPrice) : null,
+    discountLabel: parsed.data.discountLabel ?? null,
+    active: parsed.data.active ?? true,
+    displayOrder: parsed.data.displayOrder ?? 0,
+  }).returning();
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "PLAN_CREATED", entity: "membership_plan", entityId: plan.id });
+  res.status(201).json(CreateMembershipPlanResponse.parse(planView(plan)));
+});
+
+router.patch("/membership-plans/:id", requireAdmin, async (req, res): Promise<void> => {
+  const params = UpdateMembershipPlanParams.safeParse(req.params);
+  const body = UpdateMembershipPlanBody.safeParse(req.body);
+  if (!params.success || !body.success) { res.status(400).json({ error: "Invalid membership plan" }); return; }
+  const [plan] = await db.update(membershipPlansTable).set({
+    ...body.data,
+    price: body.data.price === undefined ? undefined : String(body.data.price),
+    originalPrice: body.data.originalPrice === undefined ? undefined : (body.data.originalPrice != null ? String(body.data.originalPrice) : null),
+  }).where(eq(membershipPlansTable.id, params.data.id)).returning();
+  if (!plan) { res.status(404).json({ error: "Membership plan not found" }); return; }
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "PLAN_UPDATED", entity: "membership_plan", entityId: plan.id });
+  res.json(UpdateMembershipPlanResponse.parse(planView(plan)));
+});
+
+router.delete("/membership-plans/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const [plan] = await db.update(membershipPlansTable).set({ active: false, archived: true }).where(eq(membershipPlansTable.id, id)).returning();
+  if (!plan) { res.status(404).json({ error: "Membership plan not found" }); return; }
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "PLAN_ARCHIVED", entity: "membership_plan", entityId: plan.id });
+  res.json(planView(plan));
+});
+
+// Hard delete — only reachable once a plan is already archived (the soft
+// delete above), and blocked outright if any ACTIVE membership still
+// references it, so a subscriber's plan can never disappear out from under
+// them. Payments referencing the plan are left as historical records
+// (planName/amount/etc are already denormalized onto the payment row, so
+// deleting the plan doesn't lose anything from the payment's own display).
+router.delete("/membership-plans/:id/permanent", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) { res.status(400).json({ error: "Invalid plan id" }); return; }
+  const [plan] = await db.select().from(membershipPlansTable).where(eq(membershipPlansTable.id, id));
+  if (!plan) { res.status(404).json({ error: "Membership plan not found" }); return; }
+  if (plan.active || !plan.archived) { res.status(409).json({ error: "Archive this plan first before deleting it permanently." }); return; }
+
+  const [activeSub] = await db.select({ id: membershipsTable.id }).from(membershipsTable).where(and(eq(membershipsTable.planId, id), eq(membershipsTable.status, "ACTIVE"))).limit(1);
+  if (activeSub) { res.status(409).json({ error: "This plan still has active subscribers — it can't be permanently deleted." }); return; }
+
+  await db.delete(membershipPlansTable).where(eq(membershipPlansTable.id, id));
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "PLAN_PERMANENTLY_DELETED", entity: "membership_plan", entityId: id });
+  res.json({ ok: true });
+});
+
+router.get("/payments", requireAuth, async (req, res): Promise<void> => {
+  const params = ListPaymentsQueryParams.safeParse(req.query);
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  const isAdmin = isAdminRole(req.user!.role);
+  const rows = await db.select().from(paymentsTable).where(isAdmin ? undefined : eq(paymentsTable.userId, req.user!.id)).orderBy(desc(paymentsTable.createdAt));
+  const filtered = rows.filter((row) => (params.data.status ? row.status === params.data.status : row.status !== "VOIDED") && (!params.data.search || row.reference.toLowerCase().includes(params.data.search.toLowerCase())));
+  res.json(ListPaymentsResponse.parse(await Promise.all(filtered.map(paymentView))));
+});
+
+router.post("/payments", requireAuth, async (req, res): Promise<void> => {
+  const parsed = SubmitPaymentBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const [plan] = await db.select().from(membershipPlansTable).where(and(eq(membershipPlansTable.id, parsed.data.planId), eq(membershipPlansTable.active, true)));
+  if (!plan) { res.status(400).json({ error: "Selected plan is not available" }); return; }
+  // couponCode isn't part of the generated SubmitPaymentBody schema (that
+  // schema is auto-generated from openapi.yaml — see lib/api-zod — so it's
+  // read directly off the body here rather than hand-editing generated
+  // code). Same validateCoupon() helper as registration; see its comment.
+  let couponApplied: CouponApplication | null = null;
+  const couponCode = typeof req.body?.couponCode === "string" ? req.body.couponCode.trim() : "";
+  if (couponCode) {
+    const result = await validateCoupon(couponCode, Number(plan.price));
+    if ("error" in result) { res.status(400).json({ error: result.error }); return; }
+    couponApplied = result;
+  }
+  const [payment] = await db.insert(paymentsTable).values({
+    userId: req.user!.id, planId: plan.id, planName: plan.name,
+    amount: couponApplied ? String(couponApplied.discountedAmount) : plan.price, currency: plan.currency,
+    duration: plan.duration, durationUnit: plan.durationUnit, method: parsed.data.method, reference: parsed.data.reference,
+    paymentDate: parsed.data.paymentDate, proofPath: parsed.data.proofPath ?? null, status: "PAYMENT_PENDING_REVIEW",
+    couponCode: couponApplied?.coupon.code ?? null, discountAmount: couponApplied ? String(couponApplied.discountAmount) : null,
+  }).returning();
+  if (couponApplied) await markCouponUsed(couponApplied.coupon.id);
+  await db.update(usersTable).set({ status: "PAYMENT_PENDING_REVIEW" }).where(eq(usersTable.id, req.user!.id));
+  void sendEmail(req.user!.email, "We've received your payment", paymentSubmittedEmailHtml(req.user!.name, plan.name)).catch(() => {});
+  res.status(201).json(await paymentView(payment));
+});
+
+router.post("/payments/:id/approve", requireAdmin, async (req, res): Promise<void> => {
+  const params = ApprovePaymentParams.safeParse(req.params);
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, params.data.id));
+  if (!payment || payment.status !== "PAYMENT_PENDING_REVIEW") { res.status(409).json({ error: "Payment is not awaiting review" }); return; }
+  const startsAt = new Date();
+  const expiresAt = new Date(startsAt);
+  if (payment.durationUnit === "years") expiresAt.setFullYear(expiresAt.getFullYear() + payment.duration);
+  else if (payment.durationUnit === "months") expiresAt.setMonth(expiresAt.getMonth() + payment.duration);
+  else expiresAt.setDate(expiresAt.getDate() + payment.duration);
+  const [updated] = await db.update(paymentsTable).set({ status: "APPROVED", reviewedBy: req.user!.id, reviewedAt: new Date() }).where(eq(paymentsTable.id, payment.id)).returning();
+  // Supersede any previously-active membership row(s) for this student before
+  // inserting the new one, so a renewal/duplicate approval never leaves two
+  // simultaneously-ACTIVE rows (see section 10 of the fix notes — this was
+  // the root cause of "subscribed students" over-counting).
+  await db.update(membershipsTable).set({ status: "SUPERSEDED" }).where(and(eq(membershipsTable.userId, payment.userId), eq(membershipsTable.status, "ACTIVE")));
+  await db.insert(membershipsTable).values({ userId: payment.userId, paymentId: payment.id, planId: payment.planId, status: "ACTIVE", startsAt, expiresAt });
+  await db.update(usersTable).set({ status: "ACTIVE" }).where(eq(usersTable.id, payment.userId));
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "PAYMENT_APPROVED", entity: "payment", entityId: payment.id });
+  await db.insert(notificationsTable).values({ userId: payment.userId, title: "Membership activated", body: "Your payment was verified. Your study access is now active.", type: "success" });
+
+  const [student] = await db.select({ name: usersTable.name, email: usersTable.email }).from(usersTable).where(eq(usersTable.id, payment.userId));
+  if (student) {
+    void sendEmail(student.email, "Your MedschoolProffs membership is active", membershipActivatedEmailHtml(student.name, payment.planName, expiresAt)).catch(() => {});
+  }
+
+  res.json(ApprovePaymentResponse.parse(await paymentView(updated)));
+});
+
+router.post("/payments/:id/reject", requireAdmin, async (req, res): Promise<void> => {
+  const params = RejectPaymentParams.safeParse(req.params);
+  const body = RejectPaymentBody.safeParse(req.body);
+  if (!params.success || !body.success) { res.status(400).json({ error: "A rejection reason is required" }); return; }
+  const [updated] = await db.update(paymentsTable).set({ status: "REJECTED", rejectionReason: body.data.reason, reviewedBy: req.user!.id, reviewedAt: new Date() }).where(eq(paymentsTable.id, params.data.id)).returning();
+  if (!updated) { res.status(404).json({ error: "Payment not found" }); return; }
+  await db.update(usersTable).set({ status: "REJECTED" }).where(eq(usersTable.id, updated.userId));
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "PAYMENT_REJECTED", entity: "payment", entityId: updated.id, metadata: JSON.stringify({ reason: body.data.reason }) });
+  await db.insert(notificationsTable).values({ userId: updated.userId, title: "Payment needs attention", body: body.data.reason, type: "warning" });
+
+  const [rejectedStudent] = await db.select({ name: usersTable.name, email: usersTable.email }).from(usersTable).where(eq(usersTable.id, updated.userId));
+  if (rejectedStudent) {
+    void sendEmail(rejectedStudent.email, "Your MedschoolProffs payment needs attention", paymentRejectedEmailHtml(rejectedStudent.name, body.data.reason)).catch(() => {});
+  }
+
+  res.json(RejectPaymentResponse.parse(await paymentView(updated)));
+});
+
+// Void an erroneously-entered payment. Kept as a row (status VOIDED) rather
+// than hard-deleted so the audit trail and any already-activated membership
+// remain inspectable; it's simply excluded from the default admin queue view.
+router.delete("/payments/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) { res.status(400).json({ error: "Invalid payment id" }); return; }
+  const [updated] = await db.update(paymentsTable).set({ status: "VOIDED", reviewedBy: req.user!.id, reviewedAt: new Date() }).where(eq(paymentsTable.id, id)).returning();
+  if (!updated) { res.status(404).json({ error: "Payment not found" }); return; }
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "PAYMENT_VOIDED", entity: "payment", entityId: updated.id });
+  res.json({ ok: true });
+});
+
+// Hard delete — only for payments already VOIDED (the route above), so a
+// pending/approved/rejected submission can't be erased by accident. Clears
+// the paymentId back-reference on any membership it created (the
+// membership itself is untouched, same as the void endpoint) before
+// removing the row.
+router.delete("/payments/:id/permanent", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) { res.status(400).json({ error: "Invalid payment id" }); return; }
+  const [payment] = await db.select().from(paymentsTable).where(eq(paymentsTable.id, id));
+  if (!payment) { res.status(404).json({ error: "Payment not found" }); return; }
+
+  await db.update(membershipsTable).set({ paymentId: null }).where(eq(membershipsTable.paymentId, id));
+  await db.delete(paymentsTable).where(eq(paymentsTable.id, id));
+
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "PAYMENT_PERMANENTLY_DELETED", entity: "payment", entityId: id });
+  res.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// Blocks — top-level curriculum grouping above Modules (Block -> Module ->
+// Subject -> Topic). Mirrors the /modules routes below 1:1: list is open to
+// any authenticated user (student "Modules" page groups by block too),
+// mutations are admin-only. See PROJECT-BRIEF.md / fix-brief section 1.
+// ---------------------------------------------------------------------------
+
+router.get("/blocks", requireAuth, async (req, res): Promise<void> => {
+  const isAdmin = isAdminRole(req.user!.role);
+  // Bug fix: this never applied programTargetKind/yearTargetNumber at all
+  // (unlike GET /modules, which has always used getVisibleModuleIds) — a
+  // block's targeting only ever showed up as an admin-facing badge, so a
+  // Year-1-only block was visible to every year, including 3rd year. Same
+  // null-means-everyone matching Modules/Past papers use, via the new
+  // getVisibleBlockIds helper.
+  let visibleIds: number[] | null = null;
+  if (!isAdmin) {
+    const targeting = await getStudentTargeting(req.user!.id);
+    visibleIds = await getVisibleBlockIds(targeting);
+  }
+  const rows = await db.select().from(blocksTable)
+    .where(and(isAdmin ? undefined : eq(blocksTable.active, true), visibleIds ? inArray(blocksTable.id, visibleIds) : undefined))
+    .orderBy(blocksTable.displayOrder);
+  res.json(rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    subtitle: row.subtitle,
+    iconUrl: resolveFileUrl(row.iconPath, { transform: THUMBNAIL_TRANSFORM }),
+    displayOrder: row.displayOrder,
+    active: row.active,
+    ...(isAdmin ? { programTargetKind: row.programTargetKind, yearTargetNumber: row.yearTargetNumber, targetingLabel: describeModuleTargeting(row.programTargetKind, row.yearTargetNumber) } : {}),
+  })));
+});
+
+const BlockBody = z.object({
+  name: z.string().min(1),
+  subtitle: z.string().optional(),
+  active: z.boolean().optional(),
+  iconPath: z.string().nullable().optional(),
+  displayOrder: z.number().int().optional(),
+  programTargetKind: z.string().max(40).nullable().optional(),
+  yearTargetNumber: z.number().int().min(1).max(5).nullable().optional(),
+});
+
+router.post("/blocks", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = BlockBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const [maxRow] = await db.select({ max: sql<number>`coalesce(max(${blocksTable.displayOrder}), -1)` }).from(blocksTable);
+  const [block] = await db.insert(blocksTable).values({
+    name: parsed.data.name,
+    subtitle: parsed.data.subtitle ?? "",
+    active: parsed.data.active ?? true,
+    iconPath: parsed.data.iconPath ?? null,
+    displayOrder: parsed.data.displayOrder ?? Number(maxRow?.max ?? -1) + 1,
+    programTargetKind: parsed.data.programTargetKind ? parsed.data.programTargetKind.trim().toUpperCase() : null,
+    yearTargetNumber: parsed.data.yearTargetNumber ?? null,
+  }).returning();
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "BLOCK_CREATED", entity: "block", entityId: block.id });
+  res.status(201).json({ id: block.id, name: block.name, subtitle: block.subtitle, iconUrl: resolveFileUrl(block.iconPath, { transform: THUMBNAIL_TRANSFORM }), displayOrder: block.displayOrder, active: block.active });
+});
+
+router.patch("/blocks/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const parsed = BlockBody.partial().safeParse(req.body);
+  if (!parsed.success || Number.isNaN(id)) { res.status(400).json({ error: "Invalid block" }); return; }
+  const { programTargetKind, yearTargetNumber, ...rest } = parsed.data;
+  const [block] = await db.update(blocksTable).set({
+    ...rest,
+    ...(programTargetKind !== undefined ? { programTargetKind: programTargetKind ? programTargetKind.trim().toUpperCase() : null } : {}),
+    ...(yearTargetNumber !== undefined ? { yearTargetNumber } : {}),
+  }).where(eq(blocksTable.id, id)).returning();
+  if (!block) { res.status(404).json({ error: "Block not found" }); return; }
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "BLOCK_UPDATED", entity: "block", entityId: block.id });
+  res.json({ id: block.id, name: block.name, subtitle: block.subtitle, iconUrl: resolveFileUrl(block.iconPath, { transform: THUMBNAIL_TRANSFORM }), displayOrder: block.displayOrder, active: block.active, programTargetKind: block.programTargetKind, yearTargetNumber: block.yearTargetNumber, targetingLabel: describeModuleTargeting(block.programTargetKind, block.yearTargetNumber) });
+});
+
+router.delete("/blocks/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const [block] = await db.update(blocksTable).set({ active: false, archived: true }).where(eq(blocksTable.id, id)).returning();
+  if (!block) { res.status(404).json({ error: "Block not found" }); return; }
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "BLOCK_ARCHIVED", entity: "block", entityId: block.id });
+  res.json({ ok: true });
+});
+
+// Hard delete — only reachable once already archived, same convention as
+// modules' permanent delete. Un-assigns (does not delete) any modules that
+// were in this block, so no module or its subjects/topics/MCQs are lost.
+router.delete("/blocks/:id/permanent", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) { res.status(400).json({ error: "Invalid block id" }); return; }
+  const [block] = await db.select().from(blocksTable).where(eq(blocksTable.id, id));
+  if (!block) { res.status(404).json({ error: "Block not found" }); return; }
+  await db.update(modulesTable).set({ blockId: null }).where(eq(modulesTable.blockId, id));
+  await db.delete(blocksTable).where(eq(blocksTable.id, id));
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "BLOCK_PERMANENTLY_DELETED", entity: "block", entityId: id });
+  res.json({ ok: true });
+});
+
+router.get("/modules", requireAuth, async (req, res): Promise<void> => {
+  const params = ListModulesQueryParams.safeParse(req.query);
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  const isAdmin = isAdminRole(req.user!.role);
+  let visibleIds: number[] | null = null;
+  if (!isAdmin) {
+    const targeting = await getStudentTargeting(req.user!.id);
+    visibleIds = await getVisibleModuleIds(targeting);
+  }
+  const rows = await db.select().from(modulesTable).where(and(
+    params.data.search ? ilike(modulesTable.name, `%${params.data.search}%`) : undefined,
+    isAdmin ? undefined : eq(modulesTable.active, true),
+    visibleIds ? inArray(modulesTable.id, visibleIds) : undefined,
+  )).orderBy(modulesTable.displayOrder);
+
+  const blockRows = await db.select({ id: blocksTable.id, name: blocksTable.name }).from(blocksTable);
+  const blockNameById = new Map(blockRows.map((b) => [b.id, b.name]));
+
+  // Real per-module progress (was hardcoded to 0 here) — question-level
+  // coverage, matching GET /student/dashboard's fix (fix-brief section 7):
+  // distinct MCQs this student has actually answered at least once, divided
+  // by the module's total published question count. Topic-level counting
+  // hit 100% the instant a single question was answered in a module with
+  // only 1 topic, however many questions that topic actually had.
+  const questionAttemptRows = await db.selectDistinct({ moduleId: mcqsTable.moduleId, mcqId: practiceAnswersTable.mcqId })
+    .from(practiceAnswersTable)
+    .innerJoin(practiceAttemptsTable, eq(practiceAttemptsTable.id, practiceAnswersTable.attemptId))
+    .innerJoin(mcqsTable, eq(mcqsTable.id, practiceAnswersTable.mcqId))
+    .where(and(eq(practiceAttemptsTable.userId, req.user!.id), sql`${mcqsTable.moduleId} IS NOT NULL`));
+  const attemptedQuestionsByModule = new Map<number, Set<number>>();
+  for (const r of questionAttemptRows) {
+    if (r.moduleId == null) continue;
+    if (!attemptedQuestionsByModule.has(r.moduleId)) attemptedQuestionsByModule.set(r.moduleId, new Set());
+    attemptedQuestionsByModule.get(r.moduleId)!.add(r.mcqId);
+  }
+
+  const withCounts = await Promise.all(rows.map(async (row) => {
+    const counts = await getModuleCounts(row.id);
+    const attempted = attemptedQuestionsByModule.get(row.id)?.size ?? 0;
+    const progress = counts.mcqCount ? Math.round((attempted / counts.mcqCount) * 100) : 0;
+    return {
+      id: row.id, name: row.name, subtitle: row.subtitle, subjectCount: counts.subjectCount, topicCount: counts.topicCount, mcqCount: counts.mcqCount, progress, active: row.active,
+      blockId: row.blockId, blockName: row.blockId != null ? (blockNameById.get(row.blockId) ?? null) : null,
+      displayOrder: row.displayOrder,
+      // Round 3, item 7 — optional module-level thumbnail, same
+      // resolveFileUrl() convention as med_blocks.iconPath.
+      iconUrl: resolveFileUrl(row.iconPath),
+      ...(isAdmin ? { programTargetKind: row.programTargetKind, yearTargetNumber: row.yearTargetNumber, targetingLabel: describeModuleTargeting(row.programTargetKind, row.yearTargetNumber) } : {}),
+    };
+  }));
+  res.json(withCounts);
+});
+
+const ModuleTargetingFields = {
+  programTargetKind: z.string().max(40).nullable().optional(),
+  yearTargetNumber: z.number().int().min(1).max(5).nullable().optional(),
+  blockId: z.number().int().positive().nullable().optional(),
+  displayOrder: z.number().int().optional(),
+  // Round 3, item 7 — optional module thumbnail, storage path from the
+  // uploads endpoint (mirrors how blocks' iconPath is accepted).
+  iconPath: z.string().nullable().optional(),
+};
+
+router.post("/modules", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = CreateModuleBody.and(z.object(ModuleTargetingFields)).safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const [maxRow] = await db.select({ max: sql<number>`coalesce(max(${modulesTable.displayOrder}), -1)` }).from(modulesTable);
+  const [module] = await db.insert(modulesTable).values({
+    name: parsed.data.name, subtitle: parsed.data.subtitle ?? "", active: parsed.data.active ?? true,
+    blockId: parsed.data.blockId ?? null,
+    iconPath: parsed.data.iconPath ?? null,
+    displayOrder: parsed.data.displayOrder ?? Number(maxRow?.max ?? -1) + 1,
+    programTargetKind: parsed.data.programTargetKind ? parsed.data.programTargetKind.trim().toUpperCase() : null,
+    yearTargetNumber: parsed.data.yearTargetNumber ?? null,
+  }).returning();
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MODULE_CREATED", entity: "module", entityId: module.id });
+  res.status(201).json({ ...CreateModuleResponse.parse({ id: module.id, name: module.name, subtitle: module.subtitle, subjectCount: 0, topicCount: 0, progress: 0, active: module.active }), blockId: module.blockId, displayOrder: module.displayOrder, iconUrl: resolveFileUrl(module.iconPath, { transform: THUMBNAIL_TRANSFORM }) }); // genuinely 0/0 — brand-new module has no subjects/topics yet
+});
+
+router.patch("/modules/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const parsed = CreateModuleBody.partial().and(z.object(ModuleTargetingFields)).safeParse(req.body);
+  if (!parsed.success || Number.isNaN(id)) { res.status(400).json({ error: "Invalid module" }); return; }
+  const { programTargetKind, yearTargetNumber, ...rest } = parsed.data;
+  const [module] = await db.update(modulesTable).set({
+    ...rest,
+    ...(programTargetKind !== undefined ? { programTargetKind: programTargetKind ? programTargetKind.trim().toUpperCase() : null } : {}),
+    ...(yearTargetNumber !== undefined ? { yearTargetNumber } : {}),
+  }).where(eq(modulesTable.id, id)).returning();
+  if (!module) { res.status(404).json({ error: "Module not found" }); return; }
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MODULE_UPDATED", entity: "module", entityId: module.id });
+  const moduleCounts = await getModuleCounts(module.id);
+  res.json({ id: module.id, name: module.name, subtitle: module.subtitle, subjectCount: moduleCounts.subjectCount, topicCount: moduleCounts.topicCount, progress: 0, active: module.active, blockId: module.blockId, displayOrder: module.displayOrder, iconUrl: resolveFileUrl(module.iconPath, { transform: THUMBNAIL_TRANSFORM }), programTargetKind: module.programTargetKind, yearTargetNumber: module.yearTargetNumber, targetingLabel: describeModuleTargeting(module.programTargetKind, module.yearTargetNumber) });
+});
+
+router.delete("/modules/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const [module] = await db.update(modulesTable).set({ active: false, archived: true }).where(eq(modulesTable.id, id)).returning();
+  if (!module) { res.status(404).json({ error: "Module not found" }); return; }
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MODULE_ARCHIVED", entity: "module", entityId: module.id });
+  res.json({ ok: true });
+});
+
+// Hard delete — only reachable from the "Show archived" list, and only for
+// a module that's already archived (the DELETE above). Detaches its
+// subjects/topics and un-tags any MCQs/flashcards filed under it (they stay
+// in their respective banks, just unassigned) before removing the row, so
+// this never orphans a foreign key or silently deletes question content.
+router.delete("/modules/:id/permanent", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) { res.status(400).json({ error: "Invalid module id" }); return; }
+  const [module] = await db.select().from(modulesTable).where(eq(modulesTable.id, id));
+  if (!module) { res.status(404).json({ error: "Module not found" }); return; }
+
+  const subjectRows = await db.select({ id: subjectsTable.id }).from(subjectsTable).where(eq(subjectsTable.moduleId, id));
+  const subjectIds = subjectRows.map((s) => s.id);
+
+  await db.update(mcqsTable).set({ moduleId: null, subjectId: null, topicId: null }).where(eq(mcqsTable.moduleId, id));
+  await db.update(flashcardsTable).set({ moduleId: null, subjectId: null, topicId: null }).where(eq(flashcardsTable.moduleId, id));
+  if (subjectIds.length) await db.delete(topicsTable).where(inArray(topicsTable.subjectId, subjectIds));
+  await db.delete(subjectsTable).where(eq(subjectsTable.moduleId, id));
+  await db.delete(modulesTable).where(eq(modulesTable.id, id));
+
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MODULE_PERMANENTLY_DELETED", entity: "module", entityId: id });
+  res.json({ ok: true });
+});
+
+// Aggregate stats for the "Practice" landing page stat bar (Total topics,
+// Avg duration, Avg questions, Total questions) — kept as its own endpoint
+// rather than folded into GET /modules so existing callers of that (which
+// expect a bare Module[] array) don't break.
+router.get("/student/practice-overview", requireAuth, async (req, res): Promise<void> => {
+  const isAdmin = isAdminRole(req.user!.role);
+  let visibleIds: number[] | null = null;
+  if (!isAdmin) {
+    const targeting = await getStudentTargeting(req.user!.id);
+    visibleIds = await getVisibleModuleIds(targeting);
+  }
+  const moduleRows = await db.select({ id: modulesTable.id }).from(modulesTable).where(and(isAdmin ? undefined : eq(modulesTable.active, true), visibleIds ? inArray(modulesTable.id, visibleIds) : undefined));
+  const counts = await Promise.all(moduleRows.map((m) => getModuleCounts(m.id)));
+  const totalTopics = counts.reduce((sum, c) => sum + c.topicCount, 0);
+  const totalQuestions = counts.reduce((sum, c) => sum + c.mcqCount, 0);
+  const avgQuestions = moduleRows.length ? Math.round(totalQuestions / moduleRows.length) : 0;
+
+  // Average session duration across everyone's completed practice sessions
+  // (platform-wide, not just this student) — matches how a "recommended
+  // avg duration" stat is normally framed. Falls back to 0 (frontend hides
+  // the card) if no sessions have been recorded yet.
+  const [durationRow] = await db.select({ avgSeconds: sql<number>`avg(extract(epoch from (${practiceAttemptsTable.completedAt} - ${practiceAttemptsTable.startedAt})))` }).from(practiceAttemptsTable);
+  const avgDurationMinutes = durationRow?.avgSeconds ? Math.round(Number(durationRow.avgSeconds) / 60) : 0;
+
+  res.json({ totalTopics, totalQuestions, avgQuestions, avgDurationMinutes, moduleCount: moduleRows.length });
+});
+
+router.get("/subjects", requireAuth, async (req, res): Promise<void> => {
+  const params = ListSubjectsQueryParams.safeParse(req.query);
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  const isAdmin = isAdminRole(req.user!.role);
+  let visibleIds: number[] | null = null;
+  if (!isAdmin) {
+    const targeting = await getStudentTargeting(req.user!.id);
+    visibleIds = await getVisibleModuleIds(targeting);
+    // A requested moduleId the student can't see returns nothing, rather
+    // than silently falling back to "all modules" — this is the actual
+    // access-control enforcement, not just a UI filter.
+    if (params.data.moduleId && !visibleIds.includes(params.data.moduleId)) { res.json([]); return; }
+  }
+  const rows = await db.select().from(subjectsTable).where(and(
+    // Bug fix: this never excluded archived (soft-deleted) rows, so
+    // clicking Delete on a subject archived it server-side but it kept
+    // sitting right there in the list — looked exactly like the delete
+    // button wasn't working (same class of bug as /admin/mcqs above).
+    eq(subjectsTable.archived, false),
+    params.data.moduleId ? eq(subjectsTable.moduleId, params.data.moduleId) : undefined,
+    visibleIds ? inArray(subjectsTable.moduleId, visibleIds) : undefined,
+  )).orderBy(asc(subjectsTable.displayOrder));
+  const topicCounts = new Map<number, number>();
+  if (rows.length) {
+    const counted = await db.select({ subjectId: topicsTable.subjectId, count: sql<number>`count(*)` }).from(topicsTable)
+      .where(and(inArray(topicsTable.subjectId, rows.map((r) => r.id)), eq(topicsTable.archived, false))).groupBy(topicsTable.subjectId);
+    for (const c of counted) topicCounts.set(c.subjectId, Number(c.count));
+  }
+  res.json(ListSubjectsResponse.parse(rows.map((row) => ({ id: row.id, moduleId: row.moduleId, name: row.name, topicCount: topicCounts.get(row.id) ?? 0, iconUrl: resolveFileUrl(row.iconPath, { transform: THUMBNAIL_TRANSFORM }), displayOrder: row.displayOrder }))));
+});
+
+router.post("/subjects", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = z.object({ moduleId: z.number().int().positive(), name: z.string().min(1), iconPath: z.string().nullable().optional(), displayOrder: z.number().int().optional() }).safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: "moduleId and name are required" }); return; }
+  let displayOrder = parsed.data.displayOrder;
+  if (displayOrder === undefined) {
+    const [{ maxOrder } = { maxOrder: null }] = await db.select({ maxOrder: sql<number | null>`max(${subjectsTable.displayOrder})` }).from(subjectsTable).where(eq(subjectsTable.moduleId, parsed.data.moduleId));
+    displayOrder = (maxOrder ?? -1) + 1;
+  }
+  const [row] = await db.insert(subjectsTable).values({ moduleId: parsed.data.moduleId, name: parsed.data.name, iconPath: parsed.data.iconPath ?? null, displayOrder }).returning();
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "SUBJECT_CREATED", entity: "subject", entityId: row.id });
+  res.status(201).json({ id: row.id, moduleId: row.moduleId, name: row.name, topicCount: 0, iconUrl: resolveFileUrl(row.iconPath, { transform: THUMBNAIL_TRANSFORM }), displayOrder: row.displayOrder });
+});
+
+router.patch("/subjects/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const parsed = z.object({ name: z.string().min(1).optional(), active: z.boolean().optional(), iconPath: z.string().nullable().optional(), displayOrder: z.number().int().optional() }).safeParse(req.body);
+  if (!parsed.success || Number.isNaN(id)) { res.status(400).json({ error: "Invalid subject" }); return; }
+  const [row] = await db.update(subjectsTable).set(parsed.data).where(eq(subjectsTable.id, id)).returning();
+  if (!row) { res.status(404).json({ error: "Subject not found" }); return; }
+  res.json({ id: row.id, moduleId: row.moduleId, name: row.name, topicCount: await getSubjectTopicCount(row.id), iconUrl: resolveFileUrl(row.iconPath, { transform: THUMBNAIL_TRANSFORM }), displayOrder: row.displayOrder });
+});
+
+router.delete("/subjects/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const [row] = await db.update(subjectsTable).set({ active: false, archived: true }).where(eq(subjectsTable.id, id)).returning();
+  if (!row) { res.status(404).json({ error: "Subject not found" }); return; }
+  res.json({ ok: true });
+});
+
+router.get("/topics", requireAuth, async (req, res): Promise<void> => {
+  const params = ListTopicsQueryParams.safeParse(req.query);
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  const isAdmin = isAdminRole(req.user!.role);
+  let visibleModuleIds: number[] | null = null;
+  if (!isAdmin) {
+    const targeting = await getStudentTargeting(req.user!.id);
+    visibleModuleIds = await getVisibleModuleIds(targeting);
+  }
+  let subjectFilter = params.data.subjectId ? eq(topicsTable.subjectId, params.data.subjectId) : undefined;
+  if (!isAdmin && params.data.subjectId) {
+    const [subject] = await db.select().from(subjectsTable).where(eq(subjectsTable.id, params.data.subjectId));
+    if (!subject || !visibleModuleIds!.includes(subject.moduleId)) { res.json([]); return; }
+  }
+  const rows = await db.select({ id: topicsTable.id, subjectId: topicsTable.subjectId, name: topicsTable.name, moduleId: subjectsTable.moduleId, displayOrder: topicsTable.displayOrder })
+    .from(topicsTable).innerJoin(subjectsTable, eq(topicsTable.subjectId, subjectsTable.id))
+    .where(and(
+      // Same bug/fix as GET /subjects just above: delete never actually
+      // removed a topic from this list, only archived it server-side.
+      eq(topicsTable.archived, false),
+      subjectFilter,
+      visibleModuleIds ? inArray(subjectsTable.moduleId, visibleModuleIds) : undefined,
+    ))
+    .orderBy(asc(topicsTable.displayOrder));
+  // Real per-topic MCQ count (was hardcoded to 0 — see fix-notes section 2).
+  // Grouped in one query rather than N+1'd per topic; filtered to published
+  // for non-admins the same way GET /mcqs is, so a student never sees a
+  // count that includes drafts they can't actually practice.
+  const topicIds = rows.map((r) => r.id);
+  const countsByTopic = new Map<number, number>();
+  if (topicIds.length) {
+    const countRows = await db.select({ topicId: mcqsTable.topicId, count: sql<number>`count(*)` }).from(mcqsTable)
+      .where(and(inArray(mcqsTable.topicId, topicIds), isAdmin ? undefined : eq(mcqsTable.status, "published")))
+      .groupBy(mcqsTable.topicId);
+    for (const row of countRows) if (row.topicId != null) countsByTopic.set(row.topicId, Number(row.count));
+  }
+  res.json(ListTopicsResponse.parse(rows.map((row) => ({ id: row.id, subjectId: row.subjectId, name: row.name, questionCount: countsByTopic.get(row.id) ?? 0, completed: false, displayOrder: row.displayOrder }))));
+});
+
+router.post("/topics", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = z.object({ subjectId: z.number().int().positive(), name: z.string().min(1), displayOrder: z.number().int().optional() }).safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: "subjectId and name are required" }); return; }
+  let displayOrder = parsed.data.displayOrder;
+  if (displayOrder === undefined) {
+    const [{ maxOrder } = { maxOrder: null }] = await db.select({ maxOrder: sql<number | null>`max(${topicsTable.displayOrder})` }).from(topicsTable).where(eq(topicsTable.subjectId, parsed.data.subjectId));
+    displayOrder = (maxOrder ?? -1) + 1;
+  }
+  const [row] = await db.insert(topicsTable).values({ subjectId: parsed.data.subjectId, name: parsed.data.name, displayOrder }).returning();
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "TOPIC_CREATED", entity: "topic", entityId: row.id });
+  res.status(201).json({ id: row.id, subjectId: row.subjectId, name: row.name, questionCount: 0, completed: false, displayOrder: row.displayOrder });
+});
+
+router.patch("/topics/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const parsed = z.object({ name: z.string().min(1).optional(), active: z.boolean().optional(), displayOrder: z.number().int().optional() }).safeParse(req.body);
+  if (!parsed.success || Number.isNaN(id)) { res.status(400).json({ error: "Invalid topic" }); return; }
+  const [row] = await db.update(topicsTable).set(parsed.data).where(eq(topicsTable.id, id)).returning();
+  if (!row) { res.status(404).json({ error: "Topic not found" }); return; }
+  // Bug fix: this hardcoded questionCount to 0 on every edit (rename,
+  // reorder, activate/deactivate) even for a topic that already had
+  // questions — same bug GET /topics was fixed for elsewhere in this file,
+  // just missed here. Any caller that trusts this response body's count
+  // (rather than refetching the list) would show a topic's question count
+  // silently drop to 0 the moment an admin renamed it.
+  res.json({ id: row.id, subjectId: row.subjectId, name: row.name, questionCount: await getTopicMcqCount(row.id), completed: false, displayOrder: row.displayOrder });
+});
+
+router.delete("/topics/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const [row] = await db.update(topicsTable).set({ active: false, archived: true }).where(eq(topicsTable.id, id)).returning();
+  if (!row) { res.status(404).json({ error: "Topic not found" }); return; }
+  res.json({ ok: true });
+});
+
+// One route, two features: past-paper practice loads its questions through
+// here too (?pastPaperId=), so it follows the "past_papers" trial toggle;
+// a single-question jump (?mcqId=, from a notebook note or flag) is allowed
+// by either; everything else is the MCQ bank.
+router.get("/mcqs", requireAuth, requireMembershipFor((req) => (req.query.pastPaperId ? "past_papers" : req.query.mcqId ? ["mcqs", "past_papers", "exams"] : "mcqs")), async (req, res): Promise<void> => {
+  const params = ListMcqsQueryParams.safeParse(req.query);
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  const isAdmin = isAdminRole(req.user!.role);
+  let visibleModuleIds: number[] | null = null;
+  if (!isAdmin) {
+    const targeting = await getStudentTargeting(req.user!.id);
+    visibleModuleIds = await getVisibleModuleIds(targeting);
+  }
+  const rows = await db.select().from(mcqsTable).where(and(
+    params.data.search ? ilike(mcqsTable.question, `%${params.data.search}%`) : undefined,
+    params.data.moduleId ? eq(mcqsTable.moduleId, params.data.moduleId) : undefined,
+    params.data.subjectId ? eq(mcqsTable.subjectId, params.data.subjectId) : undefined,
+    params.data.topicId ? eq(mcqsTable.topicId, params.data.topicId) : undefined,
+    // Past-paper practice ("Start Session" on a past paper) needs its own
+    // question set — without this filter, students got served the entire
+    // published MCQ bank instead of that paper's questions.
+    params.data.pastPaperId ? eq(mcqsTable.pastPaperId, params.data.pastPaperId) : undefined,
+    // Jumping to a single question from a linked notebook note.
+    params.data.mcqId ? eq(mcqsTable.id, params.data.mcqId) : undefined,
+    params.data.difficulty ? eq(mcqsTable.difficulty, params.data.difficulty) : undefined,
+    isAdmin ? undefined : eq(mcqsTable.status, "published"),
+    // Bug fix: MCQs with no moduleId set (very common for past-paper
+    // questions, which don't require picking a module when attached) were
+    // being silently excluded here — inArray(moduleId, [...]) never matches
+    // a null moduleId in SQL. Flashcards/books already treat a null
+    // moduleId as "globally visible"; MCQs need the same OR isNull(...)
+    // clause, or "Start Session" on a past paper returns zero questions.
+    visibleModuleIds ? or(isNull(mcqsTable.moduleId), inArray(mcqsTable.moduleId, visibleModuleIds)) : undefined,
+  )).orderBy(desc(mcqsTable.createdAt));
+  res.json(ListMcqsResponse.parse(rows.map((row) => ({ ...row, module: "", subject: "", topic: "" }))));
+});
+
+// Admin-only variant of the listing above that keeps moduleId/subjectId/
+// topicId/explanationStatus on the wire (the generic ListMcqsResponse
+// schema strips them) — used to group the question bank into the
+// Module -> Subject -> Topic tree in the admin UI.
+router.get("/admin/mcqs", requireAdmin, async (req, res): Promise<void> => {
+  const params = ListMcqsQueryParams.safeParse(req.query);
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  // Bug fix: this never excluded archived (soft-deleted) rows, so clicking
+  // Delete would archive the question server-side but it kept sitting right
+  // there in the admin bank list — looked exactly like the delete button
+  // wasn't working. Excluded by default now; ?includeArchived=true opts back
+  // in for admins who want to audit/restore something they deleted.
+  const includeArchived = req.query.includeArchived === "true";
+  const rows = await db.select().from(mcqsTable).where(and(
+    params.data.search ? ilike(mcqsTable.question, `%${params.data.search}%`) : undefined,
+    params.data.moduleId ? eq(mcqsTable.moduleId, params.data.moduleId) : undefined,
+    params.data.subjectId ? eq(mcqsTable.subjectId, params.data.subjectId) : undefined,
+    params.data.topicId ? eq(mcqsTable.topicId, params.data.topicId) : undefined,
+    params.data.difficulty ? eq(mcqsTable.difficulty, params.data.difficulty) : undefined,
+    includeArchived ? undefined : ne(mcqsTable.status, "archived"),
+  )).orderBy(desc(mcqsTable.createdAt));
+  res.json(rows);
+});
+
+router.post("/mcqs", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = CreateMcqBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const [mcq] = await db.insert(mcqsTable).values({
+    ...parsed.data, options: parsed.data.options, status: "draft",
+    explanationStatus: parsed.data.explanation?.trim() ? "APPROVED" : "PENDING",
+  }).returning();
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MCQ_CREATED", entity: "mcq", entityId: mcq.id });
+  res.status(201).json(CreateMcqResponse.parse({ ...mcq, module: "", subject: "", topic: "" }));
+});
+
+router.patch("/mcqs/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const parsed = CreateMcqBody.partial().safeParse(req.body);
+  if (!parsed.success || Number.isNaN(id)) { res.status(400).json({ error: "Invalid MCQ" }); return; }
+  const updates: Record<string, unknown> = { ...parsed.data };
+  // If the admin is hand-editing the explanation text (not just toggling
+  // status separately via /mcqs/:id/explanation-status), treat that as a
+  // review — it's no longer an unreviewed AI draft.
+  if (parsed.data.explanation !== undefined) {
+    updates.explanationStatus = parsed.data.explanation.trim() ? "REVIEWED" : "PENDING";
+  }
+  const [mcq] = await db.update(mcqsTable).set(updates).where(eq(mcqsTable.id, id)).returning();
+  if (!mcq) { res.status(404).json({ error: "MCQ not found" }); return; }
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MCQ_UPDATED", entity: "mcq", entityId: mcq.id });
+  res.json({ ...mcq, module: "", subject: "", topic: "" });
+});
+
+router.post("/mcqs/:id/publish", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const [mcq] = await db.update(mcqsTable).set({ status: "published" }).where(eq(mcqsTable.id, id)).returning();
+  if (!mcq) { res.status(404).json({ error: "MCQ not found" }); return; }
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MCQ_PUBLISHED", entity: "mcq", entityId: mcq.id });
+  res.json({ ...mcq, module: "", subject: "", topic: "" });
+});
+
+router.delete("/mcqs/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const [mcq] = await db.select({ id: mcqsTable.id }).from(mcqsTable).where(eq(mcqsTable.id, id));
+  if (!mcq) { res.status(404).json({ error: "MCQ not found" }); return; }
+  await hardDeleteMcqs([id]);
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MCQ_DELETED", entity: "mcq", entityId: id });
+  res.json({ ok: true });
+});
+
+// Bulk delete for the MCQ bank's multi-select / "delete all in current
+// filtered view" admin tools. Accepts either an explicit id list or
+// { all: true, filters } to archive everything matching the current list
+// filters (mirrors the bulk-generate pattern already used in
+// explanations.ts). Archives (soft-delete) rather than hard-deletes, same
+// as the single-MCQ delete route above.
+const BulkDeleteMcqsBody = z.object({ ids: z.array(z.number().int().positive()) }).or(
+  z.object({
+    all: z.literal(true),
+    filters: z.object({
+      search: z.string().optional(),
+      moduleId: z.number().int().positive().optional(),
+      subjectId: z.number().int().positive().optional(),
+      topicId: z.number().int().positive().optional(),
+      difficulty: z.string().optional(),
+    }).optional(),
+  }),
+);
+
+router.delete("/admin/mcqs/bulk", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = BulkDeleteMcqsBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+
+  let idsToDelete: number[];
+  if ("ids" in parsed.data) {
+    idsToDelete = parsed.data.ids;
+  } else {
+    const filters = parsed.data.filters ?? {};
+    const rows = await db.select({ id: mcqsTable.id }).from(mcqsTable).where(and(
+      filters.search ? ilike(mcqsTable.question, `%${filters.search}%`) : undefined,
+      filters.moduleId ? eq(mcqsTable.moduleId, filters.moduleId) : undefined,
+      filters.subjectId ? eq(mcqsTable.subjectId, filters.subjectId) : undefined,
+      filters.topicId ? eq(mcqsTable.topicId, filters.topicId) : undefined,
+      filters.difficulty ? eq(mcqsTable.difficulty, filters.difficulty) : undefined,
+    ));
+    idsToDelete = rows.map((r) => r.id);
+  }
+
+  if (!idsToDelete.length) { res.json({ ok: true, deleted: 0 }); return; }
+
+  await hardDeleteMcqs(idsToDelete);
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MCQ_BULK_DELETED", entity: "mcq", entityId: 0, metadata: JSON.stringify({ ids: idsToDelete, count: idsToDelete.length }) });
+  res.json({ ok: true, deleted: idsToDelete.length });
+});
+
+// One-click fix for a module stuck showing fewer questions than were
+// actually imported into it (see the CommitBody.status comment in
+// mcq-import.ts for the root cause) — flips every draft MCQ scoped to a
+// module (or every draft MCQ in the whole bank, if moduleId is omitted)
+// to "published" in one request, instead of the admin opening each one.
+router.patch("/admin/mcqs/publish-drafts", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = z.object({ moduleId: z.number().int().positive().optional() }).safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const rows = await db.update(mcqsTable).set({ status: "published" }).where(and(
+    eq(mcqsTable.status, "draft"),
+    parsed.data.moduleId ? eq(mcqsTable.moduleId, parsed.data.moduleId) : undefined,
+  )).returning({ id: mcqsTable.id });
+  if (rows.length) {
+    await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MCQS_DRAFTS_PUBLISHED", entity: "mcq", entityId: parsed.data.moduleId ?? 0, metadata: JSON.stringify({ moduleId: parsed.data.moduleId ?? null, count: rows.length }) });
+  }
+  res.json({ ok: true, published: rows.length });
+});
+
+// Bulk create for the "Add multiple MCQs" admin flow — accepts an array of
+// MCQ payloads shaped like CreateMcqBody and inserts them in one request.
+router.post("/admin/mcqs/bulk", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = z.object({ mcqs: z.array(CreateMcqBody).min(1) }).safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  try {
+    const rows = await db.insert(mcqsTable).values(parsed.data.mcqs.map((mcq) => ({
+      ...mcq, options: mcq.options, status: "draft" as const,
+      explanationStatus: (mcq.explanation?.trim() ? "APPROVED" : "PENDING") as "APPROVED" | "PENDING",
+    }))).returning();
+    await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MCQ_BULK_CREATED", entity: "mcq", entityId: 0, metadata: JSON.stringify({ count: rows.length }) });
+    res.status(201).json({ ok: true, created: rows.length, mcqs: rows.map((mcq) => ({ ...mcq, module: "", subject: "", topic: "" })) });
+  } catch (err) {
+    // See dbErrorMessage() — without this, a failed batch insert here
+    // surfaced the raw SQL + every bound parameter instead of the actual
+    // Postgres error.
+    res.status(422).json({ error: `Could not save these questions: ${dbErrorMessage(err, "unknown database error")}` });
+  }
+});
+
+// Fixes question banks (typically bulk-imported from an external AI
+// generator) where the correct option is suspiciously clustered on the
+// same letter across many questions — a dead giveaway to students that
+// isn't actually testing their knowledge. Randomly reorders each
+// question's `options` array (and `optionExplanations`, in lockstep, if
+// present) WITHOUT touching `correctAnswer`. That's safe specifically
+// because `correctAnswer` is stored as the correct option's full text, not
+// a letter/index (see mcqsTable's comment and shuffleMcqOptions' own file
+// comment) — every correctness check compares option text, and the A/B/C
+// letter students see is computed from array position, so reshuffling
+// `options` automatically carries "correct" along with the option that
+// earned it. Same {ids} | {all, filters} shape as the bulk-delete endpoint
+// above, so it can target one selection or an entire module/subject/topic
+// at once.
+const ShuffleOptionsBody = z.object({ ids: z.array(z.number().int().positive()).min(1) }).or(
+  z.object({
+    all: z.literal(true),
+    filters: z.object({
+      search: z.string().optional(),
+      moduleId: z.number().int().positive().optional(),
+      subjectId: z.number().int().positive().optional(),
+      topicId: z.number().int().positive().optional(),
+      difficulty: z.string().optional(),
+      // Lets the Past Papers admin screen scope this to one paper's
+      // questions the same way AnalysisPanel scopes it to a
+      // module/subject/topic — see mcqsTable.pastPaperId's own comment for
+      // why past-paper MCQs aren't reachable via those three filters alone.
+      pastPaperId: z.number().int().positive().optional(),
+    }).optional(),
+  }),
+);
+
+router.post("/admin/mcqs/shuffle-options", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = ShuffleOptionsBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+
+  const rows = "ids" in parsed.data
+    ? await db.select({ id: mcqsTable.id, options: mcqsTable.options, optionExplanations: mcqsTable.optionExplanations })
+        .from(mcqsTable).where(inArray(mcqsTable.id, parsed.data.ids))
+    : await db.select({ id: mcqsTable.id, options: mcqsTable.options, optionExplanations: mcqsTable.optionExplanations })
+        .from(mcqsTable).where(and(
+          parsed.data.filters?.search ? ilike(mcqsTable.question, `%${parsed.data.filters.search}%`) : undefined,
+          parsed.data.filters?.moduleId ? eq(mcqsTable.moduleId, parsed.data.filters.moduleId) : undefined,
+          parsed.data.filters?.subjectId ? eq(mcqsTable.subjectId, parsed.data.filters.subjectId) : undefined,
+          parsed.data.filters?.topicId ? eq(mcqsTable.topicId, parsed.data.filters.topicId) : undefined,
+          parsed.data.filters?.difficulty ? eq(mcqsTable.difficulty, parsed.data.filters.difficulty) : undefined,
+          parsed.data.filters?.pastPaperId ? eq(mcqsTable.pastPaperId, parsed.data.filters.pastPaperId) : undefined,
+        ));
+
+  if (!rows.length) { res.json({ ok: true, shuffled: 0, skipped: 0 }); return; }
+
+  // Compute every row's new order in memory first (cheap — pure JS, no DB
+  // involved), then write them all back. The old version awaited one
+  // `db.update` per row in a loop, so a "shuffle all" over a large bank (a
+  // few hundred+ questions) meant a few hundred+ sequential DB round-trips
+  // — easily tens of seconds, which is what was showing up as "taking more
+  // time" / timing out. Batching into a single statement per chunk (via
+  // jsonb_to_recordset, matched back on id) cuts that to one DB round-trip
+  // per ~500 rows regardless of how many questions are selected.
+  const updates: { id: number; options: string[]; optionExplanations: (string | null)[] | null }[] = [];
+  for (const row of rows) {
+    const { options: newOptions, optionExplanations: newExplanations, changed } = shuffleMcqOptions(
+      row.options as string[],
+      row.optionExplanations as (string | null)[] | null,
+    );
+    if (!changed) continue;
+    updates.push({ id: row.id, options: newOptions, optionExplanations: newExplanations });
+  }
+
+  const shuffledCount = updates.length;
+  const BATCH_SIZE = 500;
+  if (shuffledCount) {
+    await db.transaction(async (tx) => {
+      for (let i = 0; i < updates.length; i += BATCH_SIZE) {
+        // Bug fix: the payload's keys must match the recordset's COLUMN names
+        // below. It used to be sent as `optionExplanations` (camelCase) while
+        // the column is `option_explanations`, so jsonb_to_recordset found no
+        // matching key, read NULL, and the UPDATE wiped every question's
+        // per-option explanations on every shuffle. Only `options` (whose name
+        // is the same in both spellings) survived.
+        const batch = updates.slice(i, i + BATCH_SIZE).map((u) => ({ id: u.id, options: u.options, option_explanations: u.optionExplanations }));
+        await tx.execute(sql`
+          UPDATE med_mcqs AS m
+          SET options = v.options, option_explanations = v.option_explanations
+          FROM jsonb_to_recordset(${JSON.stringify(batch)}::jsonb)
+            AS v(id int, options text[], option_explanations text[])
+          WHERE m.id = v.id
+        `);
+      }
+    });
+  }
+
+  if (shuffledCount) {
+    await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "MCQS_OPTIONS_SHUFFLED", entity: "mcq", entityId: 0, metadata: JSON.stringify({ ids: updates.map((u) => u.id), count: shuffledCount }) });
+  }
+  res.json({ ok: true, shuffled: shuffledCount, skipped: rows.length - shuffledCount });
+});
+
+router.get("/flashcards", requireAuth, requireMembershipFor("flashcards"), async (req, res): Promise<void> => {
+  const params = ListFlashcardsQueryParams.safeParse(req.query);
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  const isAdmin = isAdminRole(req.user!.role);
+  let visibleModuleIds: number[] | null = null;
+  if (!isAdmin) {
+    const targeting = await getStudentTargeting(req.user!.id);
+    visibleModuleIds = await getVisibleModuleIds(targeting);
+  }
+  // Flashcards with no moduleId set are treated as globally visible, same as
+  // an untargeted module — most existing/demo flashcards predate this field.
+  const rows = await db.select().from(flashcardsTable).where(and(
+    eq(flashcardsTable.active, true),
+    params.data.moduleId ? eq(flashcardsTable.moduleId, params.data.moduleId) : undefined,
+    params.data.subjectId ? eq(flashcardsTable.subjectId, params.data.subjectId) : undefined,
+    params.data.topicId ? eq(flashcardsTable.topicId, params.data.topicId) : undefined,
+    visibleModuleIds ? or(isNull(flashcardsTable.moduleId), inArray(flashcardsTable.moduleId, visibleModuleIds)) : undefined,
+  ));
+  res.json(ListFlashcardsResponse.parse(rows.map((row) => ({ ...row, learned: false }))));
+});
+
+router.post("/flashcards", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = z.object({
+    front: z.string().min(1), back: z.string().min(1), module: z.string().min(1), topic: z.string().min(1),
+    moduleId: z.number().int().positive().optional(), subjectId: z.number().int().positive().optional(), topicId: z.number().int().positive().optional(),
+  }).safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: "front, back, module, and topic are required" }); return; }
+  const [row] = await db.insert(flashcardsTable).values(parsed.data).returning();
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "FLASHCARD_CREATED", entity: "flashcard", entityId: row.id });
+  res.status(201).json({ ...row, learned: false });
+});
+
+// Admin-only variant of GET /flashcards that keeps moduleId/subjectId/topicId
+// on the wire (ListFlashcardsResponse strips them, same reason as
+// /admin/mcqs above) — used to group flashcards into the admin's
+// Module -> Subject -> Topic bank tree instead of one flat list.
+router.get("/admin/flashcards", requireAdmin, async (req, res): Promise<void> => {
+  const params = z.object({ moduleId: z.coerce.number().int().optional(), subjectId: z.coerce.number().int().optional(), topicId: z.coerce.number().int().optional(), search: z.string().optional() }).safeParse(req.query);
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  const includeArchived = req.query.includeArchived === "true";
+  const rows = await db.select().from(flashcardsTable).where(and(
+    params.data.search ? or(ilike(flashcardsTable.front, `%${params.data.search}%`), ilike(flashcardsTable.back, `%${params.data.search}%`)) : undefined,
+    params.data.moduleId ? eq(flashcardsTable.moduleId, params.data.moduleId) : undefined,
+    params.data.subjectId ? eq(flashcardsTable.subjectId, params.data.subjectId) : undefined,
+    params.data.topicId ? eq(flashcardsTable.topicId, params.data.topicId) : undefined,
+    includeArchived ? undefined : eq(flashcardsTable.archived, false),
+  )).orderBy(desc(flashcardsTable.createdAt));
+  res.json(rows);
+});
+
+router.patch("/flashcards/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const parsed = z.object({
+    front: z.string().min(1).optional(), back: z.string().min(1).optional(),
+    moduleId: z.number().int().positive().nullable().optional(), subjectId: z.number().int().positive().nullable().optional(), topicId: z.number().int().positive().nullable().optional(),
+    module: z.string().optional(), topic: z.string().optional(),
+  }).safeParse(req.body);
+  if (!parsed.success || Number.isNaN(id)) { res.status(400).json({ error: "Invalid flashcard" }); return; }
+  const [row] = await db.update(flashcardsTable).set(parsed.data).where(eq(flashcardsTable.id, id)).returning();
+  if (!row) { res.status(404).json({ error: "Flashcard not found" }); return; }
+  res.json({ ...row, learned: false });
+});
+
+router.delete("/flashcards/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const [row] = await db.update(flashcardsTable).set({ active: false, archived: true }).where(eq(flashcardsTable.id, id)).returning();
+  if (!row) { res.status(404).json({ error: "Flashcard not found" }); return; }
+  res.json({ ok: true });
+});
+
+// Bulk delete for the Flashcards admin screen's multi-select — mirrors
+// /admin/mcqs/bulk. One request instead of N individual DELETE calls from
+// the frontend. Soft-delete (active:false, archived:true), same as the
+// single-flashcard route above. Also accepts {all:true, filters} for the
+// tree view's "delete every card in this module/subject/topic" buttons —
+// same shape as the MCQ bank's scoped bulk delete.
+const BulkDeleteFlashcardsBody = z.union([
+  z.object({ ids: z.array(z.number().int().positive()).min(1).max(500) }),
+  z.object({ all: z.literal(true), filters: z.object({ moduleId: z.number().int().optional(), subjectId: z.number().int().optional(), topicId: z.number().int().optional() }).optional() }),
+]);
+
+router.delete("/admin/flashcards/bulk", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = BulkDeleteFlashcardsBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const where = "ids" in parsed.data
+    ? inArray(flashcardsTable.id, parsed.data.ids)
+    : and(
+        eq(flashcardsTable.archived, false),
+        parsed.data.filters?.moduleId ? eq(flashcardsTable.moduleId, parsed.data.filters.moduleId) : undefined,
+        parsed.data.filters?.subjectId ? eq(flashcardsTable.subjectId, parsed.data.filters.subjectId) : undefined,
+        parsed.data.filters?.topicId ? eq(flashcardsTable.topicId, parsed.data.filters.topicId) : undefined,
+      );
+  const rows = await db.update(flashcardsTable).set({ active: false, archived: true }).where(where).returning({ id: flashcardsTable.id });
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "FLASHCARD_BULK_DELETED", entity: "flashcard", entityId: 0, metadata: JSON.stringify({ count: rows.length }) });
+  res.json({ ok: true, deleted: rows.length });
+});
+
+router.get("/resources", requireAuth, requireMembershipFor("resources"), async (req, res): Promise<void> => {
+  const params = ListResourcesQueryParams.safeParse(req.query);
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  const rows = await db.select().from(resourcesTable).where(and(params.data.kind ? eq(resourcesTable.kind, params.data.kind) : undefined, eq(resourcesTable.active, true)));
+  res.json(ListResourcesResponse.parse(rows.map((row) => ({ ...row, storagePath: resolveFileUrl(row.storagePath), updatedAt: row.updatedAt.toISOString() }))));
+});
+
+router.post("/resources", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = z.object({ title: z.string().min(1), description: z.string().default(""), kind: z.string().min(1), module: z.string().default(""), size: z.string().default(""), storagePath: z.string().optional(), externalUrl: z.string().optional(), protected: z.boolean().optional() }).safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message }); return; }
+  const [row] = await db.insert(resourcesTable).values(parsed.data).returning();
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "RESOURCE_CREATED", entity: "resource", entityId: row.id });
+  res.status(201).json({ ...row, updatedAt: row.updatedAt.toISOString() });
+});
+
+router.delete("/resources/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const [row] = await db.update(resourcesTable).set({ active: false, archived: true }).where(eq(resourcesTable.id, id)).returning();
+  if (!row) { res.status(404).json({ error: "Resource not found" }); return; }
+  res.json({ ok: true });
+});
+
+router.get("/students", requireAdmin, async (req, res): Promise<void> => {
+  const params = ListStudentsQueryParams.safeParse(req.query);
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  const statusFilter = typeof req.query.status === "string" ? req.query.status : undefined;
+  const rows = await db.select().from(usersTable).where(and(
+    eq(usersTable.role, "student"),
+    params.data.search ? or(ilike(usersTable.name, `%${params.data.search}%`), ilike(usersTable.email, `%${params.data.search}%`), ilike(usersTable.rollNumber, `%${params.data.search}%`)) : undefined,
+    statusFilter ? eq(usersTable.status, statusFilter) : ne(usersTable.status, "DELETED"),
+  )).orderBy(desc(usersTable.createdAt));
+
+  // Bug fix: this only ever read the legacy free-text `program` column,
+  // never the real programId/academicYearId a student actually registered
+  // with (see auth.ts's /register — every current student has these set).
+  // That column also has no normalized program "kind" (MBBS/BDS) or year
+  // number on it at all, so there was no reliable way to group students by
+  // year the way the MCQ bank already groups modules by
+  // programTargetKind/yearTargetNumber (see contentVisibility.ts /
+  // shared.tsx's groupByProgramYear). Joining the same Program/AcademicYear
+  // tables the dashboard-targeting fix reads from gives the admin UI that
+  // same normalized (kind, yearNumber) pair to group by, while still
+  // falling back to the legacy text fields for old rows that predate
+  // programId/academicYearId existing, so nothing disappears from the list.
+  const programIds = [...new Set(rows.map((r) => r.programId).filter((id): id is number => id != null))];
+  const yearIds = [...new Set(rows.map((r) => r.academicYearId).filter((id): id is number => id != null))];
+  const [programRows, yearRows] = await Promise.all([
+    programIds.length ? db.select().from(programsTable).where(inArray(programsTable.id, programIds)) : Promise.resolve([]),
+    yearIds.length ? db.select().from(academicYearsTable).where(inArray(academicYearsTable.id, yearIds)) : Promise.resolve([]),
+  ]);
+  const programById = new Map(programRows.map((p) => [p.id, p]));
+  const yearById = new Map(yearRows.map((y) => [y.id, y]));
+
+  res.json(ListStudentsResponse.parse(rows.map((row) => {
+    const program = row.programId ? programById.get(row.programId) : undefined;
+    const academicYear = row.academicYearId ? yearById.get(row.academicYearId) : undefined;
+    return {
+      id: row.id, name: row.name, email: row.email,
+      institution: row.institution ?? "—",
+      program: (program?.kind || row.program) ?? "—",
+      programKind: program?.kind || null,
+      yearNumber: academicYear?.yearNumber ?? null,
+      academicYearLabel: academicYear?.label ?? null,
+      status: row.status, joinedAt: row.createdAt.toISOString(), progress: 0,
+    };
+  })));
+});
+
+router.get("/students/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const [student] = await db.select().from(usersTable).where(and(eq(usersTable.id, id), eq(usersTable.role, "student")));
+  if (!student) { res.status(404).json({ error: "Student not found" }); return; }
+  const [academicYear] = student.academicYearId ? await db.select().from(academicYearsTable).where(eq(academicYearsTable.id, student.academicYearId)) : [];
+  const [batch] = student.batchId ? await db.select().from(batchesTable).where(eq(batchesTable.id, student.batchId)) : [];
+  const payments = await db.select().from(paymentsTable).where(eq(paymentsTable.userId, id)).orderBy(desc(paymentsTable.createdAt));
+  const memberships = await db.select().from(membershipsTable).where(eq(membershipsTable.userId, id)).orderBy(desc(membershipsTable.expiresAt));
+  res.json({
+    id: student.id, name: student.name, email: student.email, phone: student.phone, rollNumber: student.rollNumber,
+    status: student.status, statusMessage: student.statusMessage, emailVerified: student.emailVerified,
+    institution: student.institution, program: student.program, academicYear: academicYear?.label ?? null, batch: batch?.label ?? null,
+    currentStreak: student.currentStreak, longestStreak: student.longestStreak,
+    lastLoginAt: student.lastLoginAt?.toISOString() ?? null, joinedAt: student.createdAt.toISOString(),
+    payments: await Promise.all(payments.map(paymentView)),
+    activeMembership: memberships.find((m) => m.status === "ACTIVE" && m.expiresAt.getTime() > Date.now()) ? {
+      expiresAt: memberships.find((m) => m.status === "ACTIVE")!.expiresAt.toISOString(),
+      isTrial: memberships.find((m) => m.status === "ACTIVE")!.isTrial,
+    } : null,
+  });
+});
+
+router.patch("/students/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const parsed = z.object({ name: z.string().min(2).max(120).optional(), phone: z.string().max(30).optional(), rollNumber: z.string().max(60).optional() }).safeParse(req.body);
+  if (!parsed.success || Number.isNaN(id)) { res.status(400).json({ error: "Invalid request" }); return; }
+  const [row] = await db.update(usersTable).set(parsed.data).where(and(eq(usersTable.id, id), eq(usersTable.role, "student"))).returning();
+  if (!row) { res.status(404).json({ error: "Student not found" }); return; }
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "STUDENT_UPDATED", entity: "user", entityId: row.id });
+  res.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// Device limit (see lib/deviceSessions.ts). Each student may be signed in on
+// at most `limit` devices at once: their own override (users.max_devices) if
+// an admin set one, otherwise the platform default (DEFAULT_MAX_DEVICES, 2).
+// 0 means unlimited.
+// ---------------------------------------------------------------------------
+
+router.get("/students/:id/devices", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) { res.status(400).json({ error: "Invalid student id" }); return; }
+  const [student] = await db.select().from(usersTable).where(and(eq(usersTable.id, id), eq(usersTable.role, "student")));
+  if (!student) { res.status(404).json({ error: "Student not found" }); return; }
+  const [sessions, defaultLimit, limit] = await Promise.all([listActiveSessions(id), getDefaultDeviceLimit(), getEffectiveDeviceLimit(student)]);
+  res.json({
+    limit,
+    override: student.maxDevices,
+    defaultLimit,
+    devices: sessions.map((d) => ({
+      id: d.id, label: d.deviceLabel, ip: d.ip,
+      signedInAt: d.createdAt.toISOString(), lastSeenAt: d.lastSeenAt.toISOString(),
+    })),
+  });
+});
+
+// maxDevices: a whole number 0..50 (0 = unlimited), or null to go back to the platform default.
+router.patch("/students/:id/device-limit", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const parsed = z.object({ maxDevices: z.number().int().min(0).max(MAX_DEVICES_CEILING).nullable() }).safeParse(req.body);
+  if (!parsed.success || !Number.isInteger(id)) { res.status(400).json({ error: `Device limit must be a whole number from 0 (unlimited) to ${MAX_DEVICES_CEILING}.` }); return; }
+  const [row] = await db.update(usersTable).set({ maxDevices: parsed.data.maxDevices }).where(and(eq(usersTable.id, id), eq(usersTable.role, "student"))).returning();
+  if (!row) { res.status(404).json({ error: "Student not found" }); return; }
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "STUDENT_DEVICE_LIMIT_SET", entity: "user", entityId: id, metadata: JSON.stringify({ maxDevices: parsed.data.maxDevices }) });
+  res.json({ ok: true, limit: await getEffectiveDeviceLimit(row), override: row.maxDevices });
+});
+
+// Sign one device out (frees its slot; that browser is logged out on its next request).
+router.delete("/students/:id/devices/:sessionId", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const sessionId = Number(req.params.sessionId);
+  if (!Number.isInteger(id) || !Number.isInteger(sessionId)) { res.status(400).json({ error: "Invalid id" }); return; }
+  if (!(await revokeOneForUser(id, sessionId))) { res.status(404).json({ error: "That device is no longer signed in." }); return; }
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "STUDENT_DEVICE_REVOKED", entity: "user", entityId: id });
+  res.json({ ok: true });
+});
+
+// Sign the student out everywhere — the fix for "I lost my phone / I'm locked out at the limit".
+router.delete("/students/:id/devices", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) { res.status(400).json({ error: "Invalid student id" }); return; }
+  const revoked = await revokeAllForUser(id);
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "STUDENT_DEVICES_RESET", entity: "user", entityId: id, metadata: JSON.stringify({ revoked }) });
+  res.json({ ok: true, revoked });
+});
+
+const STUDENT_STATUSES = ["UNVERIFIED", "VERIFIED", "PAYMENT_PENDING_REVIEW", "ACTIVE", "EXPIRED", "SUSPENDED", "REJECTED"] as const;
+
+router.patch("/students/:id/status", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const parsed = z
+    .object({
+      status: z.enum(STUDENT_STATUSES),
+      emailVerified: z.boolean().optional(),
+      planId: z.number().int().positive().optional(),
+      durationDays: z.number().int().positive().optional(),
+      // Required when rejecting — same idea as POST /payments/:id/reject's
+      // `reason`, just at the account level instead of a single payment.
+      // Optional for every other status change (nothing stops an admin
+      // from leaving a note on those too, e.g. why a student was
+      // suspended).
+      message: z.string().trim().min(1).max(1000).optional(),
+    })
+    .safeParse(req.body);
+  if (!parsed.success || Number.isNaN(id)) { res.status(400).json({ error: "Invalid request" }); return; }
+  if (parsed.data.status === "REJECTED" && !parsed.data.message) {
+    res.status(400).json({ error: "A message explaining the rejection is required" });
+    return;
+  }
+  // Moving a student to VERIFIED, PAYMENT_PENDING_REVIEW, or ACTIVE implies
+  // an admin has confirmed their identity — auto-clear the email-verification
+  // gate too, so the account status change actually lets them log in instead
+  // of silently leaving them blocked at the "please verify your email" step.
+  const impliesVerified = parsed.data.status === "VERIFIED" || parsed.data.status === "PAYMENT_PENDING_REVIEW" || parsed.data.status === "ACTIVE";
+  const emailVerified = parsed.data.emailVerified ?? (impliesVerified ? true : undefined);
+  const [row] = await db
+    .update(usersTable)
+    .set({
+      status: parsed.data.status,
+      ...(emailVerified !== undefined ? { emailVerified } : {}),
+      // Keep the account's last status message around even when a later
+      // change (e.g. re-activating) doesn't pass one — only overwrite it
+      // when this call actually provided a new one.
+      ...(parsed.data.message !== undefined ? { statusMessage: parsed.data.message } : {}),
+    })
+    .where(and(eq(usersTable.id, id), eq(usersTable.role, "student")))
+    .returning();
+  if (!row) { res.status(404).json({ error: "Student not found" }); return; }
+
+  if (parsed.data.status === "REJECTED" && parsed.data.message) {
+    await db.insert(notificationsTable).values({ userId: row.id, title: "Your account application was rejected", body: parsed.data.message, type: "warning" });
+    void sendEmail(row.email, "Your MedschoolProffs application needs attention", accountRejectedEmailHtml(row.name, parsed.data.message)).catch(() => {});
+  }
+
+  // IMPORTANT: GET /student/dashboard reads membership status/expiry only
+  // from membershipsTable (never usersTable.status) — see planView()/the
+  // dashboard route below. If this handler sets ACTIVE without also
+  // creating a membership row, the student's own dashboard will disagree
+  // with what the admin just did ("no active subscription" despite being
+  // marked Active here). Keep both in sync: manually activating a student
+  // without an existing active membership grants one here, same shape as
+  // POST /payments/:id/approve.
+  let grantedMembership: { planId: number; expiresAt: Date } | null = null;
+  if (parsed.data.status === "ACTIVE") {
+    const [existingActive] = await db.select().from(membershipsTable).where(and(eq(membershipsTable.userId, id), eq(membershipsTable.status, "ACTIVE"))).orderBy(desc(membershipsTable.expiresAt)).limit(1);
+    const stillActive = existingActive && existingActive.expiresAt > new Date();
+    if (!stillActive) {
+      let plan: typeof membershipPlansTable.$inferSelect | undefined;
+      if (parsed.data.planId) {
+        [plan] = await db.select().from(membershipPlansTable).where(eq(membershipPlansTable.id, parsed.data.planId));
+      } else {
+        [plan] = await db.select().from(membershipPlansTable).where(eq(membershipPlansTable.active, true)).orderBy(membershipPlansTable.price).limit(1);
+      }
+      const startsAt = new Date();
+      const expiresAt = new Date(startsAt);
+      if (parsed.data.durationDays) {
+        expiresAt.setDate(expiresAt.getDate() + parsed.data.durationDays);
+      } else if (plan) {
+        if (plan.durationUnit === "years") expiresAt.setFullYear(expiresAt.getFullYear() + plan.duration);
+        else if (plan.durationUnit === "months") expiresAt.setMonth(expiresAt.getMonth() + plan.duration);
+        else expiresAt.setDate(expiresAt.getDate() + plan.duration);
+      } else {
+        expiresAt.setDate(expiresAt.getDate() + 30); // no plan configured at all — 30-day default so the grant isn't silently a no-op
+      }
+      // Defensively supersede any stale ACTIVE rows for this student (even
+      // expired ones) before inserting, so a student can never end up with
+      // more than one ACTIVE-status membership row at a time.
+      await db.update(membershipsTable).set({ status: "SUPERSEDED" }).where(and(eq(membershipsTable.userId, id), eq(membershipsTable.status, "ACTIVE")));
+      await db.insert(membershipsTable).values({ userId: id, planId: plan?.id ?? null, status: "ACTIVE", startsAt, expiresAt });
+      if (plan) grantedMembership = { planId: plan.id, expiresAt };
+      void sendEmail(row.email, "Your MedschoolProffs membership is active", membershipActivatedEmailHtml(row.name, plan?.name ?? null, expiresAt)).catch(() => {});
+    }
+  }
+
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "STUDENT_STATUS_UPDATED", entity: "user", entityId: row.id, metadata: JSON.stringify({ status: parsed.data.status, emailVerified: row.emailVerified, grantedMembership, message: parsed.data.message ?? null }) });
+  res.json({ ok: true, status: row.status, emailVerified: row.emailVerified, grantedMembership, statusMessage: row.statusMessage });
+});
+
+// Trial mode: grant a student temporary access without a payment, for an
+// admin-chosen number of days. Reuses the same membership grant mechanism
+// as PATCH /students/:id/status's ACTIVE branch above (a med_memberships
+// row with status ACTIVE + expiresAt) — every place that already checks
+// membership status/expiry to gate content (GET /student/dashboard etc.)
+// works for a trial with no extra changes — just tagged isTrial: true so
+// the admin UI can show/revoke it distinctly from a real paid membership.
+router.post("/students/:id/trial", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const parsed = z.object({ durationDays: z.number().int().positive().max(365) }).safeParse(req.body);
+  if (!parsed.success || Number.isNaN(id)) { res.status(400).json({ error: "Invalid request" }); return; }
+  const [row] = await db.select().from(usersTable).where(and(eq(usersTable.id, id), eq(usersTable.role, "student")));
+  if (!row) { res.status(404).json({ error: "Student not found" }); return; }
+
+  const startsAt = new Date();
+  const expiresAt = new Date(startsAt);
+  expiresAt.setDate(expiresAt.getDate() + parsed.data.durationDays);
+
+  // Same defensive supersede as the manual-activation path, so a student
+  // never ends up with more than one ACTIVE membership row at a time —
+  // starting a trial for a student who already has an active paid
+  // membership or an earlier trial replaces it rather than stacking.
+  await db.update(membershipsTable).set({ status: "SUPERSEDED" }).where(and(eq(membershipsTable.userId, id), eq(membershipsTable.status, "ACTIVE")));
+  await db.insert(membershipsTable).values({ userId: id, planId: null, status: "ACTIVE", startsAt, expiresAt, isTrial: true });
+  await db.update(usersTable).set({ status: "ACTIVE", emailVerified: true }).where(eq(usersTable.id, id));
+
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "STUDENT_TRIAL_STARTED", entity: "user", entityId: id, metadata: JSON.stringify({ durationDays: parsed.data.durationDays, expiresAt }) });
+  void sendEmail(row.email, "Your MedschoolProffs trial has started", trialActivatedEmailHtml(row.name, expiresAt)).catch(() => {});
+  res.json({ ok: true, expiresAt: expiresAt.toISOString() });
+});
+
+// Ends a trial early (before its expiry date). Leaves the membership row
+// in place for history but marks it SUSPENDED so it no longer counts as
+// active, and reverts the student's status — to EXPIRED if they have no
+// other membership history, or back to whatever an existing non-trial
+// membership implies isn't needed here since the ACTIVE-grant path above
+// already supersedes any prior row before creating a trial.
+router.delete("/students/:id/trial", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) { res.status(400).json({ error: "Invalid student id" }); return; }
+  const [trial] = await db.select().from(membershipsTable).where(and(eq(membershipsTable.userId, id), eq(membershipsTable.status, "ACTIVE"), eq(membershipsTable.isTrial, true))).orderBy(desc(membershipsTable.expiresAt)).limit(1);
+  if (!trial) { res.status(404).json({ error: "No active trial for this student" }); return; }
+  await db.update(membershipsTable).set({ status: "SUSPENDED", suspendedReason: "Trial ended early by admin" }).where(eq(membershipsTable.id, trial.id));
+  await db.update(usersTable).set({ status: "EXPIRED" }).where(and(eq(usersTable.id, id), eq(usersTable.role, "student")));
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "STUDENT_TRIAL_ENDED", entity: "user", entityId: id });
+  res.json({ ok: true });
+});
+
+// Standalone "verify email" action — lets an admin unblock a student's login
+// (which is gated on emailVerified, independent of the status field above)
+// without having to also change their account status.
+router.post("/students/:id/verify-email", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) { res.status(400).json({ error: "Invalid student id" }); return; }
+  const [row] = await db.update(usersTable).set({ emailVerified: true, status: sql`CASE WHEN ${usersTable.status} = 'UNVERIFIED' THEN 'VERIFIED' ELSE ${usersTable.status} END` }).where(and(eq(usersTable.id, id), eq(usersTable.role, "student"))).returning();
+  if (!row) { res.status(404).json({ error: "Student not found" }); return; }
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "STUDENT_EMAIL_VERIFIED_BY_ADMIN", entity: "user", entityId: row.id });
+  res.json({ ok: true, status: row.status, emailVerified: row.emailVerified });
+});
+
+// Soft-delete only: a student record cascades to payments, exam attempts, and
+// notebook entries, so a hard DELETE would either orphan or cascade-wipe that
+// history. We mark the account DELETED (excluded from active listings/stats)
+// and keep the row so admins retain payment/audit history. Revisit with the
+// project owner if a true hard-delete is ever required.
+router.delete("/students/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) { res.status(400).json({ error: "Invalid student id" }); return; }
+  const [row] = await db.update(usersTable).set({ status: "DELETED" }).where(and(eq(usersTable.id, id), eq(usersTable.role, "student"))).returning();
+  if (!row) { res.status(404).json({ error: "Student not found" }); return; }
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "STUDENT_DELETED", entity: "user", entityId: row.id });
+  res.json({ ok: true });
+});
+
+// Hard delete — erases the student account and everything tied to it
+// (payments, memberships, practice/exam history, notebook, flagged MCQs,
+// feedback, documents, sessions). There is no dependency on the soft-delete
+// above; this can be called directly on any student, active or not.
+router.delete("/students/:id/permanent", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) { res.status(400).json({ error: "Invalid student id" }); return; }
+  const [student] = await db.select().from(usersTable).where(and(eq(usersTable.id, id), eq(usersTable.role, "student")));
+  if (!student) { res.status(404).json({ error: "Student not found" }); return; }
+
+  const practiceAttemptRows = await db.select({ id: practiceAttemptsTable.id }).from(practiceAttemptsTable).where(eq(practiceAttemptsTable.userId, id));
+  const practiceAttemptIds = practiceAttemptRows.map((r) => r.id);
+  if (practiceAttemptIds.length) await db.delete(practiceAnswersTable).where(inArray(practiceAnswersTable.attemptId, practiceAttemptIds));
+
+  const examAttemptRows = await db.select({ id: examAttemptsTable.id }).from(examAttemptsTable).where(eq(examAttemptsTable.userId, id));
+  const examAttemptIds = examAttemptRows.map((r) => r.id);
+  if (examAttemptIds.length) await db.delete(examAnswersTable).where(inArray(examAnswersTable.attemptId, examAttemptIds));
+
+  await db.update(membershipsTable).set({ paymentId: null }).where(eq(membershipsTable.userId, id));
+  await db.delete(emailVerificationTokensTable).where(eq(emailVerificationTokensTable.userId, id));
+  await db.delete(passwordResetTokensTable).where(eq(passwordResetTokensTable.userId, id));
+  await db.delete(userSessionsTable).where(eq(userSessionsTable.userId, id));
+  await db.delete(studentDocumentsTable).where(eq(studentDocumentsTable.userId, id));
+  await db.delete(practiceAttemptsTable).where(eq(practiceAttemptsTable.userId, id));
+  await db.delete(studentProgressTable).where(eq(studentProgressTable.userId, id));
+  await db.delete(examAttemptsTable).where(eq(examAttemptsTable.userId, id));
+  await db.delete(notebookEntriesTable).where(eq(notebookEntriesTable.userId, id));
+  await db.delete(savedSessionsTable).where(eq(savedSessionsTable.userId, id));
+  await db.delete(flaggedMcqsTable).where(eq(flaggedMcqsTable.userId, id));
+  await db.delete(feedbackTable).where(eq(feedbackTable.userId, id));
+  await db.delete(notificationsTable).where(eq(notificationsTable.userId, id));
+  await db.delete(membershipsTable).where(eq(membershipsTable.userId, id));
+  await db.delete(paymentsTable).where(eq(paymentsTable.userId, id));
+  await db.delete(usersTable).where(eq(usersTable.id, id));
+
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "STUDENT_PERMANENTLY_DELETED", entity: "user", entityId: id });
+  res.json({ ok: true });
+});
+
+router.get("/notifications", requireAuth, async (req, res): Promise<void> => {
+  // Broadcasts (userId IS NULL) that this user has dismissed via "Clear
+  // all" (POST /notifications/clear) are excluded — see
+  // notificationDismissalsTable's comment in schema/medschool.ts for why
+  // dismissal, not deletion, is how a student's own clear-all affects a
+  // notification they don't own outright.
+  const dismissedRows = await db.select({ notificationId: notificationDismissalsTable.notificationId }).from(notificationDismissalsTable).where(eq(notificationDismissalsTable.userId, req.user!.id));
+  const dismissedIds = dismissedRows.map((r) => r.notificationId);
+  const rows = await db.select().from(notificationsTable).where(and(
+    or(eq(notificationsTable.userId, req.user!.id), sql`${notificationsTable.userId} IS NULL`),
+    dismissedIds.length ? notInArray(notificationsTable.id, dismissedIds) : undefined,
+  )).orderBy(desc(notificationsTable.createdAt));
+  res.json(ListNotificationsResponse.parse(rows.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() }))));
+});
+
+router.post("/notifications/:id/read", requireAuth, async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  await db.update(notificationsTable).set({ read: true }).where(eq(notificationsTable.id, id));
+  res.json({ ok: true });
+});
+
+// Student/personal "Clear all" — clears the CURRENT user's own notification
+// list only. Notifications this user actually owns (userId = them, e.g. a
+// personal "Payment needs attention") are hard-deleted; broadcasts they
+// merely see (userId IS NULL) are left in place for every other student and
+// instead recorded as dismissed for this user via
+// notificationDismissalsTable, so this can never wipe an announcement out
+// from under classmates. Contrast with DELETE /admin/notifications/clear-all
+// below, which really does delete everything for everyone — that's the
+// admin-only, cross-user version of "clear".
+router.post("/notifications/clear", requireAuth, async (req, res): Promise<void> => {
+  const userId = req.user!.id;
+  const visibleBroadcasts = await db.select({ id: notificationsTable.id }).from(notificationsTable).where(isNull(notificationsTable.userId));
+  await db.delete(notificationsTable).where(eq(notificationsTable.userId, userId));
+  if (visibleBroadcasts.length) {
+    const existingDismissals = await db.select({ notificationId: notificationDismissalsTable.notificationId }).from(notificationDismissalsTable).where(eq(notificationDismissalsTable.userId, userId));
+    const alreadyDismissed = new Set(existingDismissals.map((r) => r.notificationId));
+    const toDismiss = visibleBroadcasts.filter((n) => !alreadyDismissed.has(n.id));
+    if (toDismiss.length) await db.insert(notificationDismissalsTable).values(toDismiss.map((n) => ({ userId, notificationId: n.id })));
+  }
+  res.json({ ok: true });
+});
+
+// Admin "Clear all" — a genuine global wipe, not a per-user dismissal. This
+// deletes every row in med_notifications (every student's personal
+// notifications AND every broadcast), which is what makes them disappear
+// from students' notification lists too, per how this button is meant to
+// work. The dismissal table is cleared alongside it so it doesn't
+// accumulate orphaned rows pointing at now-deleted notification ids.
+router.delete("/admin/notifications/clear-all", requireAdmin, async (req, res): Promise<void> => {
+  const deleted = await db.delete(notificationsTable).returning({ id: notificationsTable.id });
+  await db.delete(notificationDismissalsTable);
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "NOTIFICATIONS_CLEARED_ALL", entity: "notification", entityId: null, metadata: JSON.stringify({ deletedCount: deleted.length }) });
+  res.json({ ok: true, deleted: deleted.length });
+});
+
+// ---------------------------------------------------------------------------
+// Admin: broadcast a notification, optionally targeted by program kind
+// (MBBS/BDS) and/or academic year — mirrors the same targeting concept
+// used by Blocks/Modules/Exams (see getStudentTargeting in
+// contentVisibility.ts) so admins have one consistent mental model for
+// "who sees this" across content and notifications.
+// ---------------------------------------------------------------------------
+
+const BroadcastNotificationBody = z.object({
+  title: z.string().min(1).max(200),
+  body: z.string().min(1).max(2000),
+  type: z.enum(["info", "success", "warning"]).optional(),
+  // null/omitted = every program or every year; a specific value narrows it.
+  programTargetKind: z.string().max(40).nullable().optional(),
+  yearTargetNumber: z.number().int().min(1).max(6).nullable().optional(),
+});
+
+router.post("/admin/notifications/broadcast", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = BroadcastNotificationBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid notification" }); return; }
+  const { title, body, type, programTargetKind, yearTargetNumber } = parsed.data;
+  const normalizedKind = programTargetKind ? programTargetKind.trim().toUpperCase() : null;
+
+  // No targeting at all — use the existing userId=NULL convention that
+  // GET /notifications already treats as "visible to everyone".
+  if (!normalizedKind && !yearTargetNumber) {
+    const [row] = await db.insert(notificationsTable).values({ userId: null, title, body, type: type ?? "info" }).returning();
+    // metadata lets the admin's "Recently sent" panel (NotificationBroadcastPanel)
+    // show proof a broadcast actually went out — see that panel's comment
+    // for why this exists: a targeted broadcast never lands in the sending
+    // admin's own bell (admins are excluded from the student match below),
+    // so without this there was no confirmation trail at all beyond a
+    // toast that's gone the moment you dismiss it.
+    await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "NOTIFICATION_BROADCAST", entity: "notification", entityId: row.id, metadata: JSON.stringify({ title, body, scope: "All programs · All years", targetedUsers: null }) });
+    res.json({ ok: true, targetedUsers: null });
+    return;
+  }
+
+  // Targeted broadcast: a single userId=NULL row can't be scoped by
+  // program/year (every student would see it), so resolve the matching
+  // students here and insert one notification row per recipient.
+  const students = await db.select({ id: usersTable.id, programId: usersTable.programId, academicYearId: usersTable.academicYearId }).from(usersTable).where(eq(usersTable.role, "student"));
+  const programs = await db.select().from(programsTable);
+  const academicYears = await db.select().from(academicYearsTable);
+  const programKindById = new Map(programs.map((p) => [p.id, p.kind ? p.kind.trim().toUpperCase() : null]));
+  const yearNumberById = new Map(academicYears.map((y) => [y.id, y.yearNumber]));
+
+  const targetIds = students
+    .filter((s) => {
+      const kind = s.programId ? programKindById.get(s.programId) ?? null : null;
+      const year = s.academicYearId ? yearNumberById.get(s.academicYearId) ?? null : null;
+      return (!normalizedKind || kind === normalizedKind) && (!yearTargetNumber || year === yearTargetNumber);
+    })
+    .map((s) => s.id);
+
+  const scope = `${normalizedKind || "All programs"} · ${yearTargetNumber ? `Year ${yearTargetNumber}` : "All years"}`;
+  if (!targetIds.length) {
+    // Still logged (with targetedUsers: 0) rather than silently skipped —
+    // this is exactly the case that used to look like "I sent it and
+    // nothing happened": the request succeeds, a toast flashes past, and
+    // there's zero recipients to leave any other trace. Now it shows up in
+    // "Recently sent" with 0 matching students, which tells the admin
+    // *why* it didn't reach anyone (no student is currently in that
+    // program/year) instead of leaving them wondering if sending failed.
+    await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "NOTIFICATION_BROADCAST", entity: "notification", entityId: 0, metadata: JSON.stringify({ title, body, scope, targetedUsers: 0 }) });
+    res.json({ ok: true, targetedUsers: 0 });
+    return;
+  }
+  await db.insert(notificationsTable).values(targetIds.map((userId) => ({ userId, title, body, type: type ?? "info" })));
+  await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "NOTIFICATION_BROADCAST", entity: "notification", entityId: targetIds[0], metadata: JSON.stringify({ title, body, scope, targetedUsers: targetIds.length }) });
+  res.json({ ok: true, targetedUsers: targetIds.length });
+});
+
+export default router;

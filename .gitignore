@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# pnpm
+.pnpm-store/
+
+# Build output
+dist/
+**/dist/
+build/
+**/build/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Capacitor native projects (artifacts/frontend-student, frontend-admin):
+# the ios/ and android/ folders themselves ARE committed (standard Capacitor
+# practice — they contain hand-edited native config), only their generated
+# build output/caches are ignored here.
+**/ios/App/build/
+**/ios/App/Pods/
+**/ios/App/output/
+**/ios/DerivedData/
+**/android/app/build/
+**/android/build/
+**/android/.gradle/
+**/android/captures/
+**/android/local.properties
+**/*.xcuserstate
+**/xcuserdata/

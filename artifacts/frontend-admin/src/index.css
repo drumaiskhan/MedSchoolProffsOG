@@ -1,0 +1,120 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap');
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@plugin "@tailwindcss/typography";
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: hsl(var(--background)); --color-foreground: hsl(var(--foreground));
+  --color-border: hsl(var(--border)); --color-input: hsl(var(--input)); --color-ring: hsl(var(--ring));
+  --color-card: hsl(var(--card)); --color-card-foreground: hsl(var(--card-foreground)); --color-card-border: hsl(var(--card-border));
+  --color-popover: hsl(var(--popover)); --color-popover-foreground: hsl(var(--popover-foreground)); --color-popover-border: hsl(var(--popover-border));
+  --color-primary: hsl(var(--primary)); --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary)); --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted)); --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent)); --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive)); --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-sidebar: hsl(var(--sidebar)); --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border)); --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground)); --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground)); --color-sidebar-ring: hsl(var(--sidebar-ring));
+  --font-sans: var(--app-font-sans); --font-serif: var(--app-font-serif); --font-mono: var(--app-font-mono);
+  --radius-sm: calc(var(--radius) - 4px); --radius-md: calc(var(--radius) - 2px); --radius-lg: var(--radius); --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --background: 42 33% 96%; --foreground: 208 35% 19%; --border: 39 22% 87%;
+  --card: 42 40% 99%; --card-foreground: 208 35% 19%; --card-border: 39 22% 87%;
+  --sidebar: 206 41% 16%; --sidebar-foreground: 205 24% 87%; --sidebar-border: 206 34% 25%;
+  --sidebar-primary: 164 42% 56%; --sidebar-primary-foreground: 206 41% 12%; --sidebar-accent: 206 33% 22%; --sidebar-accent-foreground: 205 24% 94%; --sidebar-ring: 164 42% 56%;
+  --popover: 42 40% 99%; --popover-foreground: 208 35% 19%; --popover-border: 39 22% 87%;
+  --primary: 164 42% 39%; --primary-foreground: 42 40% 99%; --secondary: 204 28% 92%; --secondary-foreground: 208 35% 19%;
+  --muted: 41 29% 92%; --muted-foreground: 207 15% 45%; --accent: 34 74% 62%; --accent-foreground: 208 35% 19%;
+  --destructive: 2 62% 52%; --destructive-foreground: 42 40% 99%; --input: 39 22% 82%; --ring: 164 42% 39%;
+  --chart-1: 164 42% 39%; --chart-2: 34 74% 62%; --chart-3: 206 41% 40%; --chart-4: 2 62% 52%; --chart-5: 278 24% 55%;
+  --app-font-sans: 'Manrope', sans-serif; --app-font-serif: 'Newsreader', Georgia, serif; --app-font-mono: 'DM Mono', monospace;
+  --radius: .7rem; --elevate-1: rgba(22,43,54,.04); --elevate-2: rgba(22,43,54,.08); --opaque-button-border-intensity: -8;
+  --shadow-2xs: 0 1px 2px hsl(208 35% 19% / .04); --shadow-xs: 0 2px 4px hsl(208 35% 19% / .05);
+  --shadow-sm: 0 4px 10px hsl(208 35% 19% / .06); --shadow: 0 6px 14px hsl(208 35% 19% / .07); --shadow-md: 0 8px 20px hsl(208 35% 19% / .08); --shadow-lg: 0 12px 28px hsl(208 35% 19% / .1); --shadow-xl: 0 18px 40px hsl(208 35% 19% / .12);
+  --button-outline: rgba(22,43,54,.12); --badge-outline: rgba(22,43,54,.06); --tracking-normal: 0em; --spacing: .25rem;
+}
+.dark { --background: 224 28% 7%; --foreground: 210 30% 96%; --border: 222 20% 18%; --card: 223 26% 11%; --card-foreground: 210 30% 96%; --card-border: 222 20% 18%; --sidebar: 226 32% 5%; --sidebar-foreground: 210 24% 88%; --sidebar-border: 222 20% 14%; --sidebar-primary: 164 65% 55%; --sidebar-primary-foreground: 226 32% 6%; --sidebar-accent: 223 24% 14%; --sidebar-accent-foreground: 210 24% 94%; --sidebar-ring: 164 65% 55%; --popover: 223 26% 11%; --popover-foreground: 210 30% 96%; --popover-border: 222 20% 18%; --primary: 164 65% 55%; --primary-foreground: 226 32% 6%; --secondary: 223 20% 17%; --secondary-foreground: 210 30% 96%; --muted: 223 20% 15%; --muted-foreground: 216 15% 65%; --accent: 34 92% 62%; --accent-foreground: 226 32% 6%; --destructive: 2 78% 62%; --destructive-foreground: 210 30% 96%; --input: 222 20% 20%; --ring: 164 65% 55%; }
+/* Same mobile "white flash on fast scroll" fix as the student app's
+   index.css — see the comment there for the full explanation. */
+@layer base { * { @apply border-border; } html { @apply bg-background; overscroll-behavior-y: none; } body { @apply font-sans antialiased bg-background text-foreground; margin: 0; overscroll-behavior-y: none; } }
+
+@layer utilities {
+  .font-display { font-family: var(--app-font-serif); }
+  .font-mono-app { font-family: var(--app-font-mono); }
+  .page-enter { animation: pageIn .45s ease both; }
+  .card-lift { transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
+  .card-lift:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: hsl(var(--primary) / .35); }
+  .skeleton { background: linear-gradient(100deg, hsl(var(--muted)) 30%, hsl(var(--card)) 50%, hsl(var(--muted)) 70%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
+  /* Beautiful, responsive buttons everywhere: a subtle lift + shadow on
+     hover and a gentle press on click, applied via .btn-pop (used across
+     admin actions) as well as every native <button> as a safe fallback so
+     nothing feels flat or unresponsive on any screen size. */
+  .btn-pop { transition: transform .16s ease, box-shadow .16s ease, filter .16s ease, background-color .16s ease, opacity .16s ease; }
+  .btn-pop:hover:not(:disabled) { transform: translateY(-1.5px); filter: brightness(1.04); box-shadow: var(--shadow-sm); }
+  .btn-pop:active:not(:disabled) { transform: translateY(0) scale(.97); filter: brightness(.98); }
+  .brand-spinner { color: hsl(var(--primary)); animation: brandSpin 1.7s ease-in-out infinite; stroke-dasharray: 190; stroke-dashoffset: 190; }
+  .brand-spinner path { stroke-dasharray: 190; stroke-dashoffset: 190; animation: brandWaveDraw 1.7s ease-in-out infinite; }
+}
+button { transition: transform .16s ease, box-shadow .16s ease, filter .16s ease, opacity .16s ease; }
+button:hover:not(:disabled) { filter: brightness(1.035); }
+button:active:not(:disabled) { transform: scale(.98); }
+button:disabled { cursor: not-allowed; }
+button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid hsl(var(--primary) / .55); outline-offset: 2px; }
+/* Responsive safety net: prevent any flex row (button groups, card headers,
+   form rows) from forcing horizontal scroll on narrow phones — corners of
+   the UI wrap instead of overflowing. */
+@media (max-width: 480px) {
+  .admin-content { padding-left: 14px; padding-right: 14px; }
+}
+@keyframes pageIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes shimmer { to { background-position: -200% 0; } }
+@keyframes brandWaveDraw { 0% { stroke-dashoffset: 190; opacity: .55; } 55% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: -190; opacity: .55; } }
+@keyframes brandSpin { 0%, 100% { opacity: .75; } 50% { opacity: 1; } }
+
+/* Admin polish (modernisation pass): every table, scrollbar and focus ring in
+   the admin app picks these up without each page opting in. Scoped to
+   .admin-shell so the sign-in pages are untouched. */
+@layer components {
+  .admin-shell table tbody tr { transition: background-color .15s ease; }
+  .admin-shell table tbody tr:hover { background-color: hsl(var(--muted) / .55); }
+  .admin-shell table thead th { font-weight: 800; letter-spacing: .1em; }
+  .admin-shell :where(button, a, [role="tab"], [role="switch"]):focus-visible { outline: 2px solid hsl(var(--primary) / .55); outline-offset: 2px; border-radius: 10px; }
+  .admin-shell * { scrollbar-width: thin; scrollbar-color: hsl(var(--border)) transparent; }
+  .admin-shell ::-webkit-scrollbar { width: 8px; height: 8px; }
+  .admin-shell ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 999px; }
+  .admin-shell ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / .5); }
+
+  /* Round of button polish: every filled action button in the admin shell
+     (bg-primary, bg-destructive, and the sidebar's active nav pill) gets a
+     resting shadow — not just on hover — so primary actions read as
+     raised, clickable surfaces at a glance instead of only on interaction.
+     Purely additive; nothing here changes layout, colour, or existing
+     hover/active states, so pages that already set their own shadow keep
+     it untouched (box-shadow doesn't stack, the more specific/last rule
+     applied simply wins). */
+  .admin-shell button.bg-primary:not(:disabled),
+  .admin-shell button.bg-destructive:not(:disabled) { box-shadow: var(--shadow-2xs); }
+  .admin-shell button.bg-primary:not(:disabled):hover,
+  .admin-shell button.bg-destructive:not(:disabled):hover { box-shadow: var(--shadow-sm); }
+
+  /* Icon-only square/round buttons (the ubiquitous `grid size-N
+     place-items-center rounded-* border` pattern used for edit/delete/
+     settings/notification icons throughout the admin) get a visible tinted
+     hover background even where a page forgot to add its own hover: class,
+     so every icon button in the app feels equally responsive. Anything
+     with its own explicit hover:bg-* already wins by specificity/order. */
+  .admin-shell button.grid.place-items-center:not(:disabled):hover { background-color: hsl(var(--muted) / .7); }
+
+  /* Segmented controls / filter-pill rows (payment status filters, MCQ
+     difficulty picker, institution tabs, etc.) — a hairline ring on the
+     active pill so the current selection is unmistakable even on the
+     brand's low-contrast tan/olive palette. */
+  .admin-shell button[aria-pressed="true"],
+  .admin-shell button[aria-current="page"],
+  .admin-shell button[aria-checked="true"] { box-shadow: 0 0 0 1px hsl(var(--primary) / .18); }
+}

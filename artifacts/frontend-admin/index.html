@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <title>MedschoolProffs Admin</title>
+    <meta name="description" content="MedschoolProffs Admin — built on Replit. Update this description to reflect the app." />
+    <meta name="robots" content="index, follow" />
+    <meta property="og:title" content="MedschoolProffs Admin" />
+    <meta property="og:description" content="MedschoolProffs Admin — built on Replit. Update this description to reflect the app." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="MedschoolProffs Admin" />
+    <meta name="twitter:description" content="MedschoolProffs Admin — built on Replit. Update this description to reflect the app." />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=4" /><link rel="shortcut icon" type="image/svg+xml" href="/favicon.svg?v=4" />
+    <link rel="alternate icon" type="image/x-icon" href="/favicon.ico?v=4" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=4" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+      /* Same static branded loading screen as the student app's index.html
+         — shown before JS has even loaded, so no blank white flash. */
+      #root { background: #0e2a38; }
+      .boot-loader { display: flex; min-height: 100dvh; align-items: center; justify-content: center; background: #0e2a38; }
+      .boot-loader__stack { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+      .boot-loader__wave path { fill: none; stroke: #2dd9c4; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 190; stroke-dashoffset: 190; animation: boot-wave-draw 1.7s ease-in-out infinite; }
+      .boot-loader__brand { font-family: 'Inter', system-ui, sans-serif; font-weight: 700; font-size: 20px; letter-spacing: -0.01em; color: #eaf6f4; animation: boot-fade 1.7s ease-in-out infinite; }
+      @keyframes boot-wave-draw { 0% { stroke-dashoffset: 190; opacity: .55; } 55% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: -190; opacity: .55; } }
+      @keyframes boot-fade { 0%, 100% { opacity: .6; } 50% { opacity: 1; } }
+    </style>
+  </head>
+  <body>
+    <div id="root"><div class="boot-loader"><div class="boot-loader__stack">
+      <svg class="boot-loader__wave" width="64" height="40" viewBox="0 0 64 40" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M2 20 H14 L19 6 L27 34 L33 12 L38 20 H62" /></svg>
+      <div class="boot-loader__brand">MedschoolProffs</div>
+    </div></div></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

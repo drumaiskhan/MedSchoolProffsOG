@@ -1,0 +1,62 @@
+databases:
+  - name: medschoolproffs-db
+    plan: free
+    databaseName: medschoolproffs
+    user: medschoolproffs
+
+services:
+  # Backend API (Express) — built from the root Dockerfile. Shared by both frontends.
+  - type: web
+    name: medschoolproffs-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /api/healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: medschoolproffs-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: APP_URL
+        sync: false # comma-separated: both the student and admin site URLs, set after their first deploy
+      - key: COOKIE_CROSS_SITE
+        value: "true" # the frontends (static sites) and backend (this service) are different origins on Render
+
+  # Student frontend (Vite build, served as a static site)
+  - type: web
+    name: medschoolproffs-student
+    runtime: static
+    buildCommand: pnpm install && pnpm run build:student
+    staticPublishPath: ./artifacts/frontend-student/dist/public
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false # set to the medschoolproffs-api service's public URL after its first deploy, then redeploy this static site
+      - key: VITE_ADMIN_URL
+        sync: false # set to the medschoolproffs-admin service's public URL
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+  # Admin frontend (Vite build, served as a static site) — deploy this on a
+  # separate, harder-to-guess subdomain rather than linking it from the
+  # student site.
+  - type: web
+    name: medschoolproffs-admin
+    runtime: static
+    buildCommand: pnpm install && pnpm run build:admin
+    staticPublishPath: ./artifacts/frontend-admin/dist/public
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false # set to the medschoolproffs-api service's public URL after its first deploy, then redeploy this static site
+      - key: VITE_STUDENT_URL
+        sync: false # set to the medschoolproffs-student service's public URL
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
