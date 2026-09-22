@@ -82,7 +82,13 @@
 .sb-group + .sb-group { margin-top: 1.5rem; }
 .sb-group__label { display: flex; align-items: center; gap: .6rem; margin: 0 0 .5rem; padding: 0 .75rem; font-family: var(--app-font-mono); font-size: 9px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: hsl(var(--sidebar-foreground) / .4); }
 .sb-group__label::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, hsl(var(--sidebar-foreground) / .16), transparent); }
-.sb-group__items { position: relative; z-index: 1; display: grid; gap: 2px; }
+/* NOT position:relative — that would make every group its own offsetParent,
+   so item.offsetTop (used to place .sb-puck/.sb-ghost) would reset to 0 at
+   the top of each group instead of counting continuously down .sb-nav (the
+   pill's real positioning container). .sb-item already has its own
+   position:relative + z-index:1, so items still paint above the pill without
+   this wrapper needing to be positioned at all. */
+.sb-group__items { display: grid; gap: 2px; }
 
 /* Pointer spotlight (translated, never repainted). */
 .sb-spot { position: absolute; left: 0; top: 0; z-index: 0; width: 260px; height: 260px; border-radius: 50%; pointer-events: none; opacity: 0; will-change: transform;
