@@ -11,11 +11,13 @@ export type AnalyticsRange = (typeof ANALYTICS_RANGES)[number];
 /** The hero card is not tied to the range switcher; it always reads the widest window the API offers. */
 export const HERO_RANGE: AnalyticsRange = '1y';
 
-// Night is its own bucket now (used to pick the moon glyph below) even
-// though it shares "Good evening" as a greeting — nobody wants an app
-// wishing them "good night" while they're still up studying at 1 a.m.
+// Night is its own bucket (it picks the moon glyph) even though it shares
+// "Good evening" as a greeting — nobody wants an app wishing them "good night"
+// while they're still up studying at 1 a.m. The sun sets around 18:00 for most
+// of our students, so the sunset glyph only covers 17:00-18:00; from 18:00 on
+// (dark outside) the greeting shows a moon, not a sun.
 export type DayPart = 'morning' | 'afternoon' | 'evening' | 'night';
-export const dayPartForHour = (hour: number): DayPart => (hour < 5 ? 'night' : hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : hour < 21 ? 'evening' : 'night');
+export const dayPartForHour = (hour: number): DayPart => (hour < 5 ? 'night' : hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : hour < 18 ? 'evening' : 'night');
 export const DAY_PART_LABEL: Record<DayPart, string> = { morning: 'Good morning', afternoon: 'Good afternoon', evening: 'Good evening', night: 'Good evening' };
 
 const MINUTE = 60_000;

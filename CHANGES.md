@@ -1,3 +1,7 @@
+## v56 — moon after sunset on the dashboard greeting
+- `dayPartForHour`: the sunset ("evening") glyph now covers 17:00-18:00 only; from 18:00 the hero shows the night glyph (greeting text stays "Good evening"). Previously it stayed a sun until 21:00.
+- `DayPartIcon`: night is now a proper crescent moon with stars instead of a dimmed sun-like disc.
+
 # Round 18 (v37) — 3D student UI, leaderboard + streaks, admin curriculum pages
 
 See AI_HANDOFF_NOTE_v37.md and REMAINING_THINGS.md. Student app gets a GPU-safe

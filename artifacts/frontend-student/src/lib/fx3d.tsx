@@ -98,25 +98,42 @@ const DAY_GLYPH_RAYS: Record<DayGlyphPart, { count: number; length: number; opac
 
 export function DayPartIcon({ part, size = 40, className }: { part: DayGlyphPart; size?: number; className?: string }) {
   const uid = useId().replace(/[^a-zA-Z0-9]/g, '');
-  const isNight = part === 'night';
+  if (part === 'night') {
+    // A real crescent moon (a disc with a second disc masked out of it) plus a few stars.
+    return <svg viewBox="0 0 64 64" width={size} height={size} className={cx('day-glyph', 'day-glyph--moon', className)} aria-hidden="true" focusable="false">
+      <defs>
+        <radialGradient id={`dgo${uid}`} cx=".3" cy=".3" r=".9">
+          <stop offset="0" stopColor="#ffffff" /><stop offset=".5" stopColor="#dbe4ff" /><stop offset="1" stopColor="#8b9cf0" />
+        </radialGradient>
+        <mask id={`dgm${uid}`} maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">
+          <rect width="64" height="64" fill="#fff" />
+          <circle cx="40" cy="22" r="15" fill="#000" />
+        </mask>
+      </defs>
+      <ellipse cx="30" cy="58" rx="14" ry="3" fill="#000" opacity=".16" />
+      <circle cx="28" cy="31" r="20" fill={`url(#dgo${uid})`} mask={`url(#dgm${uid})`} />
+      <g fill="#fff" opacity=".95">
+        <circle cx="50" cy="38" r="1.8" /><circle cx="46" cy="52" r="1.2" /><circle cx="56" cy="24" r="1.4" />
+        <path d="M50 8l1.6 4.4L56 14l-4.4 1.6L50 20l-1.6-4.4L44 14l4.4-1.6z" />
+      </g>
+    </svg>;
+  }
   const rays = DAY_GLYPH_RAYS[part] ?? DAY_GLYPH_RAYS.afternoon;
   return <svg viewBox="0 0 64 64" width={size} height={size} className={cx('day-glyph', className)} aria-hidden="true" focusable="false">
     <defs>
       <radialGradient id={`dgo${uid}`} cx=".38" cy=".32" r=".8">
-        {isNight
-          ? <><stop offset="0" stopColor="#eef2ff" /><stop offset=".55" stopColor="#a5b4fc" /><stop offset="1" stopColor="#6366f1" /></>
-          : part === 'morning'
-            ? <><stop offset="0" stopColor="#fff6c2" /><stop offset=".5" stopColor="#ffb454" /><stop offset="1" stopColor="#fb7a3a" /></>
-            : part === 'evening'
-              ? <><stop offset="0" stopColor="#ffe3a3" /><stop offset=".5" stopColor="#fb8a4c" /><stop offset="1" stopColor="#e0553f" /></>
-              : <><stop offset="0" stopColor="#fffbe0" /><stop offset=".5" stopColor="#ffd23f" /><stop offset="1" stopColor="#ff9a1f" /></>}
+        {part === 'morning'
+          ? <><stop offset="0" stopColor="#fff6c2" /><stop offset=".5" stopColor="#ffb454" /><stop offset="1" stopColor="#fb7a3a" /></>
+          : part === 'evening'
+            ? <><stop offset="0" stopColor="#ffe3a3" /><stop offset=".5" stopColor="#fb8a4c" /><stop offset="1" stopColor="#e0553f" /></>
+            : <><stop offset="0" stopColor="#fffbe0" /><stop offset=".5" stopColor="#ffd23f" /><stop offset="1" stopColor="#ff9a1f" /></>}
       </radialGradient>
       <linearGradient id={`dgh${uid}`} x1="0" y1="0" x2="1" y2="1">
         <stop offset="0" stopColor="#fff" stopOpacity=".9" /><stop offset="1" stopColor="#fff" stopOpacity="0" />
       </linearGradient>
     </defs>
     <ellipse cx="32" cy="57" rx="16" ry="3.4" fill="#000" opacity=".16" />
-    {rays && <g stroke={isNight ? undefined : 'currentColor'} className="day-glyph__rays" style={{ color: part === 'morning' ? '#ffb454' : part === 'evening' ? '#fb8a4c' : '#ffc93f' }} strokeWidth="3" strokeLinecap="round" opacity={rays.opacity}>
+    {rays && <g stroke="currentColor" className="day-glyph__rays" style={{ color: part === 'morning' ? '#ffb454' : part === 'evening' ? '#fb8a4c' : '#ffc93f' }} strokeWidth="3" strokeLinecap="round" opacity={rays.opacity}>
       {Array.from({ length: rays.count }, (_, i) => {
         const a = (i / rays.count) * Math.PI * 2;
         const r1 = 19, r2 = r1 + rays.length;
@@ -126,13 +143,8 @@ export function DayPartIcon({ part, size = 40, className }: { part: DayGlyphPart
       })}
     </g>}
     <circle cx="32" cy="28" r="17" fill={`url(#dgo${uid})`} />
-    {isNight
-      ? <path d="M39 15a15 15 0 1 0 9 21 12 12 0 0 1-9-21z" fill="#4338ca" opacity=".55" />
-      : <path d="M32 11a17 17 0 0 0 0 34c-2-6-3-13-3-17s1-11 3-17z" fill="#000" opacity=".08" />}
+    <path d="M32 11a17 17 0 0 0 0 34c-2-6-3-13-3-17s1-11 3-17z" fill="#000" opacity=".08" />
     <circle cx="27" cy="22" r="6.5" fill={`url(#dgh${uid})`} />
-    {isNight && <g fill="#fff" opacity=".9">
-      <circle cx="48" cy="16" r="1.6" /><circle cx="14" cy="14" r="1.1" /><circle cx="50" cy="30" r="1.1" />
-    </g>}
   </svg>;
 }
 
