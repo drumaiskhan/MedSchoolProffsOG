@@ -17,13 +17,25 @@ import {
   ospeAdminApi, uploadFile, resolveUploadUrl, ApiRequestError,
   type OspeBlock, type OspeModule, type OspeLearningMaterial, type OspeStation, type OspeLabelPoint, type OspeAdminExam, type OspeExamAttemptRow, type OspeExamType,
 } from '@/lib/api';
-import { CollapsibleGroup, ConfirmDialog, EmptyState, SectionHeader, DEGREE_OPTIONS, DEGREE_YEAR_OPTIONS, studyYearToNumber, cn } from '@/lib/shared';
+import { CollapsibleGroup, ConfirmDialog, EmptyState, SectionHeader, DEGREE_OPTIONS, DEGREE_YEAR_OPTIONS, studyYearToNumber, groupByDegreeYear, cn } from '@/lib/shared';
 import { queryClient } from '@/lib/query-client';
 import { toast } from '@/hooks/use-toast';
 
 type Tab = 'blocks' | 'materials' | 'stations' | 'exams';
 
 function errMsg(err: unknown): string { return err instanceof ApiRequestError ? err.message : 'Something went wrong.'; }
+
+// Degree/Year grouping — same groupByDegreeYear + CollapsibleGroup pattern
+// Books/Past papers use, so long banks here (blocks, modules, stations,
+// exams) read the same way: MBBS/BDS colleges, collapsible per year, with
+// "Unspecified degree" / "No year set" catch-alls for untargeted items.
+type Targetable = { programTargetKind: string | null; yearTargetNumber: number | null };
+function targetDegree(item: Targetable): string { return item.programTargetKind || ''; }
+function targetYearLabel(item: Targetable): string {
+  if (!item.yearTargetNumber) return '';
+  return (DEGREE_YEAR_OPTIONS[item.programTargetKind || ''] || DEGREE_YEAR_OPTIONS.MBBS)[item.yearTargetNumber - 1] || '';
+}
+function groupTargetable<T extends Targetable>(items: T[]) { return groupByDegreeYear(items, targetDegree, targetYearLabel, (i) => i.yearTargetNumber ?? undefined); }
 
 // Shared Degree + Year picker, mirroring the one every other content type
 // (Books, Past papers, Pre-Proffs exams) uses — leaving both blank makes
@@ -126,37 +138,51 @@ function BlocksModulesTab({ examType }: { examType: OspeExamType }) {
 
   const blocks = blocksQ.data || [];
   const modules = modulesQ.data || [];
+  const blockGroups = groupTargetable(blocks);
+  const moduleGroups = groupTargetable(modules);
+
+  const blockRow = (b: OspeBlock) => <div key={b.id} className="rounded-xl border border-border bg-card p-3" data-testid={`row-block-${b.id}`}>
+    <div className="flex items-center justify-between gap-2">
+      <div><p className="text-xs font-bold">{b.name}</p>{b.subtitle && <p className="text-[11px] text-muted-foreground">{b.subtitle}</p>}<p className="mt-0.5 text-[10px] font-semibold text-primary">{b.targetingLabel}</p></div>
+      <div className="flex items-center gap-1">
+        <button onClick={() => updateBlock.mutate({ id: b.id, body: { active: !b.active } })} className={cn('rounded-lg px-2 py-1 text-[10px] font-extrabold', b.active ? 'bg-[#d7eee4] text-[#164b4b]' : 'bg-muted text-muted-foreground')} data-testid={`button-toggle-block-${b.id}`}>{b.active ? 'Active' : 'Hidden'}</button>
+        <button onClick={() => setEditingBlock(editingBlock === b.id ? null : b.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" data-testid={`button-edit-block-${b.id}`}><Pencil size={13} /></button>
+        <button onClick={() => setDeletingBlock(b.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-block-${b.id}`}><Trash2 size={13} /></button>
+      </div>
+    </div>
+    {editingBlock === b.id && <BlockForm initial={b} examType={examType} onCancel={() => setEditingBlock(null)} pending={updateBlock.isPending} onSave={(body) => updateBlock.mutate({ id: b.id, body })} />}
+  </div>;
+
+  const moduleRow = (m: OspeModule) => <div key={m.id} className="rounded-xl border border-border bg-card p-3" data-testid={`row-module-${m.id}`}>
+    <div className="flex items-center justify-between gap-2">
+      <div><p className="text-xs font-bold">{m.name}</p><p className="text-[11px] text-muted-foreground">{m.blockName || 'Unassigned'}{m.subtitle ? ` · ${m.subtitle}` : ''}</p><p className="mt-0.5 text-[10px] font-semibold text-primary">{m.targetingLabel}</p></div>
+      <div className="flex items-center gap-1">
+        <button onClick={() => updateModule.mutate({ id: m.id, body: { active: !m.active } })} className={cn('rounded-lg px-2 py-1 text-[10px] font-extrabold', m.active ? 'bg-[#d7eee4] text-[#164b4b]' : 'bg-muted text-muted-foreground')} data-testid={`button-toggle-module-${m.id}`}>{m.active ? 'Active' : 'Hidden'}</button>
+        <button onClick={() => setEditingModule(editingModule === m.id ? null : m.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" data-testid={`button-edit-module-${m.id}`}><Pencil size={13} /></button>
+        <button onClick={() => setDeletingModule(m.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-module-${m.id}`}><Trash2 size={13} /></button>
+      </div>
+    </div>
+    {editingModule === m.id && <ModuleForm initial={m} examType={examType} blocks={blocks} onCancel={() => setEditingModule(null)} pending={updateModule.isPending} onSave={(body) => updateModule.mutate({ id: m.id, body })} />}
+  </div>;
 
   return <div className="grid gap-6 lg:grid-cols-2">
     <div>
       <div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-extrabold">Blocks</h3><button onClick={() => setAddingBlock((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold hover:bg-muted" data-testid="button-toggle-add-block"><Plus size={13} /> Add block</button></div>
       {addingBlock && <BlockForm examType={examType} onCancel={() => setAddingBlock(false)} pending={createBlock.isPending} onSave={(body) => createBlock.mutate(body)} />}
-      {!blocks.length && !addingBlock ? <EmptyState icon={Layers} title="No blocks yet" body="Blocks group modules together — add one to start organizing this bank." /> : <div className="mt-3 space-y-2">{blocks.map((b) => <div key={b.id} className="rounded-xl border border-border bg-card p-3" data-testid={`row-block-${b.id}`}>
-        <div className="flex items-center justify-between gap-2">
-          <div><p className="text-xs font-bold">{b.name}</p>{b.subtitle && <p className="text-[11px] text-muted-foreground">{b.subtitle}</p>}<p className="mt-0.5 text-[10px] font-semibold text-primary">{b.targetingLabel}</p></div>
-          <div className="flex items-center gap-1">
-            <button onClick={() => updateBlock.mutate({ id: b.id, body: { active: !b.active } })} className={cn('rounded-lg px-2 py-1 text-[10px] font-extrabold', b.active ? 'bg-[#d7eee4] text-[#164b4b]' : 'bg-muted text-muted-foreground')} data-testid={`button-toggle-block-${b.id}`}>{b.active ? 'Active' : 'Hidden'}</button>
-            <button onClick={() => setEditingBlock(editingBlock === b.id ? null : b.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" data-testid={`button-edit-block-${b.id}`}><Pencil size={13} /></button>
-            <button onClick={() => setDeletingBlock(b.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-block-${b.id}`}><Trash2 size={13} /></button>
-          </div>
-        </div>
-        {editingBlock === b.id && <BlockForm initial={b} examType={examType} onCancel={() => setEditingBlock(null)} pending={updateBlock.isPending} onSave={(body) => updateBlock.mutate({ id: b.id, body })} />}
-      </div>)}</div>}
+      {!blocks.length && !addingBlock ? <EmptyState icon={Layers} title="No blocks yet" body="Blocks group modules together — add one to start organizing this bank." /> : <div className="mt-3">{blockGroups.map((g) => <CollapsibleGroup key={g.degree || 'unspecified'} defaultOpen icon={<GraduationCap size={13} />} title={g.degree === 'MBBS' || g.degree === 'BDS' ? `${g.degree} colleges` : 'Unspecified degree'} count={g.groups.reduce((sum, yg) => sum + yg.items.length, 0)} testId={`blocks-degree-${g.degree || 'unspecified'}`}>
+        {g.groups.map((yg) => <CollapsibleGroup key={yg.year || 'no-year'} defaultOpen nested title={yg.year ? [yg.year, (g.degree === 'MBBS' || g.degree === 'BDS') ? g.degree : ''].filter(Boolean).join(' ') : 'No year set'} count={yg.items.length} testId={`blocks-year-${g.degree || 'unspecified'}-${yg.year || 'no-year'}`}>
+          <div className="space-y-2">{yg.items.map(blockRow)}</div>
+        </CollapsibleGroup>)}
+      </CollapsibleGroup>)}</div>}
     </div>
     <div>
-      <div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-extrabold">Modules</h3><button onClick={() => setAddingModule((v) => !v)} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold hover:bg-muted" data-testid="button-toggle-add-module"><Plus size={13} /> Add module</button></div>
+      <div className="mb-3 flex items-center justify-between"><div><h3 className="text-sm font-extrabold">Modules</h3><p className="text-[10px] text-muted-foreground">Optional — file stations &amp; material straight under a block if you don't need this extra layer.</p></div><button onClick={() => setAddingModule((v) => !v)} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold hover:bg-muted" data-testid="button-toggle-add-module"><Plus size={13} /> Add module</button></div>
       {addingModule && <ModuleForm examType={examType} blocks={blocks} onCancel={() => setAddingModule(false)} pending={createModule.isPending} onSave={(body) => createModule.mutate(body)} />}
-      {!modules.length && !addingModule ? <EmptyState icon={FolderOpen} title="No modules yet" body="Modules are what learning material and stations get filed under." /> : <div className="mt-3 space-y-2">{modules.map((m) => <div key={m.id} className="rounded-xl border border-border bg-card p-3" data-testid={`row-module-${m.id}`}>
-        <div className="flex items-center justify-between gap-2">
-          <div><p className="text-xs font-bold">{m.name}</p><p className="text-[11px] text-muted-foreground">{m.blockName || 'Unassigned'}{m.subtitle ? ` · ${m.subtitle}` : ''}</p><p className="mt-0.5 text-[10px] font-semibold text-primary">{m.targetingLabel}</p></div>
-          <div className="flex items-center gap-1">
-            <button onClick={() => updateModule.mutate({ id: m.id, body: { active: !m.active } })} className={cn('rounded-lg px-2 py-1 text-[10px] font-extrabold', m.active ? 'bg-[#d7eee4] text-[#164b4b]' : 'bg-muted text-muted-foreground')} data-testid={`button-toggle-module-${m.id}`}>{m.active ? 'Active' : 'Hidden'}</button>
-            <button onClick={() => setEditingModule(editingModule === m.id ? null : m.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" data-testid={`button-edit-module-${m.id}`}><Pencil size={13} /></button>
-            <button onClick={() => setDeletingModule(m.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-module-${m.id}`}><Trash2 size={13} /></button>
-          </div>
-        </div>
-        {editingModule === m.id && <ModuleForm initial={m} examType={examType} blocks={blocks} onCancel={() => setEditingModule(null)} pending={updateModule.isPending} onSave={(body) => updateModule.mutate({ id: m.id, body })} />}
-      </div>)}</div>}
+      {!modules.length && !addingModule ? <EmptyState icon={FolderOpen} title="No modules yet" body="Modules are optional — only add them if you want a finer layer than blocks. Stations and material can stay directly under a block." /> : <div className="mt-3">{moduleGroups.map((g) => <CollapsibleGroup key={g.degree || 'unspecified'} defaultOpen icon={<GraduationCap size={13} />} title={g.degree === 'MBBS' || g.degree === 'BDS' ? `${g.degree} colleges` : 'Unspecified degree'} count={g.groups.reduce((sum, yg) => sum + yg.items.length, 0)} testId={`modules-degree-${g.degree || 'unspecified'}`}>
+        {g.groups.map((yg) => <CollapsibleGroup key={yg.year || 'no-year'} defaultOpen nested title={yg.year ? [yg.year, (g.degree === 'MBBS' || g.degree === 'BDS') ? g.degree : ''].filter(Boolean).join(' ') : 'No year set'} count={yg.items.length} testId={`modules-year-${g.degree || 'unspecified'}-${yg.year || 'no-year'}`}>
+          <div className="space-y-2">{yg.items.map(moduleRow)}</div>
+        </CollapsibleGroup>)}
+      </CollapsibleGroup>)}</div>}
     </div>
     {deletingBlock !== null && <ConfirmDialog title="Permanently delete this block?" body="Any modules under it are moved to Unassigned, not deleted. There is no undo." confirmLabel="Delete forever" onCancel={() => setDeletingBlock(null)} onConfirm={() => removeBlock.mutate(deletingBlock)} pending={removeBlock.isPending} />}
     {deletingModule !== null && <ConfirmDialog title="Permanently delete this module?" body="Learning material and stations under it are moved to Unassigned, not deleted. There is no undo." confirmLabel="Delete forever" onCancel={() => setDeletingModule(null)} onConfirm={() => removeModule.mutate(deletingModule)} pending={removeModule.isPending} />}
@@ -390,22 +416,29 @@ function StationsTab({ examType }: { examType: OspeExamType }) {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const stations = stationsQ.data || [];
   const modules = modulesQ.data || [];
+  const stationGroups = groupTargetable(stations);
+
+  const stationRow = (s: OspeStation) => <div key={s.id} className="border-b border-border p-4 last:border-0" data-testid={`row-station-${s.id}`}>
+    <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap">
+      {s.imagePath ? <img src={resolveUploadUrl(s.imagePath) ?? undefined} alt="" className="size-12 shrink-0 rounded-lg object-cover" /> : <div className="grid size-12 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground"><Stethoscope size={18} /></div>}
+      <div className="min-w-[160px] flex-1"><p className="text-sm font-bold leading-5">{s.title}</p><p className="mt-1 text-xs text-muted-foreground">{s.answerType === 'MCQ' ? 'Multiple choice' : s.answerType === 'LABELING' ? `Identification · ${(s.labelPoints || []).length} pin${(s.labelPoints || []).length === 1 ? '' : 's'}` : 'Written (AI graded)'} · {s.marks} mark{s.marks === 1 ? '' : 's'} · {s.targetingLabel}</p></div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button onClick={() => update.mutate({ id: s.id, body: { active: !s.active } })} className={cn('rounded-lg px-2 py-1 text-[10px] font-extrabold', s.active ? 'bg-[#d7eee4] text-[#164b4b]' : 'bg-muted text-muted-foreground')} data-testid={`button-toggle-station-${s.id}`}>{s.active ? 'Active' : 'Hidden'}</button>
+        <button onClick={() => setEditingId(editingId === s.id ? null : s.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" data-testid={`button-edit-station-${s.id}`}><Pencil size={14} /></button>
+        <button onClick={() => setDeletingId(s.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-station-${s.id}`}><Trash2 size={14} /></button>
+      </div>
+    </div>
+    {editingId === s.id && <StationForm initial={s} examType={examType} modules={modules} onCancel={() => setEditingId(null)} pending={update.isPending} onSave={(body) => update.mutate({ id: s.id, body })} />}
+  </div>;
 
   return <div>
     <div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-extrabold">Station bank</h3><button onClick={() => setAdding((v) => !v)} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-toggle-add-station"><Plus size={15} /> {adding ? 'Close' : 'Add station'}</button></div>
     {adding && <StationForm examType={examType} modules={modules} onCancel={() => setAdding(false)} pending={create.isPending} onSave={(body) => create.mutate(body)} />}
-    {!stations.length && !adding ? <EmptyState icon={Stethoscope} title="No stations yet" body="Build up a bank of stations here, then attach a set of them to an exam under the Exams tab." /> : <div className="mt-3 rounded-2xl border border-border bg-card">{stations.map((s) => <div key={s.id} className="border-b border-border p-4 last:border-0" data-testid={`row-station-${s.id}`}>
-      <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap">
-        {s.imagePath ? <img src={resolveUploadUrl(s.imagePath) ?? undefined} alt="" className="size-12 shrink-0 rounded-lg object-cover" /> : <div className="grid size-12 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground"><Stethoscope size={18} /></div>}
-        <div className="min-w-[160px] flex-1"><p className="text-sm font-bold leading-5">{s.title}</p><p className="mt-1 text-xs text-muted-foreground">{s.answerType === 'MCQ' ? 'Multiple choice' : s.answerType === 'LABELING' ? `Identification · ${(s.labelPoints || []).length} pin${(s.labelPoints || []).length === 1 ? '' : 's'}` : 'Written (AI graded)'} · {s.marks} mark{s.marks === 1 ? '' : 's'} · {s.targetingLabel}</p></div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button onClick={() => update.mutate({ id: s.id, body: { active: !s.active } })} className={cn('rounded-lg px-2 py-1 text-[10px] font-extrabold', s.active ? 'bg-[#d7eee4] text-[#164b4b]' : 'bg-muted text-muted-foreground')} data-testid={`button-toggle-station-${s.id}`}>{s.active ? 'Active' : 'Hidden'}</button>
-          <button onClick={() => setEditingId(editingId === s.id ? null : s.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" data-testid={`button-edit-station-${s.id}`}><Pencil size={14} /></button>
-          <button onClick={() => setDeletingId(s.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-station-${s.id}`}><Trash2 size={14} /></button>
-        </div>
-      </div>
-      {editingId === s.id && <StationForm initial={s} examType={examType} modules={modules} onCancel={() => setEditingId(null)} pending={update.isPending} onSave={(body) => update.mutate({ id: s.id, body })} />}
-    </div>)}</div>}
+    {!stations.length && !adding ? <EmptyState icon={Stethoscope} title="No stations yet" body="Build up a bank of stations here, then attach a set of them to an exam under the Exams tab." /> : <div className="mt-3">{stationGroups.map((g) => <CollapsibleGroup key={g.degree || 'unspecified'} defaultOpen icon={<GraduationCap size={14} />} title={g.degree === 'MBBS' || g.degree === 'BDS' ? `${g.degree} colleges` : 'Unspecified degree'} count={g.groups.reduce((sum, yg) => sum + yg.items.length, 0)} testId={`stations-degree-${g.degree || 'unspecified'}`}>
+      {g.groups.map((yg) => <CollapsibleGroup key={yg.year || 'no-year'} defaultOpen nested title={yg.year ? [yg.year, (g.degree === 'MBBS' || g.degree === 'BDS') ? g.degree : ''].filter(Boolean).join(' ') : 'No year set'} count={yg.items.length} testId={`stations-year-${g.degree || 'unspecified'}-${yg.year || 'no-year'}`}>
+        <div className="rounded-2xl border border-border bg-card">{yg.items.map(stationRow)}</div>
+      </CollapsibleGroup>)}
+    </CollapsibleGroup>)}</div>}
     {deletingId !== null && <ConfirmDialog title="Permanently delete this station?" body="This can't be done while it's attached to an exam paper — remove it from any papers first. There is no undo." confirmLabel="Delete forever" onCancel={() => setDeletingId(null)} onConfirm={() => remove.mutate(deletingId)} pending={remove.isPending} />}
   </div>;
 }
@@ -546,26 +579,34 @@ function ExamsTab({ examType }: { examType: OspeExamType }) {
 
   const exams = examsQ.data || [];
   const stations = stationsQ.data || [];
+  const examGroups = groupTargetable(exams);
+
+  const examRow = (ex: OspeAdminExam) => <div key={ex.id} className="border-b border-border p-4 last:border-0" data-testid={`row-exam-${ex.id}`}>
+    <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap">
+      <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#dceaf1] text-[#32647b]"><ClipboardCheck size={17} /></div>
+      <div className="min-w-[160px] flex-1"><p className="text-sm font-bold">{ex.title}</p><p className="mt-1 text-xs text-muted-foreground">{ex.stationCount} station{ex.stationCount === 1 ? '' : 's'} · {ex.attemptCount} attempt{ex.attemptCount === 1 ? '' : 's'} · {new Date(ex.startAt).toLocaleString()} – {new Date(ex.endAt).toLocaleString()}</p></div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-extrabold', ex.status === 'published' ? 'bg-[#d7eee4] text-[#164b4b]' : ex.status === 'archived' ? 'bg-muted text-muted-foreground' : 'bg-[#fdf1d9] text-[#8a5a12]')} data-testid={`text-exam-status-${ex.id}`}>{ex.status}</span>
+        <button onClick={() => setStationsPanelId(stationsPanelId === ex.id ? null : ex.id)} className={cn('rounded-lg px-3 py-1.5 text-[11px] font-bold', stationsPanelId === ex.id ? 'bg-[#eef7f1] text-primary' : 'border border-border text-muted-foreground hover:bg-muted')} data-testid={`button-manage-stations-${ex.id}`}>Stations</button>
+        <button onClick={() => setAttemptsPanelId(attemptsPanelId === ex.id ? null : ex.id)} className={cn('rounded-lg px-3 py-1.5 text-[11px] font-bold', attemptsPanelId === ex.id ? 'bg-[#eef7f1] text-primary' : 'border border-border text-muted-foreground hover:bg-muted')} data-testid={`button-view-attempts-${ex.id}`}>Attempts</button>
+        <button onClick={() => setEditingId(editingId === ex.id ? null : ex.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" data-testid={`button-edit-exam-${ex.id}`}><Pencil size={14} /></button>
+        {ex.status !== 'archived' ? <button onClick={() => archive.mutate(ex.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" title="Archive" data-testid={`button-archive-exam-${ex.id}`}><RotateCcw size={14} /></button> : null}
+        <button onClick={() => setDeletingId(ex.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" title="Delete forever" data-testid={`button-delete-exam-${ex.id}`}><Trash2 size={14} /></button>
+      </div>
+    </div>
+    {editingId === ex.id && <ExamForm initial={ex} examType={examType} onCancel={() => setEditingId(null)} pending={update.isPending} onSave={(body) => update.mutate({ id: ex.id, body })} />}
+    {stationsPanelId === ex.id && <div className="mt-3 rounded-xl border border-border"><ExamStationsPanel exam={ex} allStations={stations} /></div>}
+    {attemptsPanelId === ex.id && <div className="mt-3 rounded-xl border border-border"><ExamAttemptsPanel exam={ex} /></div>}
+  </div>;
 
   return <div>
     <div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-extrabold">Exam papers</h3><button onClick={() => setAdding((v) => !v)} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-toggle-add-exam"><Plus size={15} /> {adding ? 'Close' : 'Add exam'}</button></div>
     {adding && <ExamForm examType={examType} onCancel={() => setAdding(false)} pending={create.isPending} onSave={(body) => create.mutate(body)} />}
-    {!exams.length && !adding ? <EmptyState icon={ClipboardCheck} title="No exams yet" body="Create an exam, then attach stations from the bank to it." /> : <div className="mt-3 rounded-2xl border border-border bg-card">{exams.map((ex) => <div key={ex.id} className="border-b border-border p-4 last:border-0" data-testid={`row-exam-${ex.id}`}>
-      <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap">
-        <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#dceaf1] text-[#32647b]"><ClipboardCheck size={17} /></div>
-        <div className="min-w-[160px] flex-1"><p className="text-sm font-bold">{ex.title}</p><p className="mt-1 text-xs text-muted-foreground">{ex.stationCount} station{ex.stationCount === 1 ? '' : 's'} · {ex.attemptCount} attempt{ex.attemptCount === 1 ? '' : 's'} · {new Date(ex.startAt).toLocaleString()} – {new Date(ex.endAt).toLocaleString()}</p></div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-extrabold', ex.status === 'published' ? 'bg-[#d7eee4] text-[#164b4b]' : ex.status === 'archived' ? 'bg-muted text-muted-foreground' : 'bg-[#fdf1d9] text-[#8a5a12]')} data-testid={`text-exam-status-${ex.id}`}>{ex.status}</span>
-          <button onClick={() => setStationsPanelId(stationsPanelId === ex.id ? null : ex.id)} className={cn('rounded-lg px-3 py-1.5 text-[11px] font-bold', stationsPanelId === ex.id ? 'bg-[#eef7f1] text-primary' : 'border border-border text-muted-foreground hover:bg-muted')} data-testid={`button-manage-stations-${ex.id}`}>Stations</button>
-          <button onClick={() => setAttemptsPanelId(attemptsPanelId === ex.id ? null : ex.id)} className={cn('rounded-lg px-3 py-1.5 text-[11px] font-bold', attemptsPanelId === ex.id ? 'bg-[#eef7f1] text-primary' : 'border border-border text-muted-foreground hover:bg-muted')} data-testid={`button-view-attempts-${ex.id}`}>Attempts</button>
-          <button onClick={() => setEditingId(editingId === ex.id ? null : ex.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" data-testid={`button-edit-exam-${ex.id}`}><Pencil size={14} /></button>
-          {ex.status !== 'archived' ? <button onClick={() => archive.mutate(ex.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" title="Archive" data-testid={`button-archive-exam-${ex.id}`}><RotateCcw size={14} /></button> : <button onClick={() => setDeletingId(ex.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-exam-${ex.id}`}><Trash2 size={14} /></button>}
-        </div>
-      </div>
-      {editingId === ex.id && <ExamForm initial={ex} examType={examType} onCancel={() => setEditingId(null)} pending={update.isPending} onSave={(body) => update.mutate({ id: ex.id, body })} />}
-      {stationsPanelId === ex.id && <div className="mt-3 rounded-xl border border-border"><ExamStationsPanel exam={ex} allStations={stations} /></div>}
-      {attemptsPanelId === ex.id && <div className="mt-3 rounded-xl border border-border"><ExamAttemptsPanel exam={ex} /></div>}
-    </div>)}</div>}
+    {!exams.length && !adding ? <EmptyState icon={ClipboardCheck} title="No exams yet" body="Create an exam, then attach stations from the bank to it." /> : <div className="mt-3">{examGroups.map((g) => <CollapsibleGroup key={g.degree || 'unspecified'} defaultOpen icon={<GraduationCap size={14} />} title={g.degree === 'MBBS' || g.degree === 'BDS' ? `${g.degree} colleges` : 'Unspecified degree'} count={g.groups.reduce((sum, yg) => sum + yg.items.length, 0)} testId={`exams-degree-${g.degree || 'unspecified'}`}>
+      {g.groups.map((yg) => <CollapsibleGroup key={yg.year || 'no-year'} defaultOpen nested title={yg.year ? [yg.year, (g.degree === 'MBBS' || g.degree === 'BDS') ? g.degree : ''].filter(Boolean).join(' ') : 'No year set'} count={yg.items.length} testId={`exams-year-${g.degree || 'unspecified'}-${yg.year || 'no-year'}`}>
+        <div className="rounded-2xl border border-border bg-card">{yg.items.map(examRow)}</div>
+      </CollapsibleGroup>)}
+    </CollapsibleGroup>)}</div>}
     {deletingId !== null && <ConfirmDialog title="Permanently delete this exam?" body={forceDeleteInfo || 'This erases the exam paper for good. There is no undo.'} confirmLabel={forceDeleteInfo ? 'Delete anyway' : 'Delete forever'} onCancel={() => { setDeletingId(null); setForceDeleteInfo(null); }} onConfirm={() => removePermanent.mutate({ id: deletingId, force: !!forceDeleteInfo })} pending={removePermanent.isPending} />}
   </div>;
 }
