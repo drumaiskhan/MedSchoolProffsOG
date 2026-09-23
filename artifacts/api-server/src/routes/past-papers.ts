@@ -68,9 +68,18 @@ const PaperBody = z.object({
   examBoard: z.string().max(80).optional(),
   year: z.string().max(20).optional(),
   level: z.string().max(80).optional(),
-  institutionId: z.number().int().positive().optional(),
-  programId: z.number().int().positive().optional(),
-  academicYearId: z.number().int().positive().optional(),
+  // Nullable, not just optional: PastPaperEditForm (the edit form, unlike
+  // the create form) always sends these three keys explicitly — a real id
+  // when set, or `null` when the admin leaves/clears the field — rather
+  // than omitting the key. With `.optional()` alone, zod rejected `null`
+  // outright (a type mismatch, not a "missing field"), so safeParse
+  // failed on every single edit save and PATCH returned 400 before
+  // touching the DB. The update mutation on the frontend has no onError
+  // toast either, so that 400 was invisible — "Save changes" just did
+  // nothing. `.nullable()` lets an edit both set AND clear these fields.
+  institutionId: z.number().int().positive().nullable().optional(),
+  programId: z.number().int().positive().nullable().optional(),
+  academicYearId: z.number().int().positive().nullable().optional(),
   // Derived from the Degree + Year picker (see the paperView/GET comment
   // above) — null/omitted means "every program" / "every year" on that
   // axis, same convention as Modules/Blocks.

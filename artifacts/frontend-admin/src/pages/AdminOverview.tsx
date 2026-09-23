@@ -50,7 +50,15 @@ function AdminOverview() {
   const mcqImportSeries = buildMcqImportSeries(importLogsQ.data ?? []);
   const mcqImportsThisWeek = mcqImportSeries.reduce((sum, row) => sum + row.count, 0);
   const meQ = useGetCurrentUser();
-  const hour = new Date().getHours();
+  // Recomputed once a minute so "Good morning/afternoon/evening" doesn't
+  // freeze at whatever hour the dashboard first rendered if this tab is
+  // left open past a boundary (same fix as the student dashboard's hero —
+  // see useCurrentHour in frontend-student/src/lib/fx3d.tsx).
+  const [hour, setHour] = useState(() => new Date().getHours());
+  useEffect(() => {
+    const id = setInterval(() => setHour(new Date().getHours()), 60_000);
+    return () => clearInterval(id);
+  }, []);
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   if (q.isLoading || !d) return <SkeletonPage />;
   // One-tap shortcuts to the jobs admins do most — each is just a link, so

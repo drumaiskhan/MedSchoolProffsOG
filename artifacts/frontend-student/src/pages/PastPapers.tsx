@@ -1,4 +1,6 @@
 // Auto-extracted route page — code-split via React.lazy() in App.tsx.
+// v44 — same "real 3D" tilt language as Subjects / OSPE-OSCE (.cu-* in
+// fx.css + lib/tilt.tsx). See lib/fx.ts for the 3D rules.
 import { type ReactNode, type ComponentProps, type TouchEvent, useState, useEffect, useRef, createContext, useContext } from 'react';
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, Route, Switch, useLocation, useParams, useSearch, Router as WouterRouter } from 'wouter';
@@ -52,8 +54,32 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // invalidateQueries after a save) already set their own options, which
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
-import { EmptyState, PastPaperRowIcon, SectionHeader, SkeletonPage, StatTile, pastPaperEstimatedHours } from '@/lib/shared';
+import { EmptyState, SectionHeader, SkeletonPage, StatTile, pastPaperEstimatedHours } from '@/lib/shared';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { TiltAnchor, hueFromKey, vars } from '@/lib/tilt';
+
+function PastPaperCard({ paper, index }: { paper: PastPaper; index: number }) {
+  const hours = pastPaperEstimatedHours(paper.mcqCount);
+  const hue = hueFromKey(paper.examBoard || 'paper');
+  return <TiltAnchor href={`/practice?pastPaperId=${paper.id}`} testId={`card-paper-${paper.id}`} className="cu-ospe-card group" style={vars({ '--h': hue, '--i': Math.min(index, 11), '--tilt': 6 })}>
+    <span className="cu-ospe-card__glow" aria-hidden="true" />
+    <span className="cu-ospe-card__top">
+      <span className="cu-ospe-card__icon"><FileStack size={20} /></span>
+      <ArrowRight size={16} className="mt-2 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+    </span>
+    <span className="cu-ospe-card__meta" style={{ marginTop: '.85rem' }}>
+      <span className="cu-ospe-chip">{[paper.examBoard, paper.year].filter(Boolean).join(' · ') || 'Past paper'}</span>
+    </span>
+    <h3 className="cu-ospe-card__title">{paper.title}</h3>
+    <span className="cu-ospe-card__meta">
+      <span className="cu-ospe-chip"><Target size={11} /> {paper.mcqCount} Q{paper.mcqCount === 1 ? '' : 's'}</span>
+      <span className="cu-ospe-chip"><Clock3 size={11} /> ~{hours}h</span>
+    </span>
+    <span className="cu-ospe-card__foot">
+      <span className="cu-ospe-cta no-3d" data-testid={`button-start-paper-${paper.id}`}>View paper <ArrowRight size={13} /></span>
+    </span>
+  </TiltAnchor>;
+}
 
 function PastPapers() {
   const papers = useQuery({ queryKey: ['past-papers'], queryFn: () => pastPapersApi.list() });
@@ -75,7 +101,7 @@ function PastPapers() {
   const filtered = list.filter((p) => (!collegeFilter || p.examBoard === collegeFilter) && (!yearFilter || p.year === yearFilter));
   const totals = { papers: list.length, questions: list.reduce((s, p) => s + p.mcqCount, 0) };
 
-  return <div><SectionHeader eyebrow="Exam practice" title="Past Papers" description="Previous exam papers and practice tests." />
+  return <div className="cu-page"><SectionHeader eyebrow="Exam practice" title="Past Papers" description="Previous exam papers and practice tests." />
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
       <StatTile icon={FileStack} bg="bg-[#dceaf1]" fg="text-[#2c6a8f]" label="Available papers" value={totals.papers} />
       <StatTile icon={Target} bg="bg-[#d7eee4]" fg="text-[#1f7a5c]" label="Total questions" value={totals.questions} />
@@ -89,7 +115,7 @@ function PastPapers() {
       what made it render squashed/overlapping the list below on some
       browsers. Radix renders its own floating panel (via a portal, fixed
       to the trigger), matching the Flashcards filter bar's behavior. */}
-  <div className="mt-5 flex flex-wrap gap-2">
+  <div className="flex flex-wrap gap-2">
     <Select value={collegeFilter || 'all'} onValueChange={(v) => setCollegeFilter(v === 'all' ? '' : v)}>
       <SelectTrigger className="h-10 w-auto min-w-[9rem] rounded-xl border-border bg-card px-3 text-xs font-semibold transition-transform hover:-translate-y-0.5 hover:shadow-sm" data-testid="select-paper-filter-college">
         <SelectValue placeholder="Colleges/University" />
@@ -110,28 +136,7 @@ function PastPapers() {
     </Select>
   </div>
 
-  {papers.isLoading ? <SkeletonPage /> : filtered.length ? <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{filtered.map((paper) => {
-    const hours = pastPaperEstimatedHours(paper.mcqCount);
-    return <Link key={paper.id} href={`/practice?pastPaperId=${paper.id}`} className="card-lift group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-2xs)] transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-[var(--shadow-md)]" data-testid={`card-paper-${paper.id}`}>
-      <div className="flex items-start justify-between gap-2">
-        <PastPaperRowIcon examBoard={paper.examBoard} />
-        <ArrowRight size={16} className="mt-2 shrink-0 text-muted-foreground transition-all group-hover:translate-x-0.5 group-hover:text-primary" />
-      </div>
-      {/* Always the paper's own title (the "Block A"/"Block B" name it
-          was given in admin) — previously this fell back to showing the
-          college code instead whenever one was set, so the same list
-          showed a mix of college names and block names depending on the
-          paper. The college + year now sit together on the small line
-          above it instead, consistently, whether or not a college was set. */}
-      <div className="mt-3 text-[10px] font-extrabold uppercase tracking-wide text-primary">{[paper.examBoard, paper.year].filter(Boolean).join(' · ') || 'Past paper'}</div>
-      <div className="mt-1 text-sm font-extrabold leading-5">{paper.title}</div>
-      <div className="mt-3 flex items-center gap-3 border-t border-border pt-3 text-[11px] font-semibold text-muted-foreground">
-        <span className="flex items-center gap-1"><Target size={12} /> {paper.mcqCount} Q{paper.mcqCount === 1 ? '' : 's'}</span>
-        <span className="flex items-center gap-1"><Clock3 size={12} /> ~{hours}h</span>
-      </div>
-      <span className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary py-2 text-xs font-extrabold text-primary-foreground shadow-sm transition-all group-hover:shadow-md" data-testid={`button-start-paper-${paper.id}`}>View paper</span>
-    </Link>;
-  })}</div> : <EmptyState icon={FileStack} title="No past papers yet" body="Your admin can add past papers from Admin → Past papers, or none match these filters yet." />}
+  {papers.isLoading ? <SkeletonPage /> : filtered.length ? <div className="cu-ospe-grid is-materials">{filtered.map((paper, i) => <PastPaperCard key={paper.id} paper={paper} index={i} />)}</div> : <EmptyState icon={FileStack} title="No past papers yet" body="Your admin can add past papers from Admin → Past papers, or none match these filters yet." />}
   </div>;
 }
 

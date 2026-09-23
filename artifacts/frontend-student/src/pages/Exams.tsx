@@ -1,4 +1,8 @@
 // Auto-extracted route page — code-split via React.lazy() in App.tsx.
+// v44 — same "real 3D" tilt language as Subjects / OSPE-OSCE / Past Papers
+// (.cu-* in fx.css + lib/tilt.tsx). See lib/fx.ts for the 3D rules. The
+// local ExamCard below replaces lib/shared.tsx's plain ExamCard (that one
+// stays as-is; it isn't used anywhere else) with a tilt card.
 import { type ReactNode, type ComponentProps, type TouchEvent, useState, useEffect, useRef, createContext, useContext } from 'react';
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, Route, Switch, useLocation, useParams, useSearch, Router as WouterRouter } from 'wouter';
@@ -52,7 +56,36 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // invalidateQueries after a save) already set their own options, which
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
-import { SectionHeader, EmptyState, ExamCard } from '@/lib/shared';
+import { SectionHeader, EmptyState, StatTile } from '@/lib/shared';
+import { TiltDiv, hueFromKey, vars } from '@/lib/tilt';
+
+function ExamCard({ exam, index, onStart }: { exam: StudentExam; index: number; onStart: () => void }) {
+  const scopeLabel = `${exam.programTargetKind || 'All Programs'} · ${exam.yearTargetNumber ? `${exam.yearTargetNumber}${['th', 'st', 'nd', 'rd'][exam.yearTargetNumber % 10 > 3 ? 0 : exam.yearTargetNumber % 10]} Year` : 'All Years'}`;
+  const tone = exam.windowStatus === 'open' ? 'green' : exam.windowStatus === 'upcoming' ? 'blue' : 'neutral';
+  const hue = hueFromKey(exam.title || String(exam.id));
+  return <TiltDiv className="cu-ospe-card" testId={`card-exam-${exam.id}`} style={vars({ '--h': hue, '--i': Math.min(index, 11), '--tilt': 6 })}>
+    <span className="cu-ospe-card__glow" aria-hidden="true" />
+    <span className="cu-ospe-card__top">
+      <span className="cu-ospe-card__icon"><ClipboardCheck size={20} /></span>
+      <span className="cu-ospe-card__badge" data-tone={tone}>{exam.windowStatus}</span>
+    </span>
+    <h3 className="cu-ospe-card__title">{exam.title}</h3>
+    {exam.description && <p className="cu-ospe-card__desc">{exam.description}</p>}
+    <span className="cu-ospe-card__meta">
+      <span className="cu-ospe-chip"><Clock3 size={11} /> {exam.durationMinutes} min</span>
+      <span className="cu-ospe-chip">{scopeLabel}</span>
+      <span className="cu-ospe-chip"><Target size={11} /> {exam.attemptsUsed}/{exam.maxAttempts} attempts</span>
+      {exam.negativeMarkingEnabled && <span className="cu-ospe-chip" style={{ color: 'hsl(4 70% 58%)' }}><AlertTriangle size={11} /> -{exam.negativeMarkPerWrong} per wrong</span>}
+    </span>
+    <span className="cu-ospe-card__foot">
+      {exam.inProgressAttemptId
+        ? <Link href={`/exams/take/${exam.inProgressAttemptId}`} className="cu-ospe-cta no-3d" data-testid={`button-resume-exam-${exam.id}`}>Resume exam <ArrowRight size={13} /></Link>
+        : exam.canStart
+          ? <button onClick={onStart} className="cu-ospe-cta no-3d" data-testid={`button-start-exam-${exam.id}`}><ClipboardCheck size={14} /> Start exam</button>
+          : <span className="cu-ospe-note">{exam.windowStatus === 'upcoming' ? `Opens ${new Date(exam.startAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}` : exam.windowStatus === 'closed' ? 'Window closed' : 'No attempts remaining'}</span>}
+    </span>
+  </TiltDiv>;
+}
 
 function Exams() {
   const [, setLocation] = useLocation();
@@ -72,8 +105,15 @@ function Exams() {
     },
   });
   const exams = q.data || [];
-  return <div><SectionHeader eyebrow="Assessment" title="Pre-Proffs Exams" description="Timed exams. Results are released according to your admin's settings." />
-    <div className="grid gap-3 sm:grid-cols-2">{exams.map((exam) => <ExamCard key={exam.id} exam={exam} onStart={() => start.mutate(exam.id)} />)}{!exams.length && <EmptyState icon={ClipboardCheck} title="No exams scheduled" body="Your admin hasn't published an exam for your program and year yet." />}</div>
+  const openCount = exams.filter((e) => e.windowStatus === 'open').length;
+  return <div className="cu-page">
+    <SectionHeader eyebrow="Assessment" title="Pre-Proffs Exams" description="Timed exams. Results are released according to your admin's settings." />
+    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+      <StatTile icon={ClipboardCheck} bg="bg-[#dceaf1]" fg="text-[#2c6a8f]" label="Total exams" value={exams.length} />
+      <StatTile icon={Flame} bg="bg-[#d7eee4]" fg="text-[#1f7a5c]" label="Open now" value={openCount} />
+      <StatTile icon={Clock3} bg="bg-[#fdf0d9]" fg="text-[#8a5a12]" label="Total minutes" value={exams.reduce((s, e) => s + e.durationMinutes, 0)} />
+    </div>
+    <div className="cu-ospe-grid">{exams.map((exam, i) => <ExamCard key={exam.id} exam={exam} index={i} onStart={() => start.mutate(exam.id)} />)}{!exams.length && <EmptyState icon={ClipboardCheck} title="No exams scheduled" body="Your admin hasn't published an exam for your program and year yet." />}</div>
   </div>;
 }
 

@@ -1,5 +1,8 @@
+import { and, desc, eq, gt, gte, sql } from "drizzle-orm";
+import { db, membershipsTable, practiceAttemptsTable, usersTable } from "@workspace/db";
 import { getSetting } from "./settings";
 import { getStudentTargeting } from "./contentVisibility";
+import { revokeAllForUser } from "./deviceSessions";
 
 /**
  * General Trial Mode — one place that owns how the platform-wide trial is
@@ -154,4 +157,114 @@ export async function trialGrantsAccess(userId: number, feature?: TrialFeature |
  * word its banner and mark locked features without re-deriving defaults. */
 export function publicTrialView(config: TrialConfig) {
   return { active: config.active, program: config.program, years: config.years, features: config.features, endsAt: config.endsAt };
+}
+
+// ---------------------------------------------------------------------------
+// Daily MCQ cap for trial-only students (TRIAL_DAILY_MCQ_LIMIT)
+// ---------------------------------------------------------------------------
+
+/** True when this student's access to `feature` right now comes ONLY from a
+ * trial — a real paid (non-trial) ACTIVE membership means "no cap" here,
+ * regardless of whether a trial would also cover them. A student with no
+ * membership at all who's covered by General Trial Mode counts as
+ * trial-only too, same as one with an admin-granted per-student trial. */
+export async function studentIsTrialOnly(userId: number, feature: TrialFeature | readonly TrialFeature[]): Promise<boolean> {
+  const [paidActive] = await db
+    .select({ id: membershipsTable.id })
+    .from(membershipsTable)
+    .where(and(eq(membershipsTable.userId, userId), eq(membershipsTable.status, "ACTIVE"), eq(membershipsTable.isTrial, false), gt(membershipsTable.expiresAt, new Date())))
+    .limit(1);
+  if (paidActive) return false;
+  return trialGrantsAccess(userId, feature);
+}
+
+/** How many MCQs (summed across practice sessions, not per-session) a
+ * trial-only student may submit in one UTC calendar day. Setting key
+ * TRIAL_DAILY_MCQ_LIMIT — a whole number, 0 = unlimited; blank/unset
+ * defaults to 50. Applies to BOTH trial paths (an admin's per-student trial
+ * grant — POST /students/:id/trial — and General Trial Mode above) equally;
+ * whichever got the student trial access counts the same toward this cap.
+ * Paying students are never capped — see studentIsTrialOnly. */
+export async function getTrialDailyMcqLimit(): Promise<number> {
+  const raw = await getSetting("TRIAL_DAILY_MCQ_LIMIT", "50");
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : 50;
+}
+
+export interface TrialMcqStatus {
+  /** False for a paying student or an unlimited (0) cap — nothing to show. */
+  limited: boolean;
+  /** The configured cap. 0 means unlimited. */
+  limit: number;
+  /** MCQs already submitted today (UTC), summed across sessions. */
+  used: number;
+  /** limit - used, floored at 0. Infinity when `limited` is false. */
+  remaining: number;
+}
+
+/** One place that answers "how is this student doing against today's trial
+ * MCQ cap" — shared by trialDailyMcqCapError (submit-time enforcement,
+ * below) and GET /student/trial-mcq-usage (the Practice page's "X of Y MCQs
+ * used today" bar), so the two can never disagree on what "used today"
+ * means. */
+export async function getTrialDailyMcqStatus(userId: number): Promise<TrialMcqStatus> {
+  const limit = await getTrialDailyMcqLimit();
+  if (limit === 0 || !(await studentIsTrialOnly(userId, ["mcqs", "past_papers"]))) {
+    return { limited: false, limit, used: 0, remaining: Infinity };
+  }
+  const startOfDay = new Date();
+  startOfDay.setUTCHours(0, 0, 0, 0);
+  const [row] = await db
+    .select({ used: sql<number>`coalesce(sum(${practiceAttemptsTable.totalQuestions}), 0)` })
+    .from(practiceAttemptsTable)
+    .where(and(eq(practiceAttemptsTable.userId, userId), gte(practiceAttemptsTable.createdAt, startOfDay)));
+  const used = Number(row?.used ?? 0);
+  return { limited: true, limit, used, remaining: Math.max(0, limit - used) };
+}
+
+/** Returns a user-facing error message if submitting `count` more MCQs
+ * today would put a trial-only student over TRIAL_DAILY_MCQ_LIMIT, or null
+ * if the submission is fine — not a trial-only student, the cap is
+ * unlimited (0), or they still have room today. The one call POST
+ * /practice-sessions makes before recording a session. */
+export async function trialDailyMcqCapError(userId: number, count: number): Promise<string | null> {
+  const status = await getTrialDailyMcqStatus(userId);
+  if (!status.limited) return null;
+  if (count <= status.remaining) return null;
+  return status.remaining <= 0
+    ? `Trial accounts are limited to ${status.limit} MCQs a day. You've used all ${status.limit} for today — come back tomorrow, or ask about upgrading for unlimited access.`
+    : `Trial accounts are limited to ${status.limit} MCQs a day. You have ${status.remaining} left today — try a smaller set, or ask about upgrading for unlimited access.`;
+}
+
+// ---------------------------------------------------------------------------
+// Strict trial-expiry enforcement (per-student trial, POST /students/:id/trial)
+// ---------------------------------------------------------------------------
+
+/** Nothing flips a per-student trial's membership row or the account's
+ * `status` back automatically once its `expiresAt` passes — the same lazy
+ * pattern GET /admin/dashboard already relies on for accurate counts (see
+ * that route's comment). This is the one place that acts on it, called from
+ * hasActiveMembership (middlewares/auth.ts) on every membership-gated
+ * request. Once an admin-granted trial has expired, the account is banned
+ * outright — status SUSPENDED, every signed-in session revoked — rather
+ * than just quietly losing feature access, so an expired trial can never
+ * keep browsing on whatever's left of a still-valid JWT. Mirrors DELETE
+ * /students/:id/trial's manual "end trial early" path exactly, just
+ * triggered by the clock instead of an admin click.
+ *
+ * Returns true if this call just banned the account (so the caller should
+ * treat the current request as denied immediately). */
+export async function banIfTrialExpired(userId: number): Promise<boolean> {
+  const [trial] = await db
+    .select()
+    .from(membershipsTable)
+    .where(and(eq(membershipsTable.userId, userId), eq(membershipsTable.status, "ACTIVE"), eq(membershipsTable.isTrial, true)))
+    .orderBy(desc(membershipsTable.expiresAt))
+    .limit(1);
+  if (!trial || trial.expiresAt.getTime() > Date.now()) return false;
+
+  await db.update(membershipsTable).set({ status: "SUSPENDED", suspendedReason: "Trial period ended" }).where(eq(membershipsTable.id, trial.id));
+  await db.update(usersTable).set({ status: "SUSPENDED", statusMessage: "Your trial period ended. Contact support or ask about a membership to regain access." }).where(eq(usersTable.id, userId));
+  await revokeAllForUser(userId).catch(() => {});
+  return true;
 }

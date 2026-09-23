@@ -79,6 +79,14 @@ const EDITABLE_KEYS = [
   "GLOBAL_TRIAL_FEATURES",
   // Optional "YYYY-MM-DD" — the trial switches itself off after that day.
   "GLOBAL_TRIAL_ENDS_AT",
+  // Daily cap on MCQs a trial-only student may submit (summed across
+  // practice sessions, resets at UTC midnight). Applies to BOTH trial paths
+  // equally — General Trial Mode above and an admin's per-student trial
+  // grant (Students → grant trial) — never to a paying student. Whole
+  // number; 0 = unlimited; blank defaults to 50. See lib/trial.ts
+  // getTrialDailyMcqLimit / trialDailyMcqCapError, enforced in POST
+  // /practice-sessions (routes/analytics.ts).
+  "TRIAL_DAILY_MCQ_LIMIT",
   // Optional decorative photo for the student Dashboard's greeting card
   // (see frontend-student's Dashboard component) — falls back to a plain
   // decorative pattern when unset.
@@ -368,6 +376,11 @@ router.patch("/admin/settings", requireAdmin, async (req, res): Promise<void> =>
   const deviceLimit = parsed.data.DEFAULT_MAX_DEVICES;
   if (deviceLimit !== undefined && deviceLimit.trim() !== "" && parseDeviceLimit(deviceLimit) === null) {
     res.status(400).json({ error: `Default device limit must be a whole number from 0 (unlimited) to ${MAX_DEVICES_CEILING}.` });
+    return;
+  }
+  const trialMcqLimit = parsed.data.TRIAL_DAILY_MCQ_LIMIT;
+  if (trialMcqLimit !== undefined && trialMcqLimit.trim() !== "" && !(Number.isInteger(Number(trialMcqLimit)) && Number(trialMcqLimit) >= 0)) {
+    res.status(400).json({ error: "Trial daily MCQ limit must be a whole number, 0 or more (0 = unlimited)." });
     return;
   }
   for (const [key, value] of Object.entries(parsed.data)) {

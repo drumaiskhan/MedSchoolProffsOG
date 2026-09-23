@@ -294,6 +294,53 @@ export const examsApi = {
   result: (attemptId: number) => request<ExamResult>(`/exam-attempts/${attemptId}/result`),
 };
 
+// ---------------------------------------------------------------------------
+// OSPE / OSCE practical exams
+// ---------------------------------------------------------------------------
+
+export type OspeExamType = 'OSPE' | 'OSCE';
+export interface OspeLearningMaterial { id: number; moduleId: number | null; examType: OspeExamType; title: string; description: string; bodyText: string; imagePath: string | null; attachmentPath: string | null; externalUrl: string | null }
+export interface OspeExam {
+  id: number; title: string; description: string; examType: OspeExamType; programTargetKind: string | null; yearTargetNumber: number | null;
+  durationMinutes: number; startAt: string; endAt: string; maxAttempts: number; passingPercent: number | null;
+  resultReleaseMode: 'immediate' | 'after_end' | 'manual'; showMarks: boolean; showPercentage: boolean; showCorrectAnswers: boolean;
+  status: 'draft' | 'published' | 'archived';
+}
+export interface OspeStudentExam extends OspeExam { attemptsUsed: number; canStart: boolean; inProgressAttemptId: number | null; windowStatus: 'upcoming' | 'open' | 'closed' }
+// Student-facing identification point — just where the pin sits, never the
+// correct label (that stays server-side until results are released).
+export interface OspeExamLabelPoint { id: string; x: number; y: number }
+export interface OspeExamStation { id: number; title: string; instructions: string; imagePath: string | null; attachmentPath: string | null; answerType: 'MCQ' | 'WRITTEN' | 'LABELING'; options: string[] | null; labelPoints: OspeExamLabelPoint[] | null; marks: number; timeLimitSeconds: number | null }
+export interface OspeExamStartResponse { attemptId: number; startedAt: string; durationMinutes: number; stations: OspeExamStation[] }
+export interface OspeExamResult {
+  released: boolean; status?: string; totalStations?: number; fullyGraded?: boolean;
+  totalMarks?: number; obtainedMarks?: number | null; percentage?: number | null; passed?: boolean | null;
+  breakdown?: Array<{
+    stationId: number; title: string; instructions: string; imagePath: string | null; answerType: 'MCQ' | 'WRITTEN' | 'LABELING'; options: string[] | null;
+    selectedAnswer: string | null; writtenAnswer: string | null; correctAnswer: string | null; modelAnswer: string | null;
+    labelPoints: Array<{ id: string; x: number; y: number; label: string }> | null; labelAnswers: Record<string, string> | null;
+    marks: number; marksObtained: number | null; correct: boolean | null; aiVerdict: 'correct' | 'partial' | 'incorrect' | null; aiFeedback: string | null;
+  }>;
+}
+
+function ospeQuery(examType?: OspeExamType) { return examType ? `?examType=${examType}` : ''; }
+
+export const ospeApi = {
+  blocks: (examType?: OspeExamType) => request<Array<{ id: number; name: string; subtitle: string; examType: OspeExamType; displayOrder: number }>>(`/ospe/blocks${ospeQuery(examType)}`),
+  modules: (examType?: OspeExamType, blockId?: number) => request<Array<{ id: number; name: string; subtitle: string; examType: OspeExamType; blockId: number | null; displayOrder: number }>>(`/ospe/modules${examType || blockId ? `?${[examType ? `examType=${examType}` : '', blockId ? `blockId=${blockId}` : ''].filter(Boolean).join('&')}` : ''}`),
+  learningMaterials: (examType?: OspeExamType, moduleId?: number) => request<OspeLearningMaterial[]>(`/ospe/learning-materials${examType || moduleId ? `?${[examType ? `examType=${examType}` : '', moduleId ? `moduleId=${moduleId}` : ''].filter(Boolean).join('&')}` : ''}`),
+  exams: (examType?: OspeExamType) => request<OspeStudentExam[]>(`/ospe/exams${ospeQuery(examType)}`),
+  start: (id: number) => request<OspeExamStartResponse>(`/ospe/exams/${id}/start`, { method: 'POST' }),
+  answer: (attemptId: number, stationId: number, selectedAnswer: string | null, writtenAnswer: string | null, labelAnswers?: Record<string, string> | null) =>
+    request<{ ok: true }>(`/ospe/exam-attempts/${attemptId}/answer`, { method: 'POST', body: JSON.stringify({ stationId, selectedAnswer, writtenAnswer, labelAnswers: labelAnswers ?? null }) }),
+  submit: (attemptId: number) => request<{ attemptId: number; status: string; resultsReleased: boolean }>(`/ospe/exam-attempts/${attemptId}/submit`, { method: 'POST' }),
+  // Retries AI grading for any WRITTEN stations still ungraded (e.g. the
+  // submit-time grading pass ran out of its time budget) — safe to call
+  // repeatedly, already-graded stations are skipped server-side.
+  grade: (attemptId: number) => request<{ ok: true; graded: number; pending: number; obtainedMarks: number; percentage: number }>(`/ospe/exam-attempts/${attemptId}/grade`, { method: 'POST' }),
+  result: (attemptId: number) => request<OspeExamResult>(`/ospe/exam-attempts/${attemptId}/result`),
+};
+
 export const studentsAdminApi = {
   detail: (id: number) => request<StudentDetail>(`/students/${id}`),
   update: (id: number, body: Partial<{ name: string; phone: string; rollNumber: string }>) => request<{ ok: true }>(`/students/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
@@ -520,6 +567,10 @@ export const analyticsApi = {
   submitSession: (body: { moduleId?: number; subjectId?: number; topicId?: number; mode?: 'timed' | 'untimed'; durationSeconds?: number; answers: { mcqId: number; selectedAnswer: string | null }[] }) =>
     request<{ id: number; scorePercent: number; correctCount: number; totalQuestions: number }>('/practice-sessions', { method: 'POST', body: JSON.stringify(body) }),
   practiceOverview: () => request<{ totalTopics: number; totalQuestions: number; avgQuestions: number; avgDurationMinutes: number; moduleCount: number }>('/student/practice-overview'),
+  // Trial-only students are capped at TRIAL_DAILY_MCQ_LIMIT MCQs/day (admin
+  // setting, Settings → Access & trial). `limited: false` for a paying
+  // student or an unlimited (0) cap — nothing for the Practice page to show.
+  trialMcqUsage: () => request<{ limited: boolean; limit: number; used: number; remaining: number | null }>('/student/trial-mcq-usage'),
 };
 
 // ---------------------------------------------------------------------------

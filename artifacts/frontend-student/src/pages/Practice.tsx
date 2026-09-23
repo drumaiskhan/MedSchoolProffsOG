@@ -146,8 +146,20 @@ function Practice() {
   // triggering a second one.
   const siteContentQ = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get });
   const aiExplainEnabled = siteContentQ.data?.AI_EXPLAIN_ENABLED !== 'false';
+  // Trial-only students are capped at TRIAL_DAILY_MCQ_LIMIT MCQs/UTC-day
+  // (admin setting, Settings → Access & trial). `limited` is false for a
+  // paying student or an unlimited (0) cap, so nothing below renders for them.
+  const trialUsageQ = useQuery({ queryKey: ['trial-mcq-usage'], queryFn: analyticsApi.trialMcqUsage, staleTime: 30_000 });
+  const trialUsage = trialUsageQ.data;
+  const trialLimited = trialUsage?.limited === true;
   const answeredCount = Object.values(answers).filter((v) => v != null).length;
   const percentAnswered = activeMcqs.length ? Math.round((answeredCount / activeMcqs.length) * 100) : 0;
+  // Remaining allowance if the student finished right now — answers already
+  // given in this still-open session haven't hit the server yet (submission
+  // only happens at Finish/exit), so this is trialUsage.remaining (this
+  // morning's count) minus what's been answered live, not just the raw
+  // server figure.
+  const trialRemainingNow = trialLimited ? Math.max(0, (trialUsage!.remaining ?? 0) - answeredCount) : null;
 
   const finishSession = () => {
     const sessionAnswers = activeMcqs.map((m) => ({ mcqId: m.id, selectedAnswer: answers[m.id] ?? null })).filter((a) => a.selectedAnswer != null);
@@ -155,6 +167,21 @@ function Practice() {
     if (sessionAnswers.length) submitAnswer.mutate({ topicId, answers: sessionAnswers, durationSeconds, mode: mode ?? undefined });
     setFinished(true);
   };
+
+  // Force-submit the moment a trial-only student's daily MCQ cap is hit
+  // mid-session, instead of letting them keep answering only to have the
+  // whole batch rejected at Finish (see trialDailyMcqCapError on the
+  // server) — this way whatever they've already answered still gets
+  // recorded. `answeredCount > 0` guards against firing before they've
+  // touched a question (e.g. a session opened after the cap was already
+  // used up elsewhere today).
+  useEffect(() => {
+    if (!trialLimited || finished || !mode || answeredCount === 0) return;
+    if (trialRemainingNow !== 0) return;
+    toast({ title: 'Daily trial limit reached', description: `Trial accounts are limited to ${trialUsage?.limit} MCQs a day. This session was submitted with the ${answeredCount} you've answered — come back tomorrow, or ask about upgrading for unlimited access.` });
+    finishSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trialRemainingNow, trialLimited, finished, mode, answeredCount]);
   const restartSession = () => { setIndex(0); setAnswers({}); setFlaggedIds(new Set()); setSavedIds(new Set()); setPanel(null); setPaused(false); setFinished(false); setMode(null); setRemainingSeconds(0); setPendingMode('timed'); setCustomMinutes(null); setOrderedMcqs(null); setSelectedDifficulty('all'); setCountMode('20'); askAi.reset(); };
 
   useEffect(() => {
@@ -191,7 +218,13 @@ function Practice() {
     // question-count cap and the Test Summary below both work off of.
     const difficultyFilteredMcqs = selectedDifficulty === 'all' ? mcqs : mcqs.filter((m) => (m.difficulty || 'moderate').toLowerCase() === selectedDifficulty);
     const availableCount = difficultyFilteredMcqs.length;
-    const effectiveCount = countMode === 'all' ? availableCount : Math.min(Number(countMode), availableCount);
+    const rawEffectiveCount = countMode === 'all' ? availableCount : Math.min(Number(countMode), availableCount);
+    // Trial-only students can't start a set bigger than what's left of their
+    // daily MCQ cap (see lib/trial.ts on the server) — clamp the planned
+    // test size down to that, same as the live session force-submits once
+    // the cap is hit mid-way (see the useEffect above).
+    const trialCap = trialLimited ? (trialUsage!.remaining ?? 0) : null;
+    const effectiveCount = trialCap !== null ? Math.min(rawEffectiveCount, trialCap) : rawEffectiveCount;
     // 1 minute per question — standard board-exam pacing — based on the
     // actual planned test size, not the full unfiltered set.
     const autoMinutes = Math.max(1, effectiveCount);
@@ -201,8 +234,9 @@ function Practice() {
     const topicLabel = mcqs[0]?.topic || mcqs[0]?.subject || mcqs[0]?.module || (pastPaperId ? 'Past paper' : 'Practice set');
     const finishClock = pendingMode === 'timed' ? new Date(Date.now() + effectiveMinutes * 60000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null;
     const startSession = () => {
-      const limited = countMode === 'all' ? difficultyFilteredMcqs : difficultyFilteredMcqs.slice(0, Number(countMode));
-      setOrderedMcqs(shuffleQuestions ? shuffleArray(limited) : limited);
+      const byCount = countMode === 'all' ? difficultyFilteredMcqs : difficultyFilteredMcqs.slice(0, Number(countMode));
+      const capped = trialCap !== null ? byCount.slice(0, trialCap) : byCount;
+      setOrderedMcqs(shuffleQuestions ? shuffleArray(capped) : capped);
       setMode(pendingMode);
       setRemainingSeconds(pendingMode === 'timed' ? effectiveMinutes * 60 : 0);
       sessionStartRef.current = Date.now();
@@ -229,6 +263,38 @@ function Practice() {
         </div>
 
         <div className="p-5 sm:p-7">
+          {trialLimited && <div
+            className={cn(
+              'relative mb-5 overflow-hidden rounded-2xl p-4 text-white shadow-[0_8px_24px_-6px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.25)]',
+              trialCap === 0
+                ? 'bg-gradient-to-br from-[#e0654f] via-[#c0503f] to-[#8f3a2e]'
+                : 'bg-gradient-to-br from-[#f5b25a] via-[#e5a952] to-[#c17f2a]'
+            )}
+            data-testid="banner-trial-mcq-limit"
+          >
+            {/* Subtle glossy highlight + soft glow blob — the "3D" part: a
+                faint top sheen plus a blurred circle peeking from the
+                corner, both purely decorative and clipped by overflow-hidden. */}
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/25 to-transparent" />
+            <div className="pointer-events-none absolute -right-6 -top-8 size-28 rounded-full bg-white/20 blur-2xl" />
+            <div className="relative flex items-start gap-3">
+              <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-white/25 shadow-[inset_0_1px_0_rgba(255,255,255,0.5),0_2px_6px_rgba(0,0,0,0.2)]">
+                {trialCap === 0 ? <Clock3 size={16} /> : <Zap size={16} className="fill-white/90" />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] font-extrabold uppercase tracking-wide text-white/90">Trial account</span>
+                  {trialCap !== 0 && <span className="font-mono-app rounded-full bg-black/15 px-2 py-0.5 text-[10px] font-extrabold shadow-inner">{trialUsage?.used}/{trialUsage?.limit} today</span>}
+                </div>
+                <p className="mt-1 text-xs font-semibold leading-5">
+                  {trialCap === 0
+                    ? <>You've used all {trialUsage?.limit} of today's trial MCQs. Come back tomorrow, or ask about upgrading for unlimited access.</>
+                    : <>{trialCap} MCQ{trialCap === 1 ? '' : 's'} left today — this set will be capped at {trialCap}.</>}
+                </p>
+                {trialCap !== 0 && trialUsage?.limit ? <div className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-black/15 shadow-inner"><div className="h-full rounded-full bg-white/95 shadow-[0_0_6px_rgba(255,255,255,0.8)] transition-all" style={{ width: `${Math.min(100, Math.round(((trialUsage.used ?? 0) / trialUsage.limit) * 100))}%` }} /></div> : null}
+              </div>
+            </div>
+          </div>}
           <h3 className="mb-5 text-sm font-extrabold text-foreground">Configure Your Practice Test</h3>
 
           {difficultyEntries.length > 0 && <div className="mb-5">
@@ -422,7 +488,7 @@ function Practice() {
         replaces a whole separate "Timer" card that used to sit above the
         question, pushing everything down a full card's height before you
         even reached the question text. */}
-    <div className="mt-2.5 mb-4 flex items-center gap-3"><div className="flex-1"><Progress value={percentAnswered} /></div><span className="shrink-0 text-[10px] font-bold text-muted-foreground">{percentAnswered}% answered</span></div>
+    <div className="mt-2.5 mb-4 flex items-center gap-3"><div className="flex-1"><Progress value={percentAnswered} /></div><span className="shrink-0 text-[10px] font-bold text-muted-foreground">{percentAnswered}% answered</span>{trialLimited && <span className={cn('inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-extrabold text-white shadow-[0_2px_6px_-1px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.35)]', trialRemainingNow === 0 ? 'bg-gradient-to-br from-[#e0654f] to-[#a3402f]' : 'bg-gradient-to-br from-[#f5b25a] to-[#c17f2a]')} data-testid="badge-trial-mcqs-left"><Zap size={10} className="fill-white/90" /> {trialRemainingNow} left today</span>}</div>
     <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
       <div className="order-1 overflow-hidden rounded-3xl border border-border bg-card shadow-[var(--shadow-2xs)]">
         <div className="bg-gradient-to-br from-indigo-50 via-card to-card px-5 pt-5 sm:px-6 sm:pt-6">

@@ -23,6 +23,7 @@ import aiVisualizerRouter from "./ai-visualizer";
 import adminSearchRouter from "./admin-search";
 import challengesRouter from "./challenges";
 import couponsRouter from "./coupons";
+import ospeRouter from "./ospe";
 
 const router: IRouter = Router();
 
@@ -49,6 +50,7 @@ router.use(aiVisualizerRouter);
 router.use(adminSearchRouter);
 router.use(challengesRouter);
 router.use(couponsRouter);
+router.use(ospeRouter);
 router.use(medschoolRouter);
 
 export default router;

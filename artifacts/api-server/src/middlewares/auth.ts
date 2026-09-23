@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import { eq } from "drizzle-orm";
 import { db, usersTable } from "@workspace/db";
 import { SESSION_COOKIE_NAME, verifySession } from "../lib/auth";
-import { trialGrantsAccess, type TrialFeature } from "../lib/trial";
+import { banIfTrialExpired, trialGrantsAccess, type TrialFeature } from "../lib/trial";
 import { isSessionActive } from "../lib/deviceSessions";
 
 export interface AuthedUser {
@@ -129,10 +129,21 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
  * to any set of academic years, and to a chosen set of features — `feature`
  * says which one THIS route belongs to, so a trial that only unlocks the
  * MCQ bank doesn't also unlock flashcards. Separate from the per-student
- * POST /students/:id/trial grant, which is unaffected either way. */
+ * POST /students/:id/trial grant, which is unaffected either way.
+ *
+ * A status of "ACTIVE" is set by both a real membership grant AND a
+ * per-student trial grant (POST /students/:id/trial) — nothing flips it
+ * back when a trial's expiresAt passes, so this can't just trust the
+ * status column: banIfTrialExpired checks whether the thing that actually
+ * made this account ACTIVE was a trial that has since expired, and if so
+ * bans the account (status SUSPENDED, every session revoked) on the spot
+ * instead of quietly denying just this one request. */
 export async function hasActiveMembership(user: AuthedUser, feature?: TrialFeature | readonly TrialFeature[]): Promise<boolean> {
   if (isAdminRole(user.role)) return true;
-  if (user.status === "ACTIVE") return true;
+  if (user.status === "ACTIVE") {
+    if (await banIfTrialExpired(user.id)) return false;
+    return true;
+  }
   return trialGrantsAccess(user.id, feature);
 }
 

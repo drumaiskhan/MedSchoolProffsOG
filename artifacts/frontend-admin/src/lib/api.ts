@@ -280,6 +280,111 @@ export interface ExamResult {
   breakdown?: Array<{ mcqId: number; question: string; options: string[]; selectedAnswer: string | null; correctAnswer: string | null; explanation: string | null; correct: boolean | null }>;
 }
 
+// ---------------------------------------------------------------------------
+// OSPE / OSCE practical exams
+// ---------------------------------------------------------------------------
+
+export type OspeExamType = 'OSPE' | 'OSCE';
+export interface OspeBlock {
+  id: number; name: string; subtitle: string; examType: OspeExamType; iconPath: string | null; active: boolean;
+  archived: boolean; displayOrder: number; programTargetKind: string | null; yearTargetNumber: number | null; targetingLabel: string;
+}
+export interface OspeModule extends OspeBlock { blockId: number | null; blockName: string | null }
+export interface OspeLearningMaterial {
+  id: number; moduleId: number | null; examType: OspeExamType; title: string; description: string; bodyText: string;
+  imagePath: string | null; attachmentPath: string | null; externalUrl: string | null; active: boolean; archived: boolean;
+  displayOrder: number; programTargetKind: string | null; yearTargetNumber: number | null; targetingLabel: string;
+}
+export interface OspeLabelPoint { id: string; x: number; y: number; label: string; marks?: number | null }
+export interface OspeStation {
+  id: number; moduleId: number | null; examType: OspeExamType; title: string; instructions: string; imagePath: string | null;
+  attachmentPath: string | null; answerType: 'MCQ' | 'WRITTEN' | 'LABELING'; options: string[] | null; correctAnswer: string | null;
+  modelAnswer: string | null; labelPoints: OspeLabelPoint[] | null; marks: number; timeLimitSeconds: number | null; active: boolean; archived: boolean;
+  displayOrder: number; programTargetKind: string | null; yearTargetNumber: number | null; targetingLabel: string;
+}
+export interface OspeExam {
+  id: number; title: string; description: string; examType: OspeExamType; programTargetKind: string | null; yearTargetNumber: number | null;
+  durationMinutes: number; startAt: string; endAt: string; maxAttempts: number; passingPercent: number | null;
+  resultReleaseMode: 'immediate' | 'after_end' | 'manual'; showMarks: boolean; showPercentage: boolean; showCorrectAnswers: boolean;
+  status: 'draft' | 'published' | 'archived';
+}
+export interface OspeAdminExam extends OspeExam { stationCount: number; attemptCount: number }
+export interface OspeStudentExam extends OspeExam { attemptsUsed: number; canStart: boolean; inProgressAttemptId: number | null; windowStatus: 'upcoming' | 'open' | 'closed' }
+export interface OspeExamStation { id: number; title: string; instructions: string; imagePath: string | null; attachmentPath: string | null; answerType: 'MCQ' | 'WRITTEN' | 'LABELING'; options: string[] | null; labelPoints: Array<{ id: string; x: number; y: number }> | null; marks: number; timeLimitSeconds: number | null }
+export interface OspeExamStartResponse { attemptId: number; startedAt: string; durationMinutes: number; stations: OspeExamStation[] }
+export interface OspeExamAttemptRow { id: number; examId: number; userId: number; studentName: string; institution: string; attemptNumber: number; startedAt: string; submittedAt: string | null; totalStations: number; totalMarks: number; obtainedMarks: number; percentage: number; passed: boolean | null; status: string; resultsReleasedAt: string | null }
+export interface OspeExamResult {
+  released: boolean; status?: string; totalStations?: number; fullyGraded?: boolean;
+  totalMarks?: number; obtainedMarks?: number | null; percentage?: number | null; passed?: boolean | null;
+  breakdown?: Array<{
+    stationId: number; title: string; instructions: string; imagePath: string | null; answerType: 'MCQ' | 'WRITTEN' | 'LABELING'; options: string[] | null;
+    selectedAnswer: string | null; writtenAnswer: string | null; correctAnswer: string | null; modelAnswer: string | null;
+    labelPoints: OspeLabelPoint[] | null; labelAnswers: Record<string, string> | null;
+    marks: number; marksObtained: number | null; correct: boolean | null; aiVerdict: 'correct' | 'partial' | 'incorrect' | null; aiFeedback: string | null;
+  }>;
+}
+
+function ospeQuery(examType?: OspeExamType) { return examType ? `?examType=${examType}` : ''; }
+
+export const ospeAdminApi = {
+  blocks: {
+    list: (examType?: OspeExamType) => request<OspeBlock[]>(`/admin/ospe/blocks${ospeQuery(examType)}`),
+    create: (body: Partial<OspeBlock>) => request<OspeBlock>('/admin/ospe/blocks', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id: number, body: Partial<OspeBlock>) => request<OspeBlock>(`/admin/ospe/blocks/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    archive: (id: number) => request<{ ok: true }>(`/admin/ospe/blocks/${id}`, { method: 'DELETE' }),
+    removePermanent: (id: number) => request<{ ok: true }>(`/admin/ospe/blocks/${id}/permanent`, { method: 'DELETE' }),
+  },
+  modules: {
+    list: (examType?: OspeExamType) => request<OspeModule[]>(`/admin/ospe/modules${ospeQuery(examType)}`),
+    create: (body: Partial<OspeModule>) => request<OspeModule>('/admin/ospe/modules', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id: number, body: Partial<OspeModule>) => request<OspeModule>(`/admin/ospe/modules/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    archive: (id: number) => request<{ ok: true }>(`/admin/ospe/modules/${id}`, { method: 'DELETE' }),
+    removePermanent: (id: number) => request<{ ok: true }>(`/admin/ospe/modules/${id}/permanent`, { method: 'DELETE' }),
+  },
+  learningMaterials: {
+    list: (examType?: OspeExamType) => request<OspeLearningMaterial[]>(`/admin/ospe/learning-materials${ospeQuery(examType)}`),
+    create: (body: Partial<OspeLearningMaterial>) => request<OspeLearningMaterial>('/admin/ospe/learning-materials', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id: number, body: Partial<OspeLearningMaterial>) => request<OspeLearningMaterial>(`/admin/ospe/learning-materials/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    archive: (id: number) => request<{ ok: true }>(`/admin/ospe/learning-materials/${id}`, { method: 'DELETE' }),
+    removePermanent: (id: number) => request<{ ok: true }>(`/admin/ospe/learning-materials/${id}/permanent`, { method: 'DELETE' }),
+  },
+  stations: {
+    list: (examType?: OspeExamType) => request<OspeStation[]>(`/admin/ospe/stations${ospeQuery(examType)}`),
+    create: (body: Partial<OspeStation>) => request<OspeStation>('/admin/ospe/stations', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id: number, body: Partial<OspeStation>) => request<OspeStation>(`/admin/ospe/stations/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    archive: (id: number) => request<{ ok: true }>(`/admin/ospe/stations/${id}`, { method: 'DELETE' }),
+    removePermanent: (id: number) => request<{ ok: true }>(`/admin/ospe/stations/${id}/permanent`, { method: 'DELETE' }),
+  },
+  exams: {
+    list: (examType?: OspeExamType) => request<OspeAdminExam[]>(`/admin/ospe/exams${ospeQuery(examType)}`),
+    create: (body: Partial<OspeExam>) => request<OspeExam>('/admin/ospe/exams', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id: number, body: Partial<OspeExam>) => request<OspeExam>(`/admin/ospe/exams/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    archive: (id: number) => request<{ ok: true }>(`/admin/ospe/exams/${id}`, { method: 'DELETE' }),
+    removePermanent: (id: number, force?: boolean) => request<{ ok: true }>(`/admin/ospe/exams/${id}/permanent${force ? '?force=true' : ''}`, { method: 'DELETE' }),
+    setStations: (id: number, stationIds: number[]) => request<{ ok: true; count: number }>(`/admin/ospe/exams/${id}/stations`, { method: 'POST', body: JSON.stringify({ stationIds }) }),
+    getStations: (id: number) => request<Array<OspeStation & { examStationOrder: number }>>(`/admin/ospe/exams/${id}/stations`),
+    attempts: (id: number) => request<OspeExamAttemptRow[]>(`/admin/ospe/exams/${id}/attempts`),
+    releaseOne: (attemptId: number) => request<{ ok: true }>(`/admin/ospe/exam-attempts/${attemptId}/release`, { method: 'POST' }),
+    releaseAll: (examId: number) => request<{ ok: true }>(`/admin/ospe/exams/${examId}/release-all`, { method: 'POST' }),
+  },
+};
+
+export const ospeApi = {
+  blocks: (examType?: OspeExamType) => request<Array<{ id: number; name: string; subtitle: string; examType: OspeExamType; displayOrder: number }>>(`/ospe/blocks${ospeQuery(examType)}`),
+  modules: (examType?: OspeExamType, blockId?: number) => request<Array<{ id: number; name: string; subtitle: string; examType: OspeExamType; blockId: number | null; displayOrder: number }>>(`/ospe/modules${examType || blockId ? `?${[examType ? `examType=${examType}` : '', blockId ? `blockId=${blockId}` : ''].filter(Boolean).join('&')}` : ''}`),
+  learningMaterials: (examType?: OspeExamType, moduleId?: number) => request<Array<Omit<OspeLearningMaterial, 'active' | 'archived' | 'displayOrder' | 'programTargetKind' | 'yearTargetNumber' | 'targetingLabel'>>>(`/ospe/learning-materials${examType || moduleId ? `?${[examType ? `examType=${examType}` : '', moduleId ? `moduleId=${moduleId}` : ''].filter(Boolean).join('&')}` : ''}`),
+  exams: (examType?: OspeExamType) => request<OspeStudentExam[]>(`/ospe/exams${ospeQuery(examType)}`),
+  start: (id: number) => request<OspeExamStartResponse>(`/ospe/exams/${id}/start`, { method: 'POST' }),
+  answer: (attemptId: number, stationId: number, selectedAnswer: string | null, writtenAnswer: string | null) =>
+    request<{ ok: true }>(`/ospe/exam-attempts/${attemptId}/answer`, { method: 'POST', body: JSON.stringify({ stationId, selectedAnswer, writtenAnswer }) }),
+  submit: (attemptId: number) => request<{ attemptId: number; status: string; resultsReleased: boolean }>(`/ospe/exam-attempts/${attemptId}/submit`, { method: 'POST' }),
+  // Retries AI grading for any WRITTEN stations still ungraded (e.g. the
+  // first pass at submit time ran out of its time budget) — safe to call
+  // repeatedly, already-graded stations are skipped server-side.
+  grade: (attemptId: number) => request<{ ok: true; graded: number; pending: number; obtainedMarks: number; percentage: number }>(`/ospe/exam-attempts/${attemptId}/grade`, { method: 'POST' }),
+  result: (attemptId: number) => request<OspeExamResult>(`/ospe/exam-attempts/${attemptId}/result`),
+};
+
 export type ExplanationStatus = 'PENDING' | 'AI_GENERATED' | 'REVIEWED' | 'APPROVED';
 export interface ExplanationSummary { PENDING: number; AI_GENERATED: number; REVIEWED: number; APPROVED: number }
 

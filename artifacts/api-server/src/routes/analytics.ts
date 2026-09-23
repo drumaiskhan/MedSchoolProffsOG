@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db, practiceAttemptsTable, practiceAnswersTable, mcqsTable, usersTable, topicsTable, subjectsTable } from "@workspace/db";
 import { requireAuth, requireMembershipFor } from "../middlewares/auth";
 import { liveStreak, utcDay } from "../lib/streak";
+import { trialDailyMcqCapError, getTrialDailyMcqStatus } from "../lib/trial";
 
 const router: IRouter = Router();
 
@@ -46,6 +47,14 @@ router.post("/practice-sessions", requireAuth, requireMembershipFor(["mcqs", "pa
   const parsed = SubmitSessionBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message }); return; }
   const data = parsed.data;
+
+  // Trial-only students (see lib/trial.ts studentIsTrialOnly) are capped at
+  // TRIAL_DAILY_MCQ_LIMIT MCQs per UTC day, summed across sessions — set by
+  // an admin on Settings → Access & trial. Paying students are never capped.
+  if (req.user!.role === "student") {
+    const capError = await trialDailyMcqCapError(req.user!.id, data.answers.length);
+    if (capError) { res.status(403).json({ error: capError, code: "TRIAL_DAILY_LIMIT_REACHED" }); return; }
+  }
 
   const mcqIds = data.answers.map((a) => a.mcqId);
   const mcqs = await db.select().from(mcqsTable);
@@ -98,6 +107,19 @@ router.post("/practice-sessions", requireAuth, requireMembershipFor(["mcqs", "pa
   await bumpStreak(req.user!.id);
 
   res.status(201).json({ ...attempt, scorePercent: Number(attempt.scorePercent) });
+});
+
+// ---------------------------------------------------------------------------
+// Trial MCQ usage — powers the Practice page's "X of Y MCQs used today" bar
+// for trial-only students, so the cap shows up as they go instead of only
+// surfacing as a rejected submission after they've already answered past
+// it. Paying students (and any student when the cap is unlimited) just get
+// back { limited: false }.
+// ---------------------------------------------------------------------------
+router.get("/student/trial-mcq-usage", requireAuth, async (req, res): Promise<void> => {
+  if (req.user!.role !== "student") { res.json({ limited: false, limit: 0, used: 0, remaining: null }); return; }
+  const status = await getTrialDailyMcqStatus(req.user!.id);
+  res.json({ ...status, remaining: Number.isFinite(status.remaining) ? status.remaining : null });
 });
 
 // ---------------------------------------------------------------------------

@@ -248,7 +248,7 @@ type NavItem = [string, string, typeof LayoutDashboard];
 
 export const navGroups: Array<{ label: string; items: NavItem[] }> = [
   { label: 'Study desk', items: [
-    ['/dashboard', 'Overview', LayoutDashboard], ['/progress', 'My progress', TrendingUp], ['/blocks', 'Blocks', BookOpen], ['/exams', 'Pre-Proffs Exams', ClipboardCheck], ['/past-papers', 'Past papers', FileStack], ['/flashcards', 'Flashcards', Zap], ['/ai-visualizer', 'AI Visualizer', Wand2], ['/books', 'Books', Library],
+    ['/dashboard', 'Overview', LayoutDashboard], ['/progress', 'My progress', TrendingUp], ['/blocks', 'Blocks', BookOpen], ['/exams', 'Pre-Proffs Exams', ClipboardCheck], ['/ospe-osce', 'OSPE/OSCE', Stethoscope], ['/past-papers', 'Past papers', FileStack], ['/flashcards', 'Flashcards', Zap], ['/ai-visualizer', 'AI Visualizer', Wand2], ['/books', 'Books', Library],
   ] },
   { label: 'Your tools', items: [
     ['/notebook', 'My notebook', NotebookPen], ['/saved-sessions', 'Saved sessions', Bookmark], ['/flagged-mcqs', 'Flagged MCQs', Flag], ['/leaderboard', 'Leaderboard', Trophy], ['/challenge', 'Challenge a friend', Swords],

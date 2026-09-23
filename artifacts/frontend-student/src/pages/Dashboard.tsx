@@ -16,7 +16,7 @@ import { Link } from 'wouter';
 import { ArrowRight, Sparkles, ShieldCheck, Crown } from 'lucide-react';
 import { useGetStudentDashboard } from '@workspace/api-client-react';
 import { analyticsApi, siteContentApi } from '@/lib/api';
-import { SegTabs } from '@/lib/fx3d';
+import { SegTabs, useCurrentHour } from '@/lib/fx3d';
 import { ErrorState, OPEN_SEARCH_EVENT, OPEN_SEARCH_HREF, PROGRESS_ANCHOR_HREF, QUICK_LINK_TILES, SectionHeader, SkeletonPage, useNavLocks } from '@/lib/shared';
 import { DashHero } from '@/components/dashboard/DashHero';
 import {
@@ -34,6 +34,11 @@ function Dashboard() {
   const q = useGetStudentDashboard();
   const d = q.data;
   const [range, setRange] = useState<AnalyticsRange>('7d');
+  // Recomputed once a minute (see useCurrentHour) so the hero's greeting
+  // and sun/moon glyph actually roll over to the next time-of-day bucket
+  // if this tab is left open, instead of freezing at whatever it was when
+  // the dashboard last rendered.
+  const hour = useCurrentHour();
 
   // Same ['site-content'] query the Shell already runs — react-query dedupes it.
   const siteContent = useQuery({ queryKey: ['site-content'], queryFn: siteContentApi.get, staleTime: SITE_CONTENT_STALE_MS });
@@ -94,7 +99,7 @@ function Dashboard() {
     <div className="dash-row-2 dash-top">
       <DashHero
         firstName={d.user?.name?.split(' ')[0] || 'there'}
-        hour={new Date().getHours()}
+        hour={hour}
         message={message}
         streak={streak.data}
         action={action}

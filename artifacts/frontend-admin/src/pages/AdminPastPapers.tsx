@@ -47,7 +47,7 @@ import { queryClient } from '@/lib/query-client';
 function AdminPastPapers() {
   const papers = useQuery({ queryKey: ['admin-past-papers'], queryFn: () => pastPapersApi.list() });
   const create = useMutation({ mutationFn: pastPapersApi.create, onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-past-papers'] }) });
-  const update = useMutation({ mutationFn: ({ id, body }: { id: number; body: Partial<PastPaper> }) => pastPapersApi.update(id, body), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-past-papers'] }) });
+  const update = useMutation({ mutationFn: ({ id, body }: { id: number; body: Partial<PastPaper> }) => pastPapersApi.update(id, body), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-past-papers'] }), onError: (err: unknown) => toast({ title: 'Could not save changes', description: err instanceof ApiRequestError ? err.message : 'Something went wrong — please try again.', variant: 'destructive' }) });
   const toggle = useMutation({ mutationFn: ({ id, active }: { id: number; active: boolean }) => pastPapersApi.update(id, { active }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-past-papers'] }) });
   const removePermanent = useMutation({ mutationFn: pastPapersApi.removePermanent, onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['admin-past-papers'] }); setDeletingId(null); }, onError: (err: unknown) => toast({ title: 'Could not delete paper', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }) });
   // One-time fix for papers uploaded before the Degree + Year picker

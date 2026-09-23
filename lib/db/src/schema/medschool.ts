@@ -2,6 +2,7 @@ import {
   boolean,
   date,
   integer,
+  jsonb,
   numeric,
   pgTable,
   primaryKey,
@@ -874,6 +875,177 @@ export const platformSettingsTable = pgTable("med_platform_settings", {
   ...timestamps,
 });
 
+// ---------------------------------------------------------------------------
+// OSPE / OSCE practical exams — a separate curriculum namespace (its own
+// Blocks/Modules) from the MCQ blocksTable/modulesTable above, since a
+// practical station is organized around a photo/specimen/scenario plus
+// either an MCQ-style selectable answer or a written answer, not a plain
+// MCQ. Every row here carries examType ('OSPE' | 'OSCE') so both practical
+// exam types share one set of tables/routes/admin screens but stay
+// filterable — an admin picks OSPE or OSCE when creating a block, and it's
+// inherited by everything under it. programTargetKind/yearTargetNumber
+// follow the exact same null-means-everyone convention as
+// blocksTable/modulesTable/examsTable above.
+// ---------------------------------------------------------------------------
+
+export const ospeBlocksTable = pgTable("med_ospe_blocks", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  subtitle: text("subtitle").notNull().default(""),
+  examType: text("exam_type").notNull().default("OSPE"), // OSPE | OSCE
+  programTargetKind: text("program_target_kind"),
+  yearTargetNumber: integer("year_target_number"),
+  iconPath: text("icon_path"),
+  active: boolean("active").notNull().default(true),
+  archived: boolean("archived").notNull().default(false),
+  displayOrder: integer("display_order").notNull().default(0),
+  ...timestamps,
+});
+
+export const ospeModulesTable = pgTable("med_ospe_modules", {
+  id: serial("id").primaryKey(),
+  // Nullable — a module with no block shows under "Unassigned", same
+  // convention as modulesTable.blockId.
+  blockId: integer("block_id"),
+  name: text("name").notNull(),
+  subtitle: text("subtitle").notNull().default(""),
+  examType: text("exam_type").notNull().default("OSPE"),
+  programTargetKind: text("program_target_kind"),
+  yearTargetNumber: integer("year_target_number"),
+  iconPath: text("icon_path"),
+  active: boolean("active").notNull().default(true),
+  archived: boolean("archived").notNull().default(false),
+  displayOrder: integer("display_order").notNull().default(0),
+  ...timestamps,
+});
+
+// Learning material: admin-uploaded photo/text/file/link that students
+// browse freely to study before being tested — no marking, no attempt
+// tracking. The "study" counterpart to med_ospe_stations below (the
+// "test" side). Mirrors resourcesTable's storagePath/externalUrl pattern.
+export const ospeLearningMaterialsTable = pgTable("med_ospe_learning_materials", {
+  id: serial("id").primaryKey(),
+  moduleId: integer("module_id"),
+  examType: text("exam_type").notNull().default("OSPE"),
+  programTargetKind: text("program_target_kind"),
+  yearTargetNumber: integer("year_target_number"),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  bodyText: text("body_text").notNull().default(""),
+  imagePath: text("image_path"),
+  attachmentPath: text("attachment_path"),
+  externalUrl: text("external_url"),
+  active: boolean("active").notNull().default(true),
+  archived: boolean("archived").notNull().default(false),
+  displayOrder: integer("display_order").notNull().default(0),
+  ...timestamps,
+});
+
+// A single practical station — a photo/specimen/scenario plus either an
+// MCQ-style selectable answer (answerType="MCQ", graded automatically
+// against correctAnswer) or a written/structured answer (answerType=
+// "WRITTEN", graded by the student self-assessing against modelAnswer once
+// revealed, since free text can't be auto-graded). Lives in the bank until
+// attached to a med_ospe_exams paper via med_ospe_exam_stations — same
+// bank -> paper split as MCQs/med_exam_questions.
+export const ospeStationsTable = pgTable("med_ospe_stations", {
+  id: serial("id").primaryKey(),
+  moduleId: integer("module_id"),
+  examType: text("exam_type").notNull().default("OSPE"),
+  programTargetKind: text("program_target_kind"),
+  yearTargetNumber: integer("year_target_number"),
+  title: text("title").notNull(),
+  instructions: text("instructions").notNull().default(""),
+  imagePath: text("image_path"),
+  attachmentPath: text("attachment_path"),
+  answerType: text("answer_type").notNull().default("WRITTEN"), // MCQ | WRITTEN | LABELING
+  options: text("options").array(),
+  correctAnswer: text("correct_answer"),
+  modelAnswer: text("model_answer"),
+  // Only for answerType="LABELING" (identification/pin-the-label stations):
+  // numbered points pinned onto imagePath, each an { id, x, y, label,
+  // marks? } object serialized as JSON. x/y are percentages (0-100) of the
+  // image's width/height so a point stays correctly placed regardless of
+  // how large the image renders on the viewer's screen. `label` is the
+  // correct answer for that point — stripped out before the station is
+  // ever sent to a student (see getExamStationsForStudent in ospe.ts).
+  labelPoints: jsonb("label_points"),
+  marks: numeric("marks", { precision: 6, scale: 2 }).notNull().default("1"),
+  timeLimitSeconds: integer("time_limit_seconds"),
+  active: boolean("active").notNull().default(true),
+  archived: boolean("archived").notNull().default(false),
+  displayOrder: integer("display_order").notNull().default(0),
+  ...timestamps,
+});
+
+export const ospeExamsTable = pgTable("med_ospe_exams", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  examType: text("exam_type").notNull().default("OSPE"),
+  programTargetKind: text("program_target_kind"),
+  yearTargetNumber: integer("year_target_number"),
+  durationMinutes: integer("duration_minutes").notNull().default(60),
+  startAt: timestamp("start_at", { withTimezone: true }).notNull(),
+  endAt: timestamp("end_at", { withTimezone: true }).notNull(),
+  maxAttempts: integer("max_attempts").notNull().default(1),
+  passingPercent: numeric("passing_percent", { precision: 5, scale: 2 }),
+  resultReleaseMode: text("result_release_mode").notNull().default("immediate"), // immediate | after_end | manual
+  showMarks: boolean("show_marks").notNull().default(true),
+  showPercentage: boolean("show_percentage").notNull().default(true),
+  showCorrectAnswers: boolean("show_correct_answers").notNull().default(true),
+  status: text("status").notNull().default("draft"), // draft | published | archived
+  ...timestamps,
+});
+
+export const ospeExamStationsTable = pgTable("med_ospe_exam_stations", {
+  id: serial("id").primaryKey(),
+  examId: integer("exam_id").notNull(),
+  stationId: integer("station_id").notNull(),
+  displayOrder: integer("display_order").notNull().default(0),
+  ...timestamps,
+}, (table) => ({ examStationIdx: uniqueIndex("med_ospe_exam_stations_exam_station_idx").on(table.examId, table.stationId) }));
+
+export const ospeExamAttemptsTable = pgTable("med_ospe_exam_attempts", {
+  id: serial("id").primaryKey(),
+  examId: integer("exam_id").notNull(),
+  userId: integer("user_id").notNull(),
+  attemptNumber: integer("attempt_number").notNull().default(1),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  submittedAt: timestamp("submitted_at", { withTimezone: true }),
+  totalStations: integer("total_stations").notNull().default(0),
+  totalMarks: numeric("total_marks", { precision: 8, scale: 2 }).notNull().default("0"),
+  obtainedMarks: numeric("obtained_marks", { precision: 8, scale: 2 }).notNull().default("0"),
+  percentage: numeric("percentage", { precision: 5, scale: 2 }).notNull().default("0"),
+  passed: boolean("passed"),
+  status: text("status").notNull().default("in_progress"), // in_progress | submitted | auto_submitted
+  resultsReleasedAt: timestamp("results_released_at", { withTimezone: true }),
+  ...timestamps,
+});
+
+export const ospeExamAnswersTable = pgTable("med_ospe_exam_answers", {
+  id: serial("id").primaryKey(),
+  attemptId: integer("attempt_id").notNull(),
+  stationId: integer("station_id").notNull(),
+  selectedAnswer: text("selected_answer"),
+  writtenAnswer: text("written_answer"),
+  // For answerType="LABELING" stations only: { [pointId]: student's text
+  // for that pin }. Graded deterministically against labelPoints, same
+  // spirit as MCQ's correctAnswer compare — see gradeAndSubmit in ospe.ts.
+  labelAnswers: jsonb("label_answers"),
+  correct: boolean("correct"),
+  // Set by an AI grading pass (see lib/aiExplain.ts gradeWrittenAnswer) —
+  // only meaningful for answerType="WRITTEN" stations, which can't be
+  // graded automatically like MCQ. Null until grading has run (either at
+  // submit time or via the student-triggered re-grade endpoint);
+  // 'correct' | 'partial' | 'incorrect' once graded.
+  aiVerdict: text("ai_verdict"),
+  aiFeedback: text("ai_feedback"),
+  aiGradedAt: timestamp("ai_graded_at", { withTimezone: true }),
+  marksObtained: numeric("marks_obtained", { precision: 6, scale: 2 }),
+  ...timestamps,
+}, (table) => ({ attemptStationIdx: uniqueIndex("med_ospe_exam_answers_attempt_station_idx").on(table.attemptId, table.stationId) }));
+
 export const insertUserSchema = createInsertSchema(usersTable);
 export const insertMembershipPlanSchema = createInsertSchema(membershipPlansTable);
 export const insertPaymentSchema = createInsertSchema(paymentsTable);
@@ -899,4 +1071,10 @@ export type Batch = typeof batchesTable.$inferSelect;
 export type Book = typeof booksTable.$inferSelect;
 export type Coupon = typeof couponsTable.$inferSelect;
 export type BookPurchase = typeof bookPurchasesTable.$inferSelect;
+export type OspeBlock = typeof ospeBlocksTable.$inferSelect;
+export type OspeModule = typeof ospeModulesTable.$inferSelect;
+export type OspeLearningMaterial = typeof ospeLearningMaterialsTable.$inferSelect;
+export type OspeStation = typeof ospeStationsTable.$inferSelect;
+export type OspeExam = typeof ospeExamsTable.$inferSelect;
+export type OspeExamAttempt = typeof ospeExamAttemptsTable.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;

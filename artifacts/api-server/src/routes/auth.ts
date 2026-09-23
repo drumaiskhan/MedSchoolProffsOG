@@ -30,6 +30,7 @@ import { createDeviceSession, DeviceLimitError, revokeAllForUser, revokeByTokenI
 import { sendEmail, otpEmailHtml, resetPasswordEmailHtml, welcomeEmailHtml } from "../lib/email";
 import { checkRateLimit } from "../lib/rateLimit";
 import { requireAuth } from "../middlewares/auth";
+import { banIfTrialExpired } from "../lib/trial";
 import { getSetting } from "../lib/settings";
 import { getPublicAppUrl } from "../lib/publicAppUrl";
 import { resolveFileUrl } from "../lib/storage";
@@ -366,6 +367,16 @@ router.post("/auth/login", async (req, res): Promise<void> => {
 
   if (user.role === "student" && !user.emailVerified) {
     res.status(403).json({ error: "Please verify your email before logging in.", code: "EMAIL_NOT_VERIFIED" });
+    return;
+  }
+
+  // A student whose ACTIVE status came from an admin-granted trial
+  // (POST /students/:id/trial) that has since expired gets banned right
+  // here, before they can even sign back in — see banIfTrialExpired for
+  // why this can't just trust `user.status`. Falls through to the
+  // SUSPENDED check right below once it has.
+  if (user.role === "student" && user.status === "ACTIVE" && (await banIfTrialExpired(user.id))) {
+    res.status(403).json({ error: "Your trial period has ended. Contact support or ask about a membership to regain access." });
     return;
   }
 

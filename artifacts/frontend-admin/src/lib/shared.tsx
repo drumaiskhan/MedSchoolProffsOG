@@ -121,7 +121,7 @@ export const adminGroups: Array<{ label: string; items: NavItem[] }> = [
     ['/admin/academic-structure', 'Colleges & courses', FolderOpen], ['/admin/content', 'Academic content', Library], ['/admin/subjects', 'Subjects', BookOpen], ['/admin/topics', 'Topics', CircleHelp],
   ] },
   { label: 'Question banks', items: [
-    ['/admin/mcqs', 'MCQ bank', CircleHelp], ['/admin/flashcards', 'Flashcards', Zap], ['/admin/books', 'Books library', BookOpen], ['/admin/book-purchases', 'Book purchases', ReceiptText], ['/admin/past-papers', 'Past papers', FileStack], ['/admin/exams', 'Pre-Proffs Exams', ClipboardCheck],
+    ['/admin/mcqs', 'MCQ bank', CircleHelp], ['/admin/flashcards', 'Flashcards', Zap], ['/admin/books', 'Books library', BookOpen], ['/admin/book-purchases', 'Book purchases', ReceiptText], ['/admin/past-papers', 'Past papers', FileStack], ['/admin/exams', 'Pre-Proffs Exams', ClipboardCheck], ['/admin/ospe-osce', 'OSPE/OSCE', Stethoscope],
   ] },
   { label: 'Site & team', items: [
     ['/admin/team', 'Academic team', Users], ['/admin/site-content', 'Site content', Landmark],

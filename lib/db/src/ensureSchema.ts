@@ -852,6 +852,158 @@ CREATE UNIQUE INDEX IF NOT EXISTS med_user_sessions_token_idx
 CREATE INDEX IF NOT EXISTS med_user_sessions_user_idx
   ON med_user_sessions (user_id);
 
+-- ---------------------------------------------------------------------
+-- OSPE / OSCE practical exams — see lib/db/src/schema/medschool.ts for the
+-- full design comment. Own Blocks/Modules namespace (med_ospe_blocks/
+-- med_ospe_modules), learning material (med_ospe_learning_materials),
+-- a station bank (med_ospe_stations) attached to scheduled papers
+-- (med_ospe_exams -> med_ospe_exam_stations), with attempts/answers
+-- mirroring med_exam_attempts/med_exam_answers.
+-- ---------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS med_ospe_blocks (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  subtitle TEXT NOT NULL DEFAULT '',
+  exam_type TEXT NOT NULL DEFAULT 'OSPE',
+  program_target_kind TEXT,
+  year_target_number INTEGER,
+  icon_path TEXT,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  archived BOOLEAN NOT NULL DEFAULT FALSE,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS med_ospe_modules (
+  id SERIAL PRIMARY KEY,
+  block_id INTEGER,
+  name TEXT NOT NULL,
+  subtitle TEXT NOT NULL DEFAULT '',
+  exam_type TEXT NOT NULL DEFAULT 'OSPE',
+  program_target_kind TEXT,
+  year_target_number INTEGER,
+  icon_path TEXT,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  archived BOOLEAN NOT NULL DEFAULT FALSE,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS med_ospe_learning_materials (
+  id SERIAL PRIMARY KEY,
+  module_id INTEGER,
+  exam_type TEXT NOT NULL DEFAULT 'OSPE',
+  program_target_kind TEXT,
+  year_target_number INTEGER,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  body_text TEXT NOT NULL DEFAULT '',
+  image_path TEXT,
+  attachment_path TEXT,
+  external_url TEXT,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  archived BOOLEAN NOT NULL DEFAULT FALSE,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS med_ospe_stations (
+  id SERIAL PRIMARY KEY,
+  module_id INTEGER,
+  exam_type TEXT NOT NULL DEFAULT 'OSPE',
+  program_target_kind TEXT,
+  year_target_number INTEGER,
+  title TEXT NOT NULL,
+  instructions TEXT NOT NULL DEFAULT '',
+  image_path TEXT,
+  attachment_path TEXT,
+  answer_type TEXT NOT NULL DEFAULT 'WRITTEN',
+  options TEXT[],
+  correct_answer TEXT,
+  model_answer TEXT,
+  marks NUMERIC(6, 2) NOT NULL DEFAULT 1,
+  time_limit_seconds INTEGER,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  archived BOOLEAN NOT NULL DEFAULT FALSE,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE med_ospe_stations ADD COLUMN IF NOT EXISTS label_points JSONB;
+
+CREATE TABLE IF NOT EXISTS med_ospe_exams (
+  id SERIAL PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  exam_type TEXT NOT NULL DEFAULT 'OSPE',
+  program_target_kind TEXT,
+  year_target_number INTEGER,
+  duration_minutes INTEGER NOT NULL DEFAULT 60,
+  start_at TIMESTAMPTZ NOT NULL,
+  end_at TIMESTAMPTZ NOT NULL,
+  max_attempts INTEGER NOT NULL DEFAULT 1,
+  passing_percent NUMERIC(5, 2),
+  result_release_mode TEXT NOT NULL DEFAULT 'immediate',
+  show_marks BOOLEAN NOT NULL DEFAULT TRUE,
+  show_percentage BOOLEAN NOT NULL DEFAULT TRUE,
+  show_correct_answers BOOLEAN NOT NULL DEFAULT TRUE,
+  status TEXT NOT NULL DEFAULT 'draft',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS med_ospe_exam_stations (
+  id SERIAL PRIMARY KEY,
+  exam_id INTEGER NOT NULL,
+  station_id INTEGER NOT NULL,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS med_ospe_exam_stations_exam_station_idx
+  ON med_ospe_exam_stations (exam_id, station_id);
+
+CREATE TABLE IF NOT EXISTS med_ospe_exam_attempts (
+  id SERIAL PRIMARY KEY,
+  exam_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  attempt_number INTEGER NOT NULL DEFAULT 1,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  submitted_at TIMESTAMPTZ,
+  total_stations INTEGER NOT NULL DEFAULT 0,
+  total_marks NUMERIC(8, 2) NOT NULL DEFAULT 0,
+  obtained_marks NUMERIC(8, 2) NOT NULL DEFAULT 0,
+  percentage NUMERIC(5, 2) NOT NULL DEFAULT 0,
+  passed BOOLEAN,
+  status TEXT NOT NULL DEFAULT 'in_progress',
+  results_released_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS med_ospe_exam_answers (
+  id SERIAL PRIMARY KEY,
+  attempt_id INTEGER NOT NULL,
+  station_id INTEGER NOT NULL,
+  selected_answer TEXT,
+  written_answer TEXT,
+  correct BOOLEAN,
+  ai_verdict TEXT,
+  ai_feedback TEXT,
+  ai_graded_at TIMESTAMPTZ,
+  marks_obtained NUMERIC(6, 2),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS med_ospe_exam_answers_attempt_station_idx
+  ON med_ospe_exam_answers (attempt_id, station_id);
+ALTER TABLE med_ospe_exam_answers ADD COLUMN IF NOT EXISTS label_answers JSONB;
+
 COMMIT;
 `;
 

@@ -12,7 +12,7 @@ import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link, useSearch } from 'wouter';
 import {
-  Bell, Cloud, ClipboardCheck, Copy, FileStack, FolderOpen, Gift, Globe, KeyRound, Library, Mail, Megaphone, Palette, Plus,
+  Bell, Cloud, ClipboardCheck, Copy, FileStack, FolderOpen, Gift, Globe, KeyRound, Library, ListChecks, Mail, Megaphone, Palette, Plus,
   Repeat, Send, Server, Settings, ShieldCheck, Shuffle, Sparkles, Stethoscope, Swords, Target, ToggleRight, Trash2, UploadCloud, Users, Wand2, Wifi, X, Zap, GraduationCap,
 } from 'lucide-react';
 import { readableForegroundHsl, DEFAULT_THEME } from '@/lib/theme';
@@ -326,6 +326,15 @@ function AdminSettings() {
                   </Callout>}
               </div>
             </div>}
+          </Panel>
+
+          <Panel icon={ListChecks} title="Trial daily MCQ limit" description="Caps how many MCQs a trial-only student can submit per day (UTC), summed across every practice session. Applies to both General trial mode above and a per-student trial granted from Students → grant trial. Paying students (an active membership) are never capped.">
+            <div className="flex flex-wrap items-end gap-3">
+              <Field label="MCQs per day">
+                <TextInput type="number" min={0} value={values.TRIAL_DAILY_MCQ_LIMIT ?? ''} placeholder="50" onChange={(e) => set('TRIAL_DAILY_MCQ_LIMIT', e.target.value)} className="w-28" data-testid="input-trial-daily-mcq-limit" />
+              </Field>
+              <span className="pb-2.5 text-[11px] text-muted-foreground">0 = unlimited. Blank saves as the default, 50.</span>
+            </div>
           </Panel>
         </>}
 

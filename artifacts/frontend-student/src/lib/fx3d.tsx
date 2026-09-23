@@ -14,6 +14,23 @@ export function prefersReducedMotion(): boolean {
   return typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 }
 
+/** Current hour-of-day (0-23), re-read once a minute. `new Date().getHours()`
+ * inline in JSX only runs at render time — if a student leaves the
+ * dashboard tab open (no navigation, no other query refetching it back
+ * into existence), the greeting/glyph freezes at whichever time-of-day
+ * bucket it first rendered in and never rolls over to the next one, which
+ * reads as "the sun icon shows day and night". Polling once a minute is
+ * cheap and catches every bucket change (morning/afternoon/evening/night)
+ * within a minute of it actually happening. */
+export function useCurrentHour(): number {
+  const [hour, setHour] = useState(() => new Date().getHours());
+  useEffect(() => {
+    const id = setInterval(() => setHour(new Date().getHours()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  return hour;
+}
+
 /** Eases a number toward `value` (starts from 0 on first paint). Snaps when the
  * user prefers reduced motion. Returns the in-flight (fractional) value. */
 export function useCountUp(value: number, duration = 900): number {

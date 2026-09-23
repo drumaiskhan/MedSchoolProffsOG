@@ -111,6 +111,27 @@ export interface GeneratedMcq {
   difficulty: string;
 }
 
+// A written OSPE/OSCE station answer, graded by AI against the admin's
+// model answer / marking scheme instead of a human marker or the student
+// self-marking their own work.
+export interface WrittenGradingRequest {
+  /** The station's prompt/instructions shown to the student (photo caption, scenario, etc). */
+  instructions: string;
+  /** Admin-authored model answer / marking scheme this is graded against. */
+  modelAnswer: string;
+  /** What the student actually wrote. Empty/blank is graded as incorrect without calling the AI. */
+  studentAnswer: string;
+  /** Marks this station is worth — the AI is asked to award within [0, maxMarks]. */
+  maxMarks: number;
+}
+
+export interface WrittenGradingResult {
+  verdict: "correct" | "partial" | "incorrect";
+  marksAwarded: number;
+  /** One short sentence explaining the verdict, shown to the student under their answer. */
+  feedback: string;
+}
+
 // Appended to every prompt below. Reasoning-tuned models reached through a
 // custom/OpenAI-compatible endpoint sometimes narrate their chain-of-thought
 // straight into the visible response ("Wait, let me reconsider...") instead
@@ -820,7 +841,18 @@ const VALID_DIFFICULTIES = new Set(["easy", "moderate", "hard"]);
 // stops the caller from waiting on it.
 async function withHardDeadline<T>(promise: Promise<T>, ms: number, onTimeout: () => T): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
-  const deadline = new Promise<T>((resolve) => { timer = setTimeout(() => resolve(onTimeout()), ms); });
+  const deadline = new Promise<T>((resolve, reject) => {
+    // onTimeout() is invoked from inside this setTimeout callback, not
+    // synchronously inside the executor — the Promise constructor's
+    // implicit try/catch only covers the executor's synchronous body, so
+    // without this explicit try/catch a throwing onTimeout (see
+    // gradeWrittenAnswer above, which throws on timeout instead of
+    // guessing a mark) would become an uncaught exception instead of a
+    // rejection.
+    timer = setTimeout(() => {
+      try { resolve(onTimeout()); } catch (err) { reject(err); }
+    }, ms);
+  });
   try {
     return await Promise.race([promise, deadline]);
   } finally {
@@ -857,6 +889,78 @@ export async function classifyDifficulty(request: ExplanationRequest, modelOverr
       return "moderate";
     }
   })(), CLASSIFY_HARD_DEADLINE_MS, () => "moderate");
+}
+
+function buildWrittenGradingPrompt({ instructions, modelAnswer, studentAnswer, maxMarks }: WrittenGradingRequest): string {
+  return [
+    "You are an examiner grading a medical student's written answer to an OSPE/OSCE practical exam station (MBBS/BDS level).",
+    "Compare the STUDENT ANSWER against the MODEL ANSWER / marking scheme and grade it fairly:",
+    "- Give credit for medically correct content even if worded very differently from the model answer.",
+    "- Do not penalize spelling, grammar, or ordering.",
+    "- Do not award marks for content that is medically incorrect or contradicts the model answer, even if confidently stated.",
+    "- An answer that is blank, off-topic, or says \"I don't know\" is incorrect (0 marks).",
+    `This station is worth a maximum of ${maxMarks} mark(s).`,
+    "Respond with ONLY a single JSON object — no markdown code fences, no text before or after it — in exactly this shape:",
+    `{"verdict": "correct" | "partial" | "incorrect", "marksAwarded": <number, 0 to ${maxMarks}, may be fractional>, "feedback": "<one short sentence for the student, under 35 words, explaining what was right/missing>"}`,
+    NO_REASONING_INSTRUCTION,
+    "",
+    `Station / question shown to the student: ${instructions || "(no additional instructions given)"}`,
+    `Model answer / marking scheme: ${modelAnswer}`,
+    `Student's answer: ${studentAnswer}`,
+  ].join("\n");
+}
+
+const VALID_VERDICTS = new Set(["correct", "partial", "incorrect"]);
+
+function parseWrittenGradingJson(raw: string, maxMarks: number): WrittenGradingResult {
+  const cleaned = stripReasoningArtifacts(raw).replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    const objects = extractBalancedJsonObjects(cleaned);
+    parsed = objects.find((o) => o && typeof o === "object" && "verdict" in (o as object)) ?? objects[0];
+  }
+  if (!parsed || typeof parsed !== "object") throw new Error(`AI did not return valid grading JSON. Raw response: ${cleaned.slice(0, 300)}`);
+  const obj = parsed as { verdict?: unknown; marksAwarded?: unknown; feedback?: unknown };
+  const verdict = typeof obj.verdict === "string" && VALID_VERDICTS.has(obj.verdict) ? (obj.verdict as WrittenGradingResult["verdict"]) : "partial";
+  let marksAwarded = typeof obj.marksAwarded === "number" && Number.isFinite(obj.marksAwarded) ? obj.marksAwarded : maxMarks / 2;
+  marksAwarded = Math.max(0, Math.min(maxMarks, marksAwarded));
+  const feedback = typeof obj.feedback === "string" ? obj.feedback.trim().slice(0, 400) : "";
+  return { verdict, marksAwarded, feedback };
+}
+
+// 18s per station — this is called from the student-facing exam submit
+// route, which (like the admin bulk routes above) is proxied through
+// Netlify's hard, non-configurable 26s ceiling. Stations are graded in
+// parallel by the caller (routes/ospe.ts), so this bounds the *whole*
+// grading phase to ~18s regardless of station count, leaving headroom for
+// the DB writes and response on either side. On timeout this rejects
+// (rather than silently guessing a mark) so the caller can leave the
+// station as "not yet graded" and retry later via the student-triggered
+// re-grade endpoint, instead of ever inventing a score nobody actually
+// awarded.
+const WRITTEN_GRADING_HARD_DEADLINE_MS = 18_000;
+
+/** Grades one written OSPE/OSCE station answer against the admin's model
+ * answer using AI, replacing manual self-assessment. Throws
+ * (AiNotConfiguredError, a provider failure, a timeout, or an unparseable
+ * response) rather than returning a guessed result — callers must decide
+ * how to handle "not graded yet" themselves (see routes/ospe.ts
+ * gradeAndSubmit / the /grade endpoint), since silently defaulting a
+ * mark would misrepresent the student's actual result. */
+export async function gradeWrittenAnswer(request: WrittenGradingRequest, modelOverride?: string): Promise<WrittenGradingResult> {
+  if (!request.studentAnswer || !request.studentAnswer.trim()) {
+    return { verdict: "incorrect", marksAwarded: 0, feedback: "No answer was submitted for this station." };
+  }
+  return withHardDeadline(
+    (async () => {
+      const raw = await runPrompt(buildWrittenGradingPrompt(request), 300, "object", modelOverride);
+      return parseWrittenGradingJson(raw, request.maxMarks);
+    })(),
+    WRITTEN_GRADING_HARD_DEADLINE_MS,
+    () => { throw new Error(`AI grading took too long (over ${WRITTEN_GRADING_HARD_DEADLINE_MS / 1000}s)`); },
+  );
 }
 
 function buildOptionExplanationsPrompt({ question, options, correctAnswer }: ExplanationRequest): string {
