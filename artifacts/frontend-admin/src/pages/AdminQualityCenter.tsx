@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'wouter';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ArrowRight, BookMarked, CheckCircle2, Copy, FileWarning, Flag, Rocket, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { AlertTriangle, ArrowRight, BookMarked, CheckCircle2, Copy, FileWarning, Flag, Loader2, Rocket, ShieldCheck, Sparkles, Wand2, X } from 'lucide-react';
 import { explanationsApi, flaggedMcqsApi, mcqAdminApi, type AdminMcqRow, type FlaggedMcq } from '@/lib/api';
 import { Badge, ConfirmDialog, EmptyState, ErrorState, SectionHeader, SkeletonPage, cn } from '@/lib/shared';
 import { toast } from '@/hooks/use-toast';
@@ -26,6 +26,18 @@ function Stat({ icon: Icon, label, value, tone, active, onClick }: { icon: typeo
     <div className={cn('grid size-8 place-items-center rounded-lg', tone)}><Icon size={15} /></div>
     <div className="mt-2 font-display text-2xl leading-none">{value}</div><div className="mt-1 text-[11px] font-bold text-muted-foreground">{label}</div>
   </button>;
+}
+
+/** "X done · Y remaining" bar for a running AI batch-fix (dedupe, invalid
+ * repair, or both) — total is a snapshot of the count when the run
+ * started, so the bar fills smoothly even though the underlying list it's
+ * drawn from shrinks and gets re-fetched between rounds. */
+function ProgressBar({ label, done, total }: { label: string; done: number; total: number }) {
+  const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 100;
+  return <div className="rounded-2xl border border-border bg-card p-3.5 animate-in fade-in slide-in-from-top-1 duration-200" data-testid="progress-ai-fix">
+    <div className="flex items-center justify-between text-[11px] font-bold"><span className="inline-flex items-center gap-1.5"><Loader2 size={12} className="animate-spin text-primary" /> {label}</span><span className="text-muted-foreground">{done} of {total} done{done < total ? ` · ${total - done} remaining` : ''}</span></div>
+    <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-gradient-to-r from-primary to-violet transition-all duration-500" style={{ width: `${pct}%` }} /></div>
+  </div>;
 }
 
 function Compare({ pair, onClose, onDelete }: { pair: DupPair; onClose: () => void; onDelete: (id: number) => void }) {
@@ -64,6 +76,100 @@ export default function AdminQualityCenter() {
   const resolve = useMutation({ mutationFn: (id: number) => flaggedMcqsApi.updateStatus(id, 'resolved'), onSuccess: refresh, onError: fail });
   const remove = useMutation({ mutationFn: (id: number) => mcqAdminApi.remove(id), onSuccess: () => { setDel(null); setCmp(null); refresh(); toast({ title: 'Question deleted' }); }, onError: fail });
 
+  // "AI Fix" actions — three entry points (the header's combined "AI Fix
+  // All", the Duplicates tab's own button, and the Invalid stat/list's own
+  // button) all share the same underlying batch loops so there's exactly
+  // one place that knows about the 8-per-call cap / re-fetch-between-rounds
+  // pattern used to dodge the hosting gateway's timeout (see the batch
+  // routes' own comments in explanations.ts for why 8 and why re-fetch).
+  // busyKind gates all three buttons at once — only one fix run at a time,
+  // so a click on one button can't race a dedupe/repair the other kicked
+  // off. progress tracks the currently-running loop for the shared
+  // ProgressBar; total is a snapshot taken when that loop starts.
+  const [busyKind, setBusyKind] = useState<null | 'all' | 'duplicates' | 'invalid'>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const MAX_FIX_ROUNDS = 15;
+
+  const fixDuplicatesLoop = async (initialDupes: DupPair[]) => {
+    const total = initialDupes.length;
+    setProgress({ done: 0, total });
+    let currentRows = rows;
+    let currentDupes = initialDupes;
+    let fixedTotal = 0;
+    for (let round = 0; round < MAX_FIX_ROUNDS && currentDupes.length; round++) {
+      const batch = currentDupes.slice(0, 8);
+      const { fixed } = await mcqAdminApi.dedupeBatch(batch.map((p) => ({ id: p.b.id, otherId: p.a.id })));
+      fixedTotal += fixed;
+      currentRows = await mcqAdminApi.list();
+      currentDupes = findDuplicates(currentRows).filter((p) => !hidden.has(`${p.a.id}-${p.b.id}`));
+      setProgress({ done: Math.max(0, total - currentDupes.length), total });
+    }
+    return { fixedTotal, remaining: currentDupes.length };
+  };
+
+  const fixInvalidLoop = async () => {
+    let currentRows = rows;
+    let currentInvalid = currentRows.filter((m) => invalidReasons(m).length);
+    const total = currentInvalid.length;
+    setProgress({ done: 0, total });
+    let fixedTotal = 0;
+    for (let round = 0; round < MAX_FIX_ROUNDS && currentInvalid.length; round++) {
+      const batch = currentInvalid.slice(0, 8);
+      const { fixed } = await mcqAdminApi.repairInvalidBatch(batch.map((m) => ({ id: m.id, reasons: invalidReasons(m) })));
+      fixedTotal += fixed;
+      currentRows = await mcqAdminApi.list();
+      currentInvalid = currentRows.filter((m) => invalidReasons(m).length);
+      setProgress({ done: Math.max(0, total - currentInvalid.length), total });
+    }
+    return { fixedTotal, remaining: currentInvalid.length };
+  };
+
+  const runAiFixAll = async () => {
+    setBusyKind('all');
+    try {
+      if (openFlags.length) {
+        const r = await flaggedMcqsApi.resolveAll();
+        toast({ title: `Resolved ${r.resolved} reported question${r.resolved === 1 ? '' : 's'}` });
+      }
+      const { fixedTotal, remaining } = await fixDuplicatesLoop(dupes);
+      refresh();
+      toast({ title: 'AI Fix All complete', description: `${fixedTotal} duplicate question${fixedTotal === 1 ? '' : 's'} rewritten by AI.${remaining ? ` ${remaining} pairs left — run it again to keep going.` : ''}` });
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusyKind(null);
+      setProgress(null);
+    }
+  };
+
+  const runAiFixDuplicates = async () => {
+    setBusyKind('duplicates');
+    try {
+      const { fixedTotal, remaining } = await fixDuplicatesLoop(dupes);
+      refresh();
+      toast({ title: 'Duplicates fixed', description: `${fixedTotal} question${fixedTotal === 1 ? '' : 's'} rewritten by AI.${remaining ? ` ${remaining} pairs left — run it again to keep going.` : ''}` });
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusyKind(null);
+      setProgress(null);
+    }
+  };
+
+  const runAiFixInvalid = async () => {
+    setBusyKind('invalid');
+    try {
+      const { fixedTotal, remaining } = await fixInvalidLoop();
+      refresh();
+      toast({ title: 'Invalid questions fixed', description: `${fixedTotal} question${fixedTotal === 1 ? '' : 's'} repaired by AI.${remaining ? ` ${remaining} left — run it again to keep going.` : ''}` });
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusyKind(null);
+      setProgress(null);
+    }
+  };
+
   const rows: AdminMcqRow[] = mcqs.data ?? [];
   const openFlags = useMemo(() => (flags.data ?? []).filter((f: FlaggedMcq) => f.status === 'open' && !f.mcqDeleted), [flags.data]);
   const dupes = useMemo(() => findDuplicates(rows).filter((p) => !hidden.has(`${p.a.id}-${p.b.id}`)), [rows, hidden]);
@@ -86,7 +192,21 @@ export default function AdminQualityCenter() {
     : openFlags.map((f) => ({ id: f.mcqId, text: f.question ?? '', note: `${f.reason || 'No reason given'}${f.path ? ` · ${f.path}` : ''}`, action: <button onClick={() => resolve.mutate(f.id)} className="inline-flex items-center gap-1 rounded-xl bg-primary px-3 py-1.5 text-[11px] font-extrabold text-primary-foreground"><CheckCircle2 size={11} /> Resolve</button> }));
 
   return <div data-testid="page-quality-center">
-    <SectionHeader eyebrow="Question bank" title="Content Quality Center" action={<div className="flex overflow-hidden rounded-xl border border-border bg-card text-xs font-extrabold">{(['health', 'duplicates', 'workflow'] as Tab[]).map((t) => <button key={t} onClick={() => setTab(t)} className={cn('px-3.5 py-2 capitalize transition-colors', tab === t ? 'bg-primary text-primary-foreground' : 'hover:bg-muted')}>{t === 'duplicates' ? `Duplicates${dupes.length ? ` · ${dupes.length}` : ''}` : t}</button>)}</div>} />
+    <SectionHeader eyebrow="Question bank" title="Content Quality Center" action={<div className="flex flex-wrap items-center gap-2">
+      <button
+        disabled={busyKind !== null || (!openFlags.length && !dupes.length)}
+        onClick={runAiFixAll}
+        title="Resolves every reported question and has AI rewrite duplicate questions so they're no longer near-copies"
+        className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-primary to-violet px-3.5 py-2 text-xs font-extrabold text-primary-foreground shadow-sm transition-transform hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0"
+        data-testid="button-ai-fix-all"
+      >{busyKind === 'all' ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />} {busyKind === 'all' ? 'Working…' : 'AI Fix All'}</button>
+      <div className="flex overflow-hidden rounded-xl border border-border bg-card text-xs font-extrabold">{(['health', 'duplicates', 'workflow'] as Tab[]).map((t) => <button key={t} onClick={() => setTab(t)} className={cn('px-3.5 py-2 capitalize transition-colors', tab === t ? 'bg-primary text-primary-foreground' : 'hover:bg-muted')}>{t === 'duplicates' ? `Duplicates${dupes.length ? ` · ${dupes.length}` : ''}` : t}</button>)}</div>
+    </div>} />
+
+    {progress && <div className="mb-4">
+      <ProgressBar label={busyKind === 'invalid' ? 'Repairing invalid questions with AI…' : 'Rewriting duplicates with AI…'} done={progress.done} total={progress.total} />
+    </div>}
+
 
     {tab === 'health' && <div className="grid gap-4">
       <div className="flex flex-wrap items-center gap-5 rounded-3xl border border-border bg-card p-5 animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -104,11 +224,13 @@ export default function AdminQualityCenter() {
         <Stat icon={BookMarked} label="No reference" value={noRef.length} tone="bg-info/15 text-info" active={issue === 'noReference'} onClick={() => setIssue('noReference')} />
         <Stat icon={Flag} label="Reported" value={openFlags.length} tone="bg-violet/15 text-violet" active={issue === 'reported'} onClick={() => setIssue('reported')} />
       </div>
+      {issue === 'invalid' && !!invalid.length && <button disabled={busyKind !== null} onClick={runAiFixInvalid} className="inline-flex items-center gap-1.5 self-start rounded-xl bg-gradient-to-r from-primary to-violet px-3.5 py-2 text-xs font-extrabold text-primary-foreground shadow-sm transition-transform hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0" data-testid="button-ai-fix-invalid">{busyKind === 'invalid' ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />} Fix {invalid.length} invalid with AI</button>}
       {!list.length ? <EmptyState icon={ShieldCheck} title="All clear" body="Nothing in this category needs attention." /> : <div className="grid gap-2">{list.slice(0, 60).map((r, i) => <div key={`${issue}-${r.id}-${i}`} className="flex flex-wrap items-center gap-3 rounded-2xl border border-border bg-card p-3.5 animate-in fade-in slide-in-from-bottom-1 duration-300" data-testid={`issue-row-${r.id}`}>
         <div className="min-w-0 flex-1"><div className="line-clamp-2 text-xs font-semibold leading-5">{r.text}</div><div className="mt-1 text-[10px] font-bold text-muted-foreground">#{r.id} · {r.note}</div></div>{r.action}</div>)}{list.length > 60 && <p className="text-center text-[11px] text-muted-foreground">Showing 60 of {list.length}.</p>}</div>}
     </div>}
 
     {tab === 'duplicates' && <div className="grid gap-3">
+      {!!dupes.length && <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-card p-3.5"><div className="text-xs text-muted-foreground">AI rewrites the second question in each pair so it tests the same fact but no longer reads as a copy.</div><button disabled={busyKind !== null} onClick={runAiFixDuplicates} className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-gradient-to-r from-primary to-violet px-3.5 py-2 text-xs font-extrabold text-primary-foreground shadow-sm transition-transform hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0" data-testid="button-ai-fix-duplicates">{busyKind === 'duplicates' ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />} Fix {dupes.length} with AI</button></div>}
       {!dupes.length ? <EmptyState icon={Copy} title="No likely duplicates" body="Questions with very similar wording would appear here for side-by-side review." /> : dupes.map((p) => <div key={`${p.a.id}-${p.b.id}`} className="rounded-2xl border border-border bg-card p-3.5 animate-in fade-in duration-300" data-testid={`dupe-${p.a.id}-${p.b.id}`}>
         <div className="grid gap-2 md:grid-cols-2">{[p.a, p.b].map((m) => <div key={m.id} className="rounded-xl bg-muted/50 p-2.5 text-xs leading-5"><div className="text-[10px] font-bold text-muted-foreground">#{m.id}</div><div className="line-clamp-2 font-semibold">{m.question}</div></div>)}</div>
         <div className="mt-2.5 flex items-center gap-2"><Badge tone={p.score > 0.9 ? 'red' : 'amber'}>{Math.round(p.score * 100)}% similar</Badge><button onClick={() => setCmp(p)} className="ml-auto rounded-xl bg-primary px-3 py-1.5 text-[11px] font-extrabold text-primary-foreground" data-testid="button-compare">Compare</button><button onClick={() => { const next = new Set(hidden).add(`${p.a.id}-${p.b.id}`); setHidden(next); try { localStorage.setItem(DISMISS, JSON.stringify([...next])); } catch { /* ignore */ } }} className="rounded-xl border border-border px-3 py-1.5 text-[11px] font-extrabold hover:bg-muted">Not a duplicate</button></div>

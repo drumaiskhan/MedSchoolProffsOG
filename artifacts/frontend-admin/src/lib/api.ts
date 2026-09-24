@@ -515,6 +515,18 @@ export const mcqAdminApi = {
   // always the same letter.
   shuffleOptions: (body: { ids: number[] } | { all: true; filters?: { search?: string; moduleId?: number; subjectId?: number; topicId?: number; difficulty?: string; pastPaperId?: number } }) =>
     request<{ ok: true; shuffled: number; skipped: number }>('/admin/mcqs/shuffle-options', { method: 'POST', body: JSON.stringify(body) }),
+  // "AI Fix All" (Content Quality Center): rewrites the second question in
+  // each near-duplicate pair so it's no longer a near-copy of the first,
+  // keeping the same tested fact and correct answer. Capped at 8 pairs per
+  // call (server enforces this too) so a bank with many duplicates is
+  // cleared over several calls rather than one that risks a gateway timeout.
+  dedupeBatch: (pairs: Array<{ id: number; otherId: number }>) =>
+    request<{ fixed: number; results: Array<{ id: number; rewritten: boolean }> }>('/admin/mcqs/dedupe-batch', { method: 'POST', body: JSON.stringify({ pairs }) }),
+  // "AI Fix" for the Invalid stat/list: repairs empty questions, too-few or
+  // duplicate options, and missing/mismatched correct answers. Capped at 8
+  // items per call (server enforces this too), same reasoning as dedupeBatch.
+  repairInvalidBatch: (items: Array<{ id: number; reasons: string[] }>) =>
+    request<{ fixed: number; results: Array<{ id: number; fixed: boolean }> }>('/admin/mcqs/repair-invalid-batch', { method: 'POST', body: JSON.stringify({ items }) }),
 };
 
 export const mcqImportApi = {
@@ -806,6 +818,9 @@ export const flaggedMcqsApi = {
   create: (body: { mcqId: number; reason?: string }) => request<FlaggedMcq>('/flagged-mcqs', { method: 'POST', body: JSON.stringify(body) }),
   updateStatus: (id: number, status: 'open' | 'resolved') => request<FlaggedMcq>(`/flagged-mcqs/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   remove: (id: number) => request<{ ok: true }>(`/flagged-mcqs/${id}`, { method: 'DELETE' }),
+  // One-click "resolve everything reported" for the Content Quality
+  // Center's "AI Fix All" action — a single bulk update server-side.
+  resolveAll: () => request<{ ok: true; resolved: number }>('/admin/flagged-mcqs/resolve-all', { method: 'POST' }),
 };
 
 export const feedbackApi = {

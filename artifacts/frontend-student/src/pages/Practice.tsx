@@ -53,7 +53,7 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // invalidateQueries after a save) already set their own options, which
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
-import { buildStudySet, recordSession, relatedMcqs } from '@/lib/study';
+import { buildStudySet, recordSession } from '@/lib/study';
 import { Badge, EmptyState, PracticeResultCard, Progress, SectionHeader, SkeletonPage, cn, difficultyTone, useFocusMode } from '@/lib/shared';
 import { queryClient, invalidatePracticeQueries } from '@/lib/query-client';
 
@@ -546,7 +546,6 @@ function Practice() {
           {askAi.isError && <p className="mt-2 text-[11px] font-semibold text-destructive">{askAi.error instanceof ApiRequestError ? askAi.error.message : 'Could not reach AI right now.'}</p>}
         </div>}
 
-        {answers[current.id] != null && (() => { const rel = relatedMcqs(current, activeMcqs, answers); return rel.length ? <div className="mt-4 rounded-2xl border border-border bg-card p-4 pf-edit" data-testid="related-mcqs"><div className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[.14em] text-muted-foreground"><Sparkles size={12} className="text-primary" /> Related questions in this set</div><div className="grid gap-2">{rel.map((m) => <button key={m.id} onClick={() => { const at = activeMcqs.findIndex((x) => x.id === m.id); if (at >= 0) { setIndex(at); setPanel(null); } }} className="line-clamp-2 rounded-xl bg-muted/60 px-3 py-2 text-left text-xs font-semibold transition-colors hover:bg-muted">{m.question}</button>)}</div></div> : null; })()}
 
 
         <div className="mt-5 flex items-center justify-between gap-3">

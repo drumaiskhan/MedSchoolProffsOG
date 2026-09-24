@@ -63,15 +63,6 @@ export async function buildStudySet(kind: string, count: number): Promise<Mcq[]>
   return out.slice(0, count);
 }
 
-/* ---------------- Related MCQs (same session pool) ---------------- */
-const words = (s: string) => new Set(s.toLowerCase().match(/[a-z]{5,}/g) ?? []);
-export function relatedMcqs(current: Mcq, pool: Mcq[], answered: Record<number, string | null>, n = 3): Mcq[] {
-  const cw = words(current.question); const ct = new Set((current as { tags?: string[] }).tags ?? []);
-  return pool.filter((m) => m.id !== current.id && answered[m.id] == null)
-    .map((m) => { let s = 0; for (const w of words(m.question)) if (cw.has(w)) s += 1; for (const t of (m as { tags?: string[] }).tags ?? []) if (ct.has(t)) s += 3; return { m, s }; })
-    .filter((x) => x.s > 0).sort((a, b) => b.s - a.s).slice(0, n).map((x) => x.m);
-}
-
 /* ---------------- Flashcard spaced repetition (Leitner-style, per device) ---------------- */
 export type Grade = 'again' | 'hard' | 'good' | 'easy';
 export interface Sr { box: number; due: number; reps: number; lapses: number }

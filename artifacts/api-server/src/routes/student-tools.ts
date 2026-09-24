@@ -108,6 +108,15 @@ router.post("/flagged-mcqs", requireAuth, async (req, res): Promise<void> => {
   res.status(201).json(row);
 });
 
+// "Resolve all" for the Content Quality Center's "AI Fix All" action — a
+// single bulk UPDATE rather than one request per flag, so clearing a large
+// reported-questions queue can't hit a hosting gateway timeout the way a
+// sequential per-row loop over hundreds of flags could.
+router.post("/admin/flagged-mcqs/resolve-all", requireAdmin, async (_req, res): Promise<void> => {
+  const resolved = await db.update(flaggedMcqsTable).set({ status: "resolved" }).where(eq(flaggedMcqsTable.status, "open")).returning({ id: flaggedMcqsTable.id });
+  res.json({ ok: true, resolved: resolved.length });
+});
+
 router.patch("/flagged-mcqs/:id", requireAdmin, async (req, res): Promise<void> => {
   const parsed = z.object({ status: z.enum(["open", "resolved"]) }).safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "Invalid status" }); return; }

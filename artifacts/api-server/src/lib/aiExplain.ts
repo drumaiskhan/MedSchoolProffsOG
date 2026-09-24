@@ -1013,6 +1013,118 @@ export async function generateOptionExplanations(request: ExplanationRequest, mo
   })(), GENERATE_OPTION_EXPLANATIONS_HARD_DEADLINE_MS, () => []);
 }
 
+function buildRewriteDuplicatePrompt({ question, options, correctAnswer, otherQuestion }: { question: string; options: string[]; correctAnswer: string | null; otherQuestion: string }): string {
+  const optionList = options.map((opt, i) => `${String.fromCharCode(65 + i)}. ${opt}`).join("\n");
+  return [
+    "You are cleaning up a medical school (MBBS/BDS) question bank. Two questions in the bank are near-duplicates of each other — same underlying concept, wording too similar.",
+    "Rewrite QUESTION B ONLY so it tests the exact same concept and has the exact same correct option (same medical fact), but reads as a genuinely different question — change the clinical scenario, phrasing, numbers, or angle of the question so it no longer looks copy-pasted from Question A. Do not change what is being tested or which option is correct.",
+    "Keep the same number of options, in the same order, with the same option that is correct — only reword the question stem and, if needed, the option wording (not the underlying meaning of the correct option).",
+    "Do not use markdown.",
+    NO_REASONING_INSTRUCTION,
+    "",
+    `Question A (keep as-is, for reference only): ${otherQuestion}`,
+    "",
+    `Question B (rewrite this one): ${question}`,
+    `Question B's options:\n${optionList}`,
+    correctAnswer ? `Question B's correct answer: ${correctAnswer}` : "",
+    "",
+    `Respond with ONLY a valid JSON object, no prose before or after, no code fences, in exactly this shape: {"question": "...", "options": [${options.map(() => '"..."').join(", ")}], "correctAnswer": "..."}`,
+  ].filter(Boolean).join("\n");
+}
+
+// 12s per row — same budget as generateOptionExplanations (a full
+// question + option set is a comparable amount of output), so a capped
+// batch of these run at the same concurrency stays under the 26s proxy
+// ceiling the same way. See withHardDeadline's comment above
+// classifyDifficulty for why an outer deadline is needed at all.
+const REWRITE_DUPLICATE_HARD_DEADLINE_MS = 12_000;
+
+/** Rewrites one side of a near-duplicate MCQ pair (found by the client-side
+ * Jaccard similarity check in contentQuality.ts) into a distinct question
+ * that still tests the same fact and keeps the same correct option — the
+ * "AI Fix All" duplicate-removal action in the Content Quality Center.
+ * Returns null on an unparseable response, a mismatched option count (would
+ * silently corrupt the correct-answer mapping downstream), an error, or
+ * simply taking too long — the caller skips that pair rather than writing
+ * bad data or stalling the batch, same shape as generateOptionExplanations
+ * above. */
+export async function rewriteDuplicateMcq(request: { question: string; options: string[]; correctAnswer: string | null; otherQuestion: string }, modelOverride?: string): Promise<{ question: string; options: string[]; correctAnswer: string } | null> {
+  return withHardDeadline((async () => {
+    try {
+      const raw = await runPrompt(buildRewriteDuplicatePrompt(request), Math.max(600, request.options.length * 150), "object", modelOverride);
+      const cleaned = stripReasoningArtifacts(raw).replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+      let parsed: unknown;
+      try { parsed = JSON.parse(cleaned); } catch { const objects = extractBalancedJsonObjects(cleaned); parsed = objects.find((o) => o && typeof o === "object" && "question" in (o as object)); }
+      if (!parsed || typeof parsed !== "object") return null;
+      const obj = parsed as { question?: unknown; options?: unknown; correctAnswer?: unknown };
+      if (typeof obj.question !== "string" || !obj.question.trim()) return null;
+      if (!Array.isArray(obj.options) || obj.options.length !== request.options.length) return null;
+      const options = obj.options.map((o) => String(o ?? "").trim());
+      if (options.some((o) => !o)) return null;
+      const correctAnswer = typeof obj.correctAnswer === "string" && options.includes(obj.correctAnswer.trim()) ? obj.correctAnswer.trim() : options[0];
+      return { question: obj.question.trim(), options, correctAnswer };
+    } catch {
+      return null;
+    }
+  })(), REWRITE_DUPLICATE_HARD_DEADLINE_MS, () => null);
+}
+
+function buildRepairInvalidPrompt({ question, options, correctAnswer, reasons }: { question: string; options: string[]; correctAnswer: string | null; reasons: string[] }): string {
+  const optionList = options.map((opt, i) => `${String.fromCharCode(65 + i)}. ${opt === "" ? "(empty)" : opt}`).join("\n") || "(no options given)";
+  return [
+    "You are repairing a broken entry in a medical school (MBBS/BDS) MCQ bank. This question failed automated validation for the reason(s) listed below.",
+    "Fix ONLY what is broken — keep the medical topic and as much of the original wording as possible. Specifically:",
+    "- If the question text is empty or unusable, write a clear, sensible question on a plausible medical topic consistent with any options given.",
+    "- If there are fewer than 2 usable options, add options so there are at least 4, all medically plausible for that question (one correct, others real distractors).",
+    "- If two or more options are duplicates of each other, reword the duplicates so every option is distinct while keeping the same total count.",
+    "- If no correct answer is set, or the correct answer doesn't match any option exactly, pick the single best/most correct option and set it as the correct answer, character-for-character identical to that option's text.",
+    `Reason(s) this question was flagged: ${reasons.join("; ")}`,
+    "Do not use markdown.",
+    NO_REASONING_INSTRUCTION,
+    "",
+    `Question: ${question || "(empty)"}`,
+    `Options:\n${optionList}`,
+    correctAnswer ? `Currently marked correct answer: ${correctAnswer}` : "Currently marked correct answer: (none set)",
+    "",
+    "Respond with ONLY a valid JSON object, no prose before or after, no code fences, in exactly this shape (options must be an array of at least 2 non-empty strings, correctAnswer must exactly equal one of them): {\"question\": \"...\", \"options\": [\"...\", \"...\"], \"correctAnswer\": \"...\"}",
+  ].join("\n");
+}
+
+// 12s per row — same budget as rewriteDuplicateMcq/generateOptionExplanations
+// above; a capped batch at the same concurrency stays under the 26s proxy
+// ceiling for the same reason.
+const REPAIR_INVALID_HARD_DEADLINE_MS = 12_000;
+
+/** Repairs one structurally-invalid MCQ (empty question, too few/duplicate
+ * options, missing/mismatched correct answer — see invalidReasons in the
+ * frontend's contentQuality.ts, whose output is passed in as `reasons`) —
+ * the "AI Fix" action for the Content Quality Center's Invalid stat/list.
+ * Returns null (so the caller skips that row rather than writing bad data
+ * or stalling the batch) on an unparseable response, fewer than 2 options,
+ * any empty option, a correct answer that still doesn't match an option
+ * exactly, an error, or simply taking too long. */
+export async function repairInvalidMcq(request: { question: string; options: string[]; correctAnswer: string | null; reasons: string[] }, modelOverride?: string): Promise<{ question: string; options: string[]; correctAnswer: string } | null> {
+  return withHardDeadline((async () => {
+    try {
+      const raw = await runPrompt(buildRepairInvalidPrompt(request), 900, "object", modelOverride);
+      const cleaned = stripReasoningArtifacts(raw).replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+      let parsed: unknown;
+      try { parsed = JSON.parse(cleaned); } catch { const objects = extractBalancedJsonObjects(cleaned); parsed = objects.find((o) => o && typeof o === "object" && "question" in (o as object)); }
+      if (!parsed || typeof parsed !== "object") return null;
+      const obj = parsed as { question?: unknown; options?: unknown; correctAnswer?: unknown };
+      if (typeof obj.question !== "string" || !obj.question.trim()) return null;
+      if (!Array.isArray(obj.options) || obj.options.length < 2) return null;
+      const options = obj.options.map((o) => String(o ?? "").trim());
+      if (options.some((o) => !o)) return null;
+      if (new Set(options.map((o) => o.toLowerCase())).size !== options.length) return null;
+      if (typeof obj.correctAnswer !== "string" || !options.includes(obj.correctAnswer.trim())) return null;
+      return { question: obj.question.trim(), options, correctAnswer: obj.correctAnswer.trim() };
+    } catch {
+      return null;
+    }
+  })(), REPAIR_INVALID_HARD_DEADLINE_MS, () => null);
+}
+
 export async function generateFlashcardExplanation(request: FlashcardExplanationRequest): Promise<string> {
   return runPrompt(buildFlashcardPrompt(request), 700);
 }

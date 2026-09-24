@@ -250,7 +250,7 @@ type NavItem = [string, string, typeof LayoutDashboard];
 
 export const navGroups: Array<{ label: string; items: NavItem[] }> = [
   { label: 'Study desk', items: [
-    ['/dashboard', 'Overview', LayoutDashboard], ['/study', 'Study plan', CalendarCheck], ['/progress', 'My progress', TrendingUp], ['/blocks', 'Blocks', BookOpen], ['/exams', 'Pre-Proffs Exams', ClipboardCheck], ['/ospe-osce', 'OSPE/OSCE', Stethoscope], ['/past-papers', 'Past papers', FileStack], ['/flashcards', 'Flashcards', Zap], ['/ai-visualizer', 'AI Visualizer', Wand2], ['/books', 'Books', Library],
+    ['/dashboard', 'Overview', LayoutDashboard], ['/blocks', 'Blocks', BookOpen], ['/flashcards', 'Flashcards', Zap], ['/past-papers', 'Past papers', FileStack], ['/exams', 'Pre-Proffs Exams', ClipboardCheck], ['/ospe-osce', 'OSPE/OSCE', Stethoscope], ['/books', 'Books', Library], ['/progress', 'My progress', TrendingUp], ['/study', 'Study plan', CalendarCheck], ['/ai-visualizer', 'AI Visualizer', Wand2],
   ] },
   { label: 'Your tools', items: [
     ['/notebook', 'My notebook', NotebookPen], ['/saved-sessions', 'Saved sessions', Bookmark], ['/flagged-mcqs', 'Flagged MCQs', Flag], ['/leaderboard', 'Leaderboard', Trophy], ['/challenge', 'Challenge a friend', Swords],

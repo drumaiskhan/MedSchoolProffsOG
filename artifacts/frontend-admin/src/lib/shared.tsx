@@ -1667,11 +1667,11 @@ export function AdminInstitutionsList({ selectedId, onSelect }: { selectedId: nu
     setDragOverIndex(null);
   };
 
-  return <div className="rounded-2xl border border-border bg-card p-5">
-    <h4 className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Institutions</h4>
-    <p className="mt-1 text-[11px] text-muted-foreground">The colleges students can register under, split by MBBS and BDS since they're different institutions — drag a row by its handle to reorder, or use the arrows for a one-spot nudge. Manage programmes, years, and batches below.</p>
+  return <div className="rounded-3xl border border-border bg-card p-5 shadow-sm">
+    <div className="flex items-center gap-2.5"><div className="grid size-8 shrink-0 place-items-center rounded-xl bg-primary/15 text-primary"><Landmark size={16} /></div><div><h4 className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Institutions</h4></div></div>
+    <p className="mt-1.5 text-[11px] text-muted-foreground">The colleges students can register under, split by MBBS and BDS since they're different institutions — drag a row by its handle to reorder, or use the arrows for a one-spot nudge. Manage programmes, years, and batches below.</p>
     <div className="mt-3 flex gap-1.5 rounded-xl bg-muted p-1">
-      {tabs.map((t) => <button key={t.key} type="button" onClick={() => setKindTab(t.key)} className={cn('flex-1 rounded-lg py-1.5 text-[11px] font-bold transition-colors', kindTab === t.key ? 'bg-card text-primary shadow-sm' : 'text-muted-foreground hover:text-foreground')} data-testid={`tab-institution-kind-${t.key || 'unset'}`}>{t.label} <span className="font-mono-app text-[10px] opacity-70">({allInstitutions.filter((i) => (i.kind || '') === t.key).length})</span></button>)}
+      {tabs.map((t) => <button key={t.key} type="button" onClick={() => setKindTab(t.key)} className={cn('flex-1 rounded-lg py-1.5 text-[11px] font-bold transition-all', kindTab === t.key ? 'bg-card text-primary shadow-sm' : 'text-muted-foreground hover:text-foreground')} data-testid={`tab-institution-kind-${t.key || 'unset'}`}>{t.label} <span className="font-mono-app text-[10px] opacity-70">({allInstitutions.filter((i) => (i.kind || '') === t.key).length})</span></button>)}
     </div>
     <div className="mt-3 space-y-1.5">
       {orderedInstitutions.map((i: Institution, idx) => <div
@@ -1680,8 +1680,8 @@ export function AdminInstitutionsList({ selectedId, onSelect }: { selectedId: nu
         onDragOver={(e) => { if (dragIndex !== null) { e.preventDefault(); if (dragOverIndex !== idx) setDragOverIndex(idx); } }}
         onDrop={(e) => { e.preventDefault(); dropInstitution(idx); }}
         className={cn(
-          'flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs cursor-pointer hover:bg-muted transition-colors',
-          selectedId === i.id && 'bg-primary/10 font-bold',
+          'flex items-center justify-between gap-2 rounded-xl border border-transparent px-3 py-2 text-xs cursor-pointer hover:bg-muted transition-all',
+          selectedId === i.id && 'border-primary/20 bg-primary/10 font-bold shadow-sm',
           dragIndex === idx && 'opacity-40',
           dragOverIndex === idx && dragIndex !== idx && 'ring-2 ring-primary/50',
         )}
@@ -1701,6 +1701,7 @@ export function AdminInstitutionsList({ selectedId, onSelect }: { selectedId: nu
             <button type="button" disabled={idx === 0 || reorder.isPending} onClick={() => moveInstitution(idx, -1)} className="grid size-4 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-30" data-testid={`button-move-up-institution-${i.id}`} aria-label="Move up"><ChevronUp size={12} /></button>
             <button type="button" disabled={idx === orderedInstitutions.length - 1 || reorder.isPending} onClick={() => moveInstitution(idx, 1)} className="grid size-4 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-30" data-testid={`button-move-down-institution-${i.id}`} aria-label="Move down"><ChevronDown size={12} /></button>
           </div>
+          <div className={cn('grid size-7 shrink-0 place-items-center rounded-lg text-[11px] font-extrabold', i.kind === 'BDS' ? 'bg-info/15 text-info' : i.kind === 'MBBS' ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground')}>{i.name.trim().charAt(0).toUpperCase() || '?'}</div>
           {renamingId === i.id
             ? <form onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); if (renameValue.trim()) renameInstitution.mutate({ id: i.id, name: renameValue.trim() }); }} className="flex flex-1 items-center gap-1.5">
                 <input autoFocus value={renameValue} onChange={(e) => setRenameValue(e.target.value)} className="h-7 min-w-0 flex-1 rounded-lg border border-border bg-background px-2 text-xs" data-testid={`input-rename-institution-${i.id}`} />
@@ -1713,7 +1714,7 @@ export function AdminInstitutionsList({ selectedId, onSelect }: { selectedId: nu
           {/* Always editable, not just while unset — an admin who typed a
               college into the wrong tab (or is fixing a legacy row) needs
               a way to correct it, not just set it once. */}
-          <select value={i.kind || ''} onChange={(e) => updateInstitutionKind.mutate({ id: i.id, kind: e.target.value })} className="h-6 rounded border border-border bg-background px-1 text-[10px] font-bold" data-testid={`select-institution-kind-${i.id}`}><option value="">Unset</option><option value="MBBS">MBBS</option><option value="BDS">BDS</option></select>
+          <select value={i.kind || ''} onChange={(e) => updateInstitutionKind.mutate({ id: i.id, kind: e.target.value })} className="h-6 rounded-md border border-border bg-background px-1 text-[10px] font-bold" data-testid={`select-institution-kind-${i.id}`}><option value="">Unset</option><option value="MBBS">MBBS</option><option value="BDS">BDS</option></select>
           <button type="button" onClick={() => { setRenamingId(i.id); setRenameValue(i.name); }} className="text-[10px] font-bold text-primary" data-testid={`button-rename-institution-${i.id}`}>Rename</button>
           <button type="button" onClick={() => toggleInstitution.mutate({ id: i.id, active: !i.active })} className="text-[10px] font-bold text-primary" data-testid={`button-toggle-institution-${i.id}`}>{i.active ? 'Archive' : 'Activate'}</button>
           {/* No longer gated behind "archived first" — the backend already

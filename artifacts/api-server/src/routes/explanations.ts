@@ -3,7 +3,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, mcqsTable, flashcardsTable, topicsTable, subjectsTable, modulesTable, auditLogsTable } from "@workspace/db";
 import { requireAdmin, requireAuth, requireMembershipFor } from "../middlewares/auth";
-import { generateExplanation, generateFlashcardExplanation, generateFlashcardSet, generateMcqSet, classifyDifficulty, generateOptionExplanations, AiNotConfiguredError } from "../lib/aiExplain";
+import { generateExplanation, generateFlashcardExplanation, generateFlashcardSet, generateMcqSet, classifyDifficulty, generateOptionExplanations, rewriteDuplicateMcq, repairInvalidMcq, AiNotConfiguredError } from "../lib/aiExplain";
 import { getAllSettings } from "../lib/settings";
 
 const router: IRouter = Router();
@@ -366,6 +366,74 @@ router.post("/admin/mcqs/generate-option-explanations", requireAdmin, async (req
   }
   const generated = results.filter((r) => r.optionExplanations.length).length;
   res.json({ generated, remaining, results });
+});
+
+// ---------------------------------------------------------------------------
+// Admin: "AI Fix All" duplicate removal — the Content Quality Center finds
+// near-duplicate pairs client-side (findDuplicates in contentQuality.ts,
+// over data it already has loaded) and sends capped batches of pairs here.
+// Only the second question in each pair is rewritten; the first is left
+// untouched as the "keeper" — same capped/concurrency-limited shape as
+// classify-difficulty and generate-option-explanations above, so a bank
+// with 100+ duplicate pairs is worked through by the frontend calling this
+// repeatedly rather than one request trying to rewrite them all and hitting
+// the 26s proxy ceiling.
+// ---------------------------------------------------------------------------
+
+const DedupeBatchBody = z.object({ pairs: z.array(z.object({ id: z.number().int().positive(), otherId: z.number().int().positive() })).min(1).max(8) });
+
+router.post("/admin/mcqs/dedupe-batch", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = DedupeBatchBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+
+  const ids = Array.from(new Set(parsed.data.pairs.flatMap((p) => [p.id, p.otherId])));
+  const rows = await db.select({ id: mcqsTable.id, question: mcqsTable.question, options: mcqsTable.options, correctAnswer: mcqsTable.correctAnswer }).from(mcqsTable).where(inArray(mcqsTable.id, ids));
+  const byId = new Map(rows.map((r) => [r.id, r]));
+
+  // Same concurrency reasoning as CLASSIFY_CONCURRENCY / GENERATE_CONCURRENCY
+  // above: a fully sequential loop over up to 8 AI calls (each with its own
+  // 12s hard deadline) could take a while, so pairs run in parallel and the
+  // batch size (8) is chosen so one round comfortably clears in a single
+  // 12s window.
+  const results = await Promise.all(parsed.data.pairs.map(async (pair) => {
+    const row = byId.get(pair.id);
+    const other = byId.get(pair.otherId);
+    if (!row || !other) return { id: pair.id, rewritten: false };
+    const rewritten = await rewriteDuplicateMcq({ question: row.question, options: row.options as string[], correctAnswer: row.correctAnswer, otherQuestion: other.question });
+    if (!rewritten) return { id: pair.id, rewritten: false };
+    await db.update(mcqsTable).set({ question: rewritten.question, options: rewritten.options, correctAnswer: rewritten.correctAnswer }).where(eq(mcqsTable.id, pair.id));
+    return { id: pair.id, rewritten: true };
+  }));
+  res.json({ fixed: results.filter((r) => r.rewritten).length, results });
+});
+
+// ---------------------------------------------------------------------------
+// Admin: "AI Fix" for structurally-invalid questions (empty question, too
+// few/duplicate options, missing or mismatched correct answer — see
+// invalidReasons in the frontend's contentQuality.ts). The client already
+// has each row's reasons computed (no server-side re-check needed), so it
+// sends them along with the batch. Same capped/concurrency-limited shape as
+// dedupe-batch above.
+// ---------------------------------------------------------------------------
+
+const RepairInvalidBatchBody = z.object({ items: z.array(z.object({ id: z.number().int().positive(), reasons: z.array(z.string()).min(1) })).min(1).max(8) });
+
+router.post("/admin/mcqs/repair-invalid-batch", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = RepairInvalidBatchBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+
+  const rows = await db.select({ id: mcqsTable.id, question: mcqsTable.question, options: mcqsTable.options, correctAnswer: mcqsTable.correctAnswer }).from(mcqsTable).where(inArray(mcqsTable.id, parsed.data.items.map((i) => i.id)));
+  const byId = new Map(rows.map((r) => [r.id, r]));
+
+  const results = await Promise.all(parsed.data.items.map(async (item) => {
+    const row = byId.get(item.id);
+    if (!row) return { id: item.id, fixed: false };
+    const repaired = await repairInvalidMcq({ question: row.question, options: row.options as string[], correctAnswer: row.correctAnswer, reasons: item.reasons });
+    if (!repaired) return { id: item.id, fixed: false };
+    await db.update(mcqsTable).set({ question: repaired.question, options: repaired.options, correctAnswer: repaired.correctAnswer }).where(eq(mcqsTable.id, item.id));
+    return { id: item.id, fixed: true };
+  }));
+  res.json({ fixed: results.filter((r) => r.fixed).length, results });
 });
 
 // ---------------------------------------------------------------------------
