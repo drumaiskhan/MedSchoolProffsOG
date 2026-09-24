@@ -133,7 +133,7 @@ function AdminContent() {
         </div>
         <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-bold">
           <span className="rounded-full bg-muted px-2.5 py-1 text-muted-foreground">{all.length} module{all.length === 1 ? '' : 's'}</span>
-          {all.length > 0 && <span className={cn('rounded-full px-2.5 py-1', published === all.length ? 'bg-[#d7eee4] text-[#287058]' : 'bg-[#fff0cb] text-[#8d6420]')}>{published}/{all.length} published</span>}
+          {all.length > 0 && <span className={cn('rounded-full px-2.5 py-1', published === all.length ? 'bg-primary/15 text-primary' : 'bg-accent/20 text-accent-text')}>{published}/{all.length} published</span>}
         </div>
         <div className="ml-auto flex items-center gap-1">
           <div className="flex flex-col"><button onClick={() => moveBlock(siblings, b, -1)} disabled={filtering || bi <= 0 || reorderBlocks.isPending} className="rounded p-0.5 text-muted-foreground hover:bg-muted disabled:opacity-25" aria-label="Move block up" data-testid={`button-block-move-up-${b.id}`}><ChevronUp size={13} /></button><button onClick={() => moveBlock(siblings, b, 1)} disabled={filtering || bi < 0 || bi === siblings.length - 1 || reorderBlocks.isPending} className="rounded p-0.5 text-muted-foreground hover:bg-muted disabled:opacity-25" aria-label="Move block down" data-testid={`button-block-move-down-${b.id}`}><ChevronDown size={13} /></button></div>

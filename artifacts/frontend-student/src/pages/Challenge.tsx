@@ -1,13 +1,16 @@
 // Auto-extracted route page — code-split via React.lazy() in App.tsx.
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'wouter';
-import { Swords, Search, CheckCircle2, XCircle, Clock3, Trophy, ArrowLeft, X, GraduationCap, SlidersHorizontal } from 'lucide-react';
+import { Swords, Search, Share2, CheckCircle2, XCircle, Clock3, Trophy, ArrowLeft, X, GraduationCap, SlidersHorizontal } from 'lucide-react';
 import { authApi, blocksApi, type Block, challengesApi, ApiRequestError, type ChallengeOpponent, type ChallengeSummary } from '@/lib/api';
 import { getGetCurrentUserQueryKey, useListModules, useListSubjects, useListTopics } from '@workspace/api-client-react';
 import { EmptyState, SectionHeader, SkeletonPage, Badge, cn, initials, BrandSpinner } from '@/lib/shared';
 import { toast } from '@/hooks/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ChallengeAchievements } from '@/components/ChallengeAchievements';
+import { ChallengeShareDialog, shareableVerdict } from '@/components/ChallengeShareDialog';
+import { computeChallengeAchievements } from '@/lib/challengeAchievements';
 
 const QUESTION_COUNT_PRESETS = [5, 10, 15, 20];
 
@@ -156,7 +159,7 @@ function statusBadge(c: ChallengeSummary) {
   return <Badge tone="amber">Waiting on opponent</Badge>;
 }
 
-function ChallengeRow({ c, onOpen, onDecline }: { c: ChallengeSummary; onOpen: () => void; onDecline: () => void }) {
+function ChallengeRow({ c, onOpen, onDecline, onShare }: { c: ChallengeSummary; onOpen: () => void; onDecline: () => void; onShare: () => void }) {
   const canPlay = (c.status === 'PENDING') && !c.iHavePlayed;
   const canDecline = c.role === 'opponent' && c.status === 'PENDING' && !c.iHavePlayed;
   return <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3.5 last:border-0" data-testid={`row-challenge-${c.id}`}>
@@ -172,6 +175,7 @@ function ChallengeRow({ c, onOpen, onDecline }: { c: ChallengeSummary; onOpen: (
       {statusBadge(c)}
       {canPlay && <button onClick={onOpen} className="rounded-lg bg-primary px-3 py-1.5 text-[11px] font-extrabold text-primary-foreground" data-testid={`button-play-${c.id}`}>Play</button>}
       {canDecline && <button onClick={onDecline} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold text-muted-foreground hover:bg-muted" data-testid={`button-decline-${c.id}`}>Decline</button>}
+      {shareableVerdict(c) && <button onClick={onShare} className="inline-flex items-center gap-1 rounded-lg border border-primary/30 bg-primary/10 px-2.5 py-1.5 text-[11px] font-extrabold text-primary hover:bg-primary/15" data-testid={`button-share-${c.id}`}><Share2 size={12} /> Share</button>}
       {c.status === 'COMPLETED' && <button onClick={onOpen} className="rounded-lg border border-border px-3 py-1.5 text-[11px] font-bold hover:bg-muted" data-testid={`button-review-${c.id}`}>Review</button>}
     </div>
   </div>;
@@ -248,6 +252,7 @@ function PlayChallenge({ id, onClose }: { id: number; onClose: () => void }) {
 
 function Challenge() {
   const [openId, setOpenId] = useState<number | null>(null);
+  const [shareId, setShareId] = useState<number | null>(null);
   const mine = useQuery({ queryKey: ['challenges-mine'], queryFn: challengesApi.mine });
   const qc = useQueryClient();
 
@@ -256,6 +261,19 @@ function Challenge() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['challenges-mine'] }),
     onError: (err: unknown) => toast({ title: 'Could not decline', description: err instanceof ApiRequestError ? err.message : 'Something went wrong.', variant: 'destructive' }),
   });
+
+  // Announce badges that unlock while this page is open (e.g. right after you
+  // submit a match). The first load only records what's already earned, so
+  // opening the page never replays old unlocks.
+  const seenEarned = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (!mine.data) return;
+    const earned = computeChallengeAchievements(mine.data.sent, mine.data.received).filter((a) => a.earned);
+    if (seenEarned.current) {
+      for (const a of earned) if (!seenEarned.current.has(a.id)) toast({ title: 'Achievement unlocked!', description: a.label });
+    }
+    seenEarned.current = new Set(earned.map((a) => a.id));
+  }, [mine.data]);
 
   if (openId != null) return <PlayChallenge id={openId} onClose={() => setOpenId(null)} />;
 
@@ -272,20 +290,22 @@ function Challenge() {
           <div>
             <p className="mb-2 text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Challenges for you ({received.length})</p>
             <div className="overflow-hidden rounded-2xl border border-border bg-card">
-              {received.map((c) => <ChallengeRow key={c.id} c={c} onOpen={() => setOpenId(c.id)} onDecline={() => decline.mutate(c.id)} />)}
+              {received.map((c) => <ChallengeRow key={c.id} c={c} onOpen={() => setOpenId(c.id)} onDecline={() => decline.mutate(c.id)} onShare={() => setShareId(c.id)} />)}
               {!received.length && <EmptyState icon={Swords} title="No challenges yet" body="When a friend challenges you, it'll show up here." />}
             </div>
           </div>
           <div>
             <p className="mb-2 text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Sent by you ({sent.length})</p>
             <div className="overflow-hidden rounded-2xl border border-border bg-card">
-              {sent.map((c) => <ChallengeRow key={c.id} c={c} onOpen={() => setOpenId(c.id)} onDecline={() => decline.mutate(c.id)} />)}
+              {sent.map((c) => <ChallengeRow key={c.id} c={c} onOpen={() => setOpenId(c.id)} onDecline={() => decline.mutate(c.id)} onShare={() => setShareId(c.id)} />)}
               {!sent.length && <EmptyState icon={Swords} title="No challenges sent" body="Search for a friend on the left and send your first quiz challenge." />}
             </div>
           </div>
         </>}
       </div>
     </div>
+    <ChallengeShareDialog challenge={[...sent, ...received].find((c) => c.id === shareId) ?? null} onClose={() => setShareId(null)} />
+    {!mine.isLoading && <div className="mt-6"><ChallengeAchievements sent={sent} received={received} /></div>}
   </div>;
 }
 

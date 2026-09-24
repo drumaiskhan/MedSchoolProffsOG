@@ -52,6 +52,8 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // invalidateQueries after a save) already set their own options, which
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
+import { TiltDiv, vars } from '@/lib/tilt';
+import { MembershipPass } from '@/components/profile/ProfileVisuals';
 import { Badge, EmptyState, PAYMENT_METHODS, PaymentDestinationCard, SectionHeader, SubscriptionStatusCard, cn, money } from '@/lib/shared';
 
 function Payments() {
@@ -116,18 +118,18 @@ function Payments() {
   }, null);
 
   return <div className="max-w-5xl"><SectionHeader eyebrow="Membership" title="Access that fits your semester" description="Choose a plan, pay, and upload your proof — we activate your account after review." />
-  <div className="mb-6"><SubscriptionStatusCard plans={plans} payments={payments} /></div>
+  <div className="mb-6"><MembershipPass payments={payments} /></div>
   {!showForm ? <div className="rounded-2xl border border-dashed border-border bg-card p-6 text-center"><p className="text-xs text-muted-foreground">{isActive ? "Your access is active. Renewing early? You can submit a new payment any time." : 'Choose a plan and submit your payment to activate access.'}</p><button onClick={() => setShowForm(true)} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md" data-testid="button-show-payment-form">{isActive ? 'Renew / change plan' : 'Choose a plan & pay'}</button></div> : <div className="grid gap-6 lg:grid-cols-[1.1fr_1fr]"><div>
     <div className="mb-3 text-xs font-bold text-muted-foreground">Choose your access</div>
-    <div className="grid gap-3 sm:grid-cols-2">{plans.map((p) => <button type="button" onClick={() => setSelectedPlan(p.id)} key={p.id} className={cn('group relative overflow-hidden rounded-2xl border p-5 text-left transition-all hover:-translate-y-0.5', selectedPlan === p.id ? 'border-primary bg-[#eef7f1] shadow-sm' : 'border-border bg-card hover:border-primary/40')} data-testid={`button-plan-${p.id}`}>
+    <div className="grid gap-3 sm:grid-cols-2">{plans.map((p, i) => <TiltDiv key={p.id} style={vars({ '--tilt': 5, '--i': Math.min(i, 8) })}><button type="button" aria-pressed={selectedPlan === p.id} onClick={() => setSelectedPlan(p.id)} className="plan-3d group h-full" data-testid={`button-plan-${p.id}`}>
       {p.id === bestValueId && <span className="absolute right-3 top-3 rounded-full bg-[#e5a952] px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-[#183844]">Best value</span>}
       {p.discountLabel && p.id !== bestValueId && <span className="absolute right-3 top-3 rounded-full bg-[#fff0cb] px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-[#94651c]">{p.discountLabel}</span>}
-      <div className="flex items-center gap-2"><div className={cn('grid size-8 place-items-center rounded-lg', selectedPlan === p.id ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground')}><CreditCard size={15} /></div>{selectedPlan === p.id && <CheckCircle2 size={16} className="text-primary" />}</div>
+      <div className="flex items-center gap-2"><div className={cn('plan-3d__icon grid size-8 place-items-center rounded-lg', selectedPlan === p.id ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground')}><CreditCard size={15} /></div>{selectedPlan === p.id && <CheckCircle2 size={16} className="plan-3d__check text-primary" />}</div>
       <div className="mt-3 text-sm font-extrabold">{p.name}</div>
       {p.description && <p className="mt-1 text-[11px] leading-5 text-muted-foreground">{p.description}</p>}
       <div className="mt-2 flex items-center gap-2">{p.originalPrice != null && p.originalPrice > p.price && <span className="text-xs text-muted-foreground line-through">{money(p.originalPrice, p.currency)}</span>}<span className="font-display text-2xl">{money(p.price, p.currency)}</span></div>
       <div className="mt-1 text-[11px] text-muted-foreground">{p.duration} {p.durationUnit} access</div>
-    </button>)}{!plans.length && <EmptyState icon={CreditCard} title="No plans available yet" body="Your academic team hasn't published any membership plans yet." />}</div>
+    </button></TiltDiv>)}{!plans.length && <EmptyState icon={CreditCard} title="No plans available yet" body="Your academic team hasn't published any membership plans yet." />}</div>
     {pd && <div className="mt-5"><PaymentDestinationCard pd={pd} /></div>}
     {selectedPlanObj && <div className="mt-5 rounded-2xl border border-border bg-card p-4">
       <div className="flex items-center gap-2"><input value={couponInput} onChange={(e) => { setCouponInput(e.target.value); setCouponResult(null); setCouponError(null); }} placeholder="Coupon code (optional)" className="h-10 flex-1 rounded-xl border border-border bg-background px-3 text-xs outline-none focus:ring-2 focus:ring-primary/20" data-testid="input-payment-coupon" /><button type="button" onClick={applyCoupon} disabled={!couponInput.trim() || couponChecking} className="h-10 shrink-0 rounded-xl border border-border px-4 text-xs font-bold hover:bg-muted disabled:opacity-50" data-testid="button-apply-payment-coupon">{couponChecking ? 'Checking…' : 'Apply'}</button></div>

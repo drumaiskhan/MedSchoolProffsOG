@@ -92,6 +92,9 @@ router.delete("/admin/ospe/blocks/:id/permanent", requireAdmin, async (req, res)
   const [block] = await db.select().from(ospeBlocksTable).where(eq(ospeBlocksTable.id, id));
   if (!block) { res.status(404).json({ error: "Block not found" }); return; }
   await db.update(ospeModulesTable).set({ blockId: null }).where(eq(ospeModulesTable.blockId, id));
+  // Stations / material filed directly under this block become unassigned too (not deleted).
+  await db.update(ospeStationsTable).set({ blockId: null }).where(eq(ospeStationsTable.blockId, id));
+  await db.update(ospeLearningMaterialsTable).set({ blockId: null }).where(eq(ospeLearningMaterialsTable.blockId, id));
   await db.delete(ospeBlocksTable).where(eq(ospeBlocksTable.id, id));
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "OSPE_BLOCK_PERMANENTLY_DELETED", entity: "ospe_block", entityId: id });
   res.json({ ok: true });
@@ -184,6 +187,7 @@ const LearningMaterialBody = z.object({
   bodyText: z.string().max(20000).optional(),
   examType: ExamTypeEnum.optional(),
   moduleId: z.number().int().nullable().optional(),
+  blockId: z.number().int().nullable().optional(),
   imagePath: z.string().nullable().optional(),
   attachmentPath: z.string().nullable().optional(),
   externalUrl: z.string().max(1000).nullable().optional(),
@@ -199,7 +203,7 @@ router.post("/admin/ospe/learning-materials", requireAdmin, async (req, res): Pr
   const d = parsed.data;
   const [row] = await db.insert(ospeLearningMaterialsTable).values({
     title: d.title, description: d.description ?? "", bodyText: d.bodyText ?? "", examType: d.examType ?? "OSPE",
-    moduleId: d.moduleId ?? null, imagePath: d.imagePath ?? null, attachmentPath: d.attachmentPath ?? null,
+    moduleId: d.moduleId ?? null, blockId: d.blockId ?? null, imagePath: d.imagePath ?? null, attachmentPath: d.attachmentPath ?? null,
     externalUrl: d.externalUrl ?? null, active: d.active ?? true, displayOrder: d.displayOrder ?? 0, ...targetingFields(d),
   }).returning();
   await db.insert(auditLogsTable).values({ actorId: req.user!.id, action: "OSPE_LEARNING_MATERIAL_CREATED", entity: "ospe_learning_material", entityId: row.id });
@@ -262,6 +266,7 @@ const StationBody = z.object({
   instructions: z.string().max(5000).optional(),
   examType: ExamTypeEnum.optional(),
   moduleId: z.number().int().nullable().optional(),
+  blockId: z.number().int().nullable().optional(),
   imagePath: z.string().nullable().optional(),
   attachmentPath: z.string().nullable().optional(),
   answerType: z.enum(["MCQ", "WRITTEN", "LABELING"]).optional(),
@@ -283,7 +288,7 @@ router.post("/admin/ospe/stations", requireAdmin, async (req, res): Promise<void
   if (!parsed.success) { res.status(400).json({ error: parsed.error.issues[0]?.message }); return; }
   const d = parsed.data;
   const [row] = await db.insert(ospeStationsTable).values({
-    title: d.title, instructions: d.instructions ?? "", examType: d.examType ?? "OSPE", moduleId: d.moduleId ?? null,
+    title: d.title, instructions: d.instructions ?? "", examType: d.examType ?? "OSPE", moduleId: d.moduleId ?? null, blockId: d.blockId ?? null,
     imagePath: d.imagePath ?? null, attachmentPath: d.attachmentPath ?? null, answerType: d.answerType ?? "WRITTEN",
     options: d.options ?? null, correctAnswer: d.correctAnswer ?? null, modelAnswer: d.modelAnswer ?? null,
     labelPoints: d.labelPoints ?? null,

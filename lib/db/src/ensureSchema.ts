@@ -935,6 +935,9 @@ CREATE TABLE IF NOT EXISTS med_ospe_stations (
 );
 
 ALTER TABLE med_ospe_stations ADD COLUMN IF NOT EXISTS label_points JSONB;
+-- Stations & learning material can be filed straight under a block (no module needed).
+ALTER TABLE med_ospe_stations ADD COLUMN IF NOT EXISTS block_id INTEGER;
+ALTER TABLE med_ospe_learning_materials ADD COLUMN IF NOT EXISTS block_id INTEGER;
 
 CREATE TABLE IF NOT EXISTS med_ospe_exams (
   id SERIAL PRIMARY KEY,

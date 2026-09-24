@@ -1,0 +1,68 @@
+/* v59 — Profile hero, membership pass, plan cards, page motion.
+   Same rules as v34/v37/v43: depth = gradients + layered shadows + 2D transforms;
+   the only 3D transform is the small hover tilt from fx.css (.fx-tilt). No preserve-3d,
+   no backface-visibility, no translateZ. Motion is transform/opacity only and is
+   switched off for prefers-reduced-motion. */
+@keyframes pfRise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes pfFloat { 0%, 100% { transform: translate(0, 0) scale(1); } 50% { transform: translate(18px, -14px) scale(1.12); } }
+@keyframes pfSpin { to { transform: rotate(360deg); } }
+@keyframes pfPop { 0% { transform: scale(.4); opacity: 0; } 70% { transform: scale(1.15); } 100% { transform: scale(1); opacity: 1; } }
+@keyframes pfPulse { 0%, 100% { opacity: .55; transform: scale(1); } 50% { opacity: 0; transform: scale(1.9); } }
+
+/* Staggered entrance for the first blocks of every student page. */
+@media (prefers-reduced-motion: no-preference) {
+  .student-content > * > :nth-child(-n + 8) { animation: pfRise .5s cubic-bezier(.22, 1, .36, 1) backwards; }
+  .student-content > * > :nth-child(2) { animation-delay: 45ms; } .student-content > * > :nth-child(3) { animation-delay: 90ms; }
+  .student-content > * > :nth-child(4) { animation-delay: 135ms; } .student-content > * > :nth-child(5) { animation-delay: 180ms; }
+  .student-content > * > :nth-child(n + 6) { animation-delay: 220ms; }
+}
+
+/* ---------- Profile hero ---------- */
+.pf-hero { --fx-r: 1.75rem; }
+.pf-hero__body { position: relative; overflow: hidden; border-radius: 1.75rem; padding: 1.5rem; color: #eafff6;
+  background: radial-gradient(120% 90% at 0% 0%, #1f8f7a 0%, transparent 55%), radial-gradient(90% 90% at 100% 100%, #2b5fd9 0%, transparent 60%), linear-gradient(135deg, #0d3b3f, #123a5a);
+  box-shadow: inset 0 1px 0 hsl(0 0% 100% / .28), inset 0 -18px 30px -18px hsl(0 0% 0% / .45), 0 2px 0 #0a2b30, 0 22px 40px -18px hsl(190 70% 14% / .55); }
+.pf-orb { position: absolute; border-radius: 999px; filter: blur(34px); pointer-events: none; animation: pfFloat 9s ease-in-out infinite; }
+.pf-orb--a { width: 11rem; height: 11rem; left: -3rem; top: -4rem; background: #3ee0b0; opacity: .3; }
+.pf-orb--b { width: 13rem; height: 13rem; right: -4rem; bottom: -6rem; background: #6aa4ff; opacity: .32; animation-delay: -4s; }
+.pf-grid { position: absolute; inset: 0; pointer-events: none; opacity: .13; background-image: linear-gradient(hsl(0 0% 100%) 1px, transparent 1px), linear-gradient(90deg, hsl(0 0% 100%) 1px, transparent 1px); background-size: 28px 28px; -webkit-mask-image: radial-gradient(80% 100% at 30% 0%, #000, transparent); mask-image: radial-gradient(80% 100% at 30% 0%, #000, transparent); }
+.pf-avatar { position: relative; flex: none; width: 5.5rem; height: 5.5rem; border-radius: 1.6rem; padding: 3px;
+  background: conic-gradient(from 0deg, #ffe08a, #5ef0c0, #6aa4ff, #ffe08a); box-shadow: 0 10px 22px -8px hsl(0 0% 0% / .55); }
+.pf-avatar::after { content: ''; position: absolute; inset: -6px; border-radius: 2rem; border: 1px solid hsl(0 0% 100% / .25); animation: pfPulse 3.2s ease-out infinite; }
+.pf-avatar > :is(img, span) { width: 100%; height: 100%; border-radius: calc(1.6rem - 3px); object-fit: cover; display: grid; place-items: center; background: linear-gradient(145deg, #d7eee4, #8fd5bd); color: #0f4a44; font-weight: 800; font-size: 1.6rem; }
+.pf-chip { display: inline-flex; align-items: center; gap: .35rem; padding: .3rem .65rem; border-radius: 999px; font-size: 11px; font-weight: 800; background: hsl(0 0% 100% / .13); box-shadow: inset 0 1px 0 hsl(0 0% 100% / .25); backdrop-filter: blur(6px); }
+.pf-stat { border-radius: 1rem; padding: .7rem .8rem; background: linear-gradient(180deg, hsl(0 0% 100% / .17), hsl(0 0% 100% / .06)); box-shadow: inset 0 1px 0 hsl(0 0% 100% / .3), 0 6px 12px -8px hsl(0 0% 0% / .5); transition: transform .25s cubic-bezier(.34, 1.56, .64, 1); }
+.pf-stat:hover { transform: translateY(-3px) scale(1.03); }
+
+/* ---------- Membership pass (credit-card style) ---------- */
+.pf-pass { --fx-r: 1.5rem; --c1: #12856f; --c2: #0d3b5e; --c3: #5ef0c0; }
+.pf-pass--warn { --c1: #d98a2b; --c2: #7a2f2f; --c3: #ffd27a; }
+.pf-pass--off { --c1: #4a5a6a; --c2: #1c2733; --c3: #9fb3c8; }
+.pf-pass__body { position: relative; overflow: hidden; border-radius: 1.5rem; padding: 1.25rem 1.4rem; color: #fff; min-height: 11.5rem;
+  background: radial-gradient(90% 120% at 100% 0%, var(--c1), transparent 60%), linear-gradient(135deg, var(--c2), #0a1620);
+  box-shadow: inset 0 1px 0 hsl(0 0% 100% / .3), inset 0 -14px 24px -14px hsl(0 0% 0% / .5), 0 2px 0 hsl(0 0% 0% / .35), 0 20px 34px -16px hsl(210 60% 10% / .6); }
+.pf-pass__holo { position: absolute; inset: 0; pointer-events: none; opacity: .35; background: repeating-linear-gradient(115deg, hsl(0 0% 100% / 0) 0 14px, hsl(0 0% 100% / .09) 14px 16px); mix-blend-mode: overlay; }
+.pf-pass__chip { width: 2.4rem; height: 1.8rem; border-radius: .45rem; background: linear-gradient(135deg, #f7e2a1, #c9a24b 55%, #f3d98a); box-shadow: inset 0 0 0 1px hsl(0 0% 0% / .25), inset 0 1px 0 hsl(0 0% 100% / .6); position: relative; }
+.pf-pass__chip::after { content: ''; position: absolute; inset: 4px 7px; border-radius: 3px; border: 1px solid hsl(0 0% 0% / .25); border-width: 0 1px; }
+.pf-ring { transform: rotate(-90deg); }
+.pf-ring circle { fill: none; stroke-linecap: round; }
+.pf-ring .pf-ring__bg { stroke: hsl(0 0% 100% / .16); }
+.pf-ring .pf-ring__fg { stroke: var(--c3); transition: stroke-dashoffset 1.1s cubic-bezier(.22, 1, .36, 1); filter: drop-shadow(0 0 6px var(--c3)); }
+
+/* ---------- Plan cards ---------- */
+.plan-3d { position: relative; width: 100%; overflow: hidden; text-align: left; border-radius: 1.25rem; border: 1px solid hsl(var(--border)); padding: 1.25rem; background: hsl(var(--card)) linear-gradient(180deg, var(--sheen), transparent 46%); box-shadow: var(--raise-1); transition: border-color .25s ease, background-color .25s ease, box-shadow .25s ease; }
+.plan-3d[aria-pressed="true"] { border-color: hsl(var(--primary)); box-shadow: 0 0 0 3px hsl(var(--primary) / .22), var(--raise-1); background-color: hsl(var(--primary) / .07); }
+.plan-3d__check { animation: pfPop .35s cubic-bezier(.34, 1.56, .64, 1) both; }
+.plan-3d .plan-3d__icon { transition: transform .3s cubic-bezier(.34, 1.56, .64, 1); }
+.plan-3d:hover .plan-3d__icon, .plan-3d[aria-pressed="true"] .plan-3d__icon { transform: translateY(-2px) rotate(-6deg) scale(1.08); }
+
+/* Personal-details rows: subtle lift + press */
+.pf-row { border-radius: .9rem; padding: .7rem .8rem; margin: -.7rem -.8rem; transition: background-color .2s ease, transform .2s ease; }
+.pf-row:hover { background: hsl(var(--muted) / .7); transform: translateX(3px); }
+.pf-edit { animation: pfRise .35s cubic-bezier(.22, 1, .36, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pf-orb, .pf-avatar::after, .plan-3d__check, .pf-edit { animation: none; }
+  .pf-stat:hover, .pf-row:hover, .plan-3d:hover .plan-3d__icon { transform: none; }
+  .pf-ring .pf-ring__fg { transition: none; }
+}

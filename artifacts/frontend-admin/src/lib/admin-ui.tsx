@@ -22,16 +22,16 @@ type PanelTone = 'default' | 'amber' | 'green' | 'red';
 
 const PANEL_TONE: Record<PanelTone, string> = {
   default: 'border-border bg-card',
-  amber: 'border-[#e5a952]/60 bg-[#fff9ee]',
-  green: 'border-primary/30 bg-[#eef7f1]',
-  red: 'border-[#efc7bc] bg-[#fff5f0]',
+  amber: 'border-accent/40 bg-accent/10',
+  green: 'border-primary/30 bg-primary/8',
+  red: 'border-destructive/30 bg-destructive/8',
 };
 
 const ICON_TONE: Record<PanelTone, string> = {
   default: 'bg-primary/10 text-primary',
-  amber: 'bg-[#e5a952]/20 text-[#8a5a12]',
+  amber: 'bg-accent/20 text-accent-text',
   green: 'bg-primary/15 text-primary',
-  red: 'bg-[#f9ddd6] text-[#a34c3e]',
+  red: 'bg-destructive/15 text-destructive',
 };
 
 /** A settings card: tinted icon tile, title, optional one-line description
@@ -123,7 +123,7 @@ export function ToggleRow({ checked, onChange, title, description, testId, disab
 
 export function Switch({ checked, onChange, testId, disabled, tone = 'default', label }: { checked: boolean; onChange: (next: boolean) => void; testId?: string; disabled?: boolean; tone?: 'default' | 'amber'; label?: string }) {
   return <button type="button" role="switch" aria-checked={checked} aria-label={label} disabled={disabled} onClick={() => onChange(!checked)} data-testid={testId}
-    className={cn('relative mt-0.5 inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50', checked ? (tone === 'amber' ? 'bg-[#d9982f]' : 'bg-primary') : 'bg-input')}>
+    className={cn('relative mt-0.5 inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50', checked ? (tone === 'amber' ? 'bg-accent' : 'bg-primary') : 'bg-input')}>
     <span className={cn('inline-block size-5 rounded-full bg-white shadow transition-transform', checked ? 'translate-x-[22px]' : 'translate-x-0.5')} />
   </button>;
 }
@@ -154,10 +154,10 @@ export function OptionCard({ active, onClick, icon: Icon, title, description, te
 
 type CalloutTone = 'info' | 'warn' | 'danger' | 'success';
 const CALLOUT: Record<CalloutTone, { box: string; icon: IconType }> = {
-  info: { box: 'border-[#c9dbe6] bg-[#f1f7fb] text-[#32647b]', icon: Info },
-  warn: { box: 'border-[#e8cf9c] bg-[#fff8e8] text-[#8a5a12]', icon: AlertTriangle },
-  danger: { box: 'border-[#efc7bc] bg-[#fff5f0] text-[#9e4c39]', icon: XCircle },
-  success: { box: 'border-primary/30 bg-[#eef7f1] text-[#287058]', icon: CheckCircle2 },
+  info: { box: 'border-info/30 bg-info/10 text-info', icon: Info },
+  warn: { box: 'border-accent/40 bg-accent/10 text-accent-text', icon: AlertTriangle },
+  danger: { box: 'border-destructive/30 bg-destructive/8 text-destructive', icon: XCircle },
+  success: { box: 'border-primary/30 bg-primary/8 text-primary', icon: CheckCircle2 },
 };
 
 export function Callout({ tone = 'info', title, children, testId }: { tone?: CalloutTone; title?: ReactNode; children?: ReactNode; testId?: string }) {
@@ -169,7 +169,7 @@ export function Callout({ tone = 'info', title, children, testId }: { tone?: Cal
 }
 
 export function StatusPill({ tone = 'neutral', children }: { tone?: 'neutral' | 'green' | 'amber' | 'red'; children: ReactNode }) {
-  const styles = { neutral: 'bg-muted text-muted-foreground', green: 'bg-[#d7eee4] text-[#287058]', amber: 'bg-[#fff0cb] text-[#8d6420]', red: 'bg-[#f9ddd6] text-[#a34c3e]' }[tone];
+  const styles = { neutral: 'bg-muted text-muted-foreground', green: 'bg-primary/15 text-primary', amber: 'bg-accent/20 text-accent-text', red: 'bg-destructive/15 text-destructive' }[tone];
   return <span className={cn('inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold', styles)}>{children}</span>;
 }
 
@@ -182,7 +182,7 @@ export function Button({ variant = 'secondary', size = 'md', icon: Icon, loading
     primary: 'bg-primary text-primary-foreground shadow-sm hover:brightness-105',
     secondary: 'border border-border bg-card text-foreground hover:bg-muted',
     ghost: 'text-muted-foreground hover:bg-muted hover:text-foreground',
-    danger: 'border border-[#efc7bc] bg-[#fff5f0] text-[#a34c3e] hover:bg-[#fbe5de]',
+    danger: 'border border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/20',
   }[variant];
   return <button type="button" {...props} disabled={props.disabled || loading}
     className={cn('btn-pop inline-flex items-center justify-center gap-1.5 rounded-xl font-extrabold disabled:cursor-not-allowed disabled:opacity-50', size === 'sm' ? 'px-3 py-1.5 text-[11px]' : 'px-4 py-2.5 text-xs', styles, className)}>
@@ -216,16 +216,16 @@ export function SaveBar({ dirty, saving, saved, onSave, onDiscard, testId = 'but
 type StatTone = 'green' | 'amber' | 'blue' | 'violet' | 'neutral';
 const STAT_TONE: Record<StatTone, string> = {
   green: 'bg-primary/12 text-primary',
-  amber: 'bg-[#fff0cb] text-[#94651c]',
-  blue: 'bg-[#dceaf1] text-[#2c6a8f]',
-  violet: 'bg-[#e6dcf5] text-[#6b3fa0]',
+  amber: 'bg-accent/20 text-accent-text',
+  blue: 'bg-info/15 text-info',
+  violet: 'bg-violet/15 text-violet',
   neutral: 'bg-muted text-muted-foreground',
 };
 
 /** A row of at-a-glance counters that sits under a page header. */
 export function StatTiles({ items, className }: { items: Array<{ label: string; value: ReactNode; icon: IconType; tone?: StatTone; hint?: string; testId?: string }>; className?: string }) {
   return <div className={cn('mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))]', className)}>
-    {items.map((it) => <div key={it.label} className="flex items-center gap-3 rounded-2xl border border-border bg-card p-3.5 shadow-[var(--shadow-xs)]" data-testid={it.testId}>
+    {items.map((it) => <div key={it.label} className="card-lift flex items-center gap-3 rounded-2xl border border-border bg-card p-3.5" data-testid={it.testId}>
       <span className={cn('grid size-10 shrink-0 place-items-center rounded-xl shadow-[0_2px_0_hsl(0_0%_0%/.08),inset_0_1px_0_hsl(0_0%_100%/.6)]', STAT_TONE[it.tone ?? 'green'])}><it.icon size={17} /></span>
       <div className="min-w-0"><div className="font-display text-2xl leading-none tabular-nums">{it.value}</div><div className="mt-1 truncate text-[10px] font-bold uppercase tracking-[.08em] text-muted-foreground" title={it.hint}>{it.label}</div></div>
     </div>)}

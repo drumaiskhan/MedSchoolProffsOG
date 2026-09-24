@@ -7,7 +7,7 @@ import { Link, Route, Switch, useLocation, useParams, useSearch, Router as Woute
 import {
   ArrowLeft, ArrowRight, BookOpen, Check, CheckCircle2, ChevronRight,
   CircleHelp, Clock3, CreditCard, FileText, Flame, FolderOpen,
-  LayoutDashboard, Library, LockKeyhole, LogOut, Menu, MoreHorizontal, Pencil, Plus,
+  LayoutDashboard, CalendarCheck, Library, LockKeyhole, LogOut, Menu, MoreHorizontal, Pencil, Plus,
   ReceiptText, Search, Settings, ShieldCheck, Sparkles, Stethoscope, Target, Trash2,
   TrendingUp, TrendingDown, Minus, Users, X, Zap, Bell, SlidersHorizontal, FileStack, NotebookPen, Bookmark,
   Flag, Trophy, MessageSquare, Landmark, Copy, QrCode, User as UserIcon, Mail, Phone, Hash,
@@ -133,6 +133,7 @@ export function ProgressBadge({ tone, label }: { tone: 'up' | 'down' | 'flat' | 
 // breakdown, every question with its outcome, and a dedicated "review
 // wrong answers" section at the end so mistakes are easy to find again.
 
+import { ResultInsights } from '@/components/study/ResultInsights';
 export function PracticeResultCard({ mcqs, answers, backHref, backLabel, onRestart }: { mcqs: Mcq[]; answers: Record<number, string | null>; backHref: string; backLabel: string; onRestart: () => void }) {
   const total = mcqs.length;
   const attempted = mcqs.filter((m) => answers[m.id] != null).length;
@@ -176,6 +177,7 @@ export function PracticeResultCard({ mcqs, answers, backHref, backLabel, onResta
       </div>
       <div className="mt-7 flex flex-wrap justify-center gap-2"><button onClick={onRestart} className="rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-practice-again"><RotateCcw size={13} className="mr-1.5 inline" /> Practice again</button><Link href={backHref} className="rounded-xl border border-border bg-card px-5 py-2.5 text-xs font-bold" data-testid="link-result-back">{backLabel}</Link></div>
     </div>
+    <ResultInsights mcqs={mcqs} answers={answers} />
 
     {/* Every question with its outcome, in original order. */}
     {total > 0 && <div className="mx-auto mt-8 max-w-3xl">
@@ -248,7 +250,7 @@ type NavItem = [string, string, typeof LayoutDashboard];
 
 export const navGroups: Array<{ label: string; items: NavItem[] }> = [
   { label: 'Study desk', items: [
-    ['/dashboard', 'Overview', LayoutDashboard], ['/progress', 'My progress', TrendingUp], ['/blocks', 'Blocks', BookOpen], ['/exams', 'Pre-Proffs Exams', ClipboardCheck], ['/ospe-osce', 'OSPE/OSCE', Stethoscope], ['/past-papers', 'Past papers', FileStack], ['/flashcards', 'Flashcards', Zap], ['/ai-visualizer', 'AI Visualizer', Wand2], ['/books', 'Books', Library],
+    ['/dashboard', 'Overview', LayoutDashboard], ['/study', 'Study plan', CalendarCheck], ['/progress', 'My progress', TrendingUp], ['/blocks', 'Blocks', BookOpen], ['/exams', 'Pre-Proffs Exams', ClipboardCheck], ['/ospe-osce', 'OSPE/OSCE', Stethoscope], ['/past-papers', 'Past papers', FileStack], ['/flashcards', 'Flashcards', Zap], ['/ai-visualizer', 'AI Visualizer', Wand2], ['/books', 'Books', Library],
   ] },
   { label: 'Your tools', items: [
     ['/notebook', 'My notebook', NotebookPen], ['/saved-sessions', 'Saved sessions', Bookmark], ['/flagged-mcqs', 'Flagged MCQs', Flag], ['/leaderboard', 'Leaderboard', Trophy], ['/challenge', 'Challenge a friend', Swords],

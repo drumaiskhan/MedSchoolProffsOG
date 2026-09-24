@@ -52,6 +52,7 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // invalidateQueries after a save) already set their own options, which
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
+import { ProfileHero, MembershipPass } from '@/components/profile/ProfileVisuals';
 import { Badge, ErrorState, Footer, IconField, SectionHeader, SkeletonPage, TeamSection, initials } from '@/lib/shared';
 import { queryClient } from '@/lib/query-client';
 
@@ -114,11 +115,11 @@ function Profile() {
     }
   };
 
-  return <div className="max-w-4xl"><SectionHeader eyebrow="Your account" title="Profile & access" description="Your details, password and membership status." /><div className="grid gap-5 md:grid-cols-[220px_1fr]"><div className="rounded-2xl border border-border bg-card p-6">
-      {avatarUrl ? <img src={avatarUrl} alt="" className="size-16 rounded-2xl border border-border object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} /> : <div className="grid size-16 place-items-center rounded-2xl bg-[#d7eee4] text-xl font-extrabold text-[#164b4b]">{initials(u.name)}</div>}
-      <h2 className="mt-5 font-display text-2xl text-foreground">{u.name}</h2><div className="mt-1 text-xs text-muted-foreground">{programYearLabel}</div><Badge tone={dashboard.data?.membershipStatus === 'ACTIVE' ? 'green' : 'amber'}>{dashboard.data?.membershipStatus === 'ACTIVE' ? 'Active member' : 'Pending activation'}</Badge></div>
+  return <div className="max-w-4xl"><SectionHeader eyebrow="Your account" title="Profile & access" description="Your details, password and membership status." />
+  <div className="grid gap-5 md:grid-cols-2"><ProfileHero name={u.name} programYear={programYearLabel} avatarUrl={avatarUrl} isActive={dashboard.data?.membershipStatus === 'ACTIVE'} streak={dashboard.data?.streak ?? 0} progress={dashboard.data?.progress ?? 0} days={daysRemaining} /><MembershipPass name={u.name} manageHref="/payments" /></div>
+  <div className="mt-5 grid gap-5">
     <div className="rounded-2xl border border-border bg-card p-6"><div className="flex items-center justify-between"><h3 className="font-bold">Personal details</h3><button onClick={() => { setEditing((v) => !v); setPendingPicture(null); setPictureError(null); }} className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:opacity-80" data-testid="button-edit-profile"><Pencil size={13} /> {editing ? 'Cancel' : 'Edit'}</button></div>
-      {editing ? <form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); update.mutate({ name: String(f.get('name')), phone: String(f.get('phone') || ''), ...(pendingPicture ? { profilePicturePath: pendingPicture.storagePath } : {}) }); }} className="mt-6 grid gap-4 sm:grid-cols-2">
+      {editing ? <form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); update.mutate({ name: String(f.get('name')), phone: String(f.get('phone') || ''), ...(pendingPicture ? { profilePicturePath: pendingPicture.storagePath } : {}) }); }} className="pf-edit mt-6 grid gap-4 sm:grid-cols-2">
         {/* Optional — a student can save name/phone changes without ever picking a photo. */}
         <label className="text-xs font-bold sm:col-span-2">Profile picture <span className="font-normal text-muted-foreground">(optional)</span>
           <div className="mt-2 flex items-center gap-3">
@@ -132,9 +133,8 @@ function Profile() {
         <label className="text-xs font-bold">Phone<div className="mt-2"><IconField icon={Phone} name="phone" defaultValue={(u as { phone?: string }).phone ?? ''} data-testid="input-edit-phone" /></div></label>
         <div className="flex items-end sm:col-span-2"><button disabled={update.isPending || pictureUploading} className="rounded-xl bg-primary px-5 py-2.5 text-xs font-extrabold text-primary-foreground disabled:opacity-50" data-testid="button-save-profile">{update.isPending ? 'Saving…' : 'Save changes'}</button></div>
       </form>
-      : <div className="mt-6 grid gap-5 sm:grid-cols-2">{[['Full name', u.name], ['Email address', u.email], ['Institution', u.institution || 'Not added'], ['Programme', u.programKind || u.program || 'Not added'], ['Academic year', u.academicYear || 'Not added']].map(([label, value]) => <div key={label}><div className="text-[10px] font-bold uppercase tracking-[.12em] text-muted-foreground">{label}</div><div className="mt-2 text-sm font-semibold">{value}</div></div>)}</div>}
+      : <div className="mt-6 grid gap-5 sm:grid-cols-2">{[['Full name', u.name], ['Email address', u.email], ['Institution', u.institution || 'Not added'], ['Programme', u.programKind || u.program || 'Not added'], ['Academic year', u.academicYear || 'Not added']].map(([label, value]) => <div key={label} className="pf-row"><div className="text-[10px] font-bold uppercase tracking-[.12em] text-muted-foreground">{label}</div><div className="mt-2 text-sm font-semibold">{value}</div></div>)}</div>}
     </div></div>
-  <div className="mt-5 rounded-2xl border border-border bg-card p-6"><div className="flex items-center gap-3"><div className="grid size-10 place-items-center rounded-xl bg-[#d7eee4] text-primary"><ShieldCheck size={19} /></div><div><h3 className="text-sm font-bold">Membership access</h3><p className="mt-1 text-xs text-muted-foreground">{daysRemaining !== null ? `Active · ${daysRemaining} days remaining` : 'No active membership yet'}</p></div><Link href="/payments" className="ml-auto rounded-xl border border-border px-3 py-2 text-xs font-bold hover:bg-muted" data-testid="link-manage-membership">Manage</Link></div></div>
   <TeamSection />
   <Footer variant="full" />
   </div>;

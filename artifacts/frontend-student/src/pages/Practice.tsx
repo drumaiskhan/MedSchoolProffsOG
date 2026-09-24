@@ -53,6 +53,7 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // invalidateQueries after a save) already set their own options, which
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
+import { buildStudySet, recordSession, relatedMcqs } from '@/lib/study';
 import { Badge, EmptyState, PracticeResultCard, Progress, SectionHeader, SkeletonPage, cn, difficultyTone, useFocusMode } from '@/lib/shared';
 import { queryClient, invalidatePracticeQueries } from '@/lib/query-client';
 
@@ -62,7 +63,12 @@ function Practice() {
   const topicId = Number(params.get('topic')) || undefined;
   const pastPaperId = Number(params.get('pastPaperId')) || undefined;
   const mcqId = Number(params.get('mcqId')) || undefined;
-  const q = useListMcqs(mcqId ? { mcqId } : pastPaperId ? { pastPaperId } : topicId ? { topicId } : undefined);
+  // v60: ?set=weak|mistakes&count=N builds a mixed set (weak topics / this device's mistakes).
+  const studySet = ['weak', 'mistakes', 'flagged'].includes(params.get('set') ?? '') ? (params.get('set') as string) : null;
+  const studyCount = [10, 20, 50].includes(Number(params.get('count'))) ? Number(params.get('count')) : 20;
+  const baseQ = useListMcqs(studySet ? { mcqId: -1 } : mcqId ? { mcqId } : pastPaperId ? { pastPaperId } : topicId ? { topicId } : undefined);
+  const setQ = useQuery({ queryKey: ['study-set', studySet, studyCount], queryFn: () => buildStudySet(studySet!, studyCount), enabled: !!studySet, staleTime: Infinity, gcTime: 0 });
+  const q = studySet ? setQ : baseQ;
   const [index, setIndex] = useState(0);
   // Every answer picked so far, keyed by mcq id — lets the student jump
   // freely between questions (via the number grid or Prev/Next) without
@@ -164,6 +170,7 @@ function Practice() {
   const finishSession = () => {
     const sessionAnswers = activeMcqs.map((m) => ({ mcqId: m.id, selectedAnswer: answers[m.id] ?? null })).filter((a) => a.selectedAnswer != null);
     const durationSeconds = Math.max(0, Math.round((Date.now() - sessionStartRef.current) / 1000));
+    try { recordSession(activeMcqs, answers, topicId); } catch { /* ledger is best-effort */ }
     if (sessionAnswers.length) submitAnswer.mutate({ topicId, answers: sessionAnswers, durationSeconds, mode: mode ?? undefined });
     setFinished(true);
   };
@@ -234,9 +241,13 @@ function Practice() {
     const topicLabel = mcqs[0]?.topic || mcqs[0]?.subject || mcqs[0]?.module || (pastPaperId ? 'Past paper' : 'Practice set');
     const finishClock = pendingMode === 'timed' ? new Date(Date.now() + effectiveMinutes * 60000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null;
     const startSession = () => {
-      const byCount = countMode === 'all' ? difficultyFilteredMcqs : difficultyFilteredMcqs.slice(0, Number(countMode));
-      const capped = trialCap !== null ? byCount.slice(0, trialCap) : byCount;
-      setOrderedMcqs(shuffleQuestions ? shuffleArray(capped) : capped);
+      // Bug fix: this used to take the FIRST N questions of the pool, so
+      // picking "10" always gave the same starting 10. When the chosen size
+      // (count cap and/or trial cap — see effectiveCount) is smaller than the
+      // pool, draw a fresh random sample each time instead. The sample keeps
+      // its syllabus order unless "Shuffle question order" is on.
+      const picked = randomSample(difficultyFilteredMcqs, effectiveCount);
+      setOrderedMcqs(shuffleQuestions ? shuffleArray(picked) : picked);
       setMode(pendingMode);
       setRemainingSeconds(pendingMode === 'timed' ? effectiveMinutes * 60 : 0);
       sessionStartRef.current = Date.now();
@@ -535,6 +546,8 @@ function Practice() {
           {askAi.isError && <p className="mt-2 text-[11px] font-semibold text-destructive">{askAi.error instanceof ApiRequestError ? askAi.error.message : 'Could not reach AI right now.'}</p>}
         </div>}
 
+        {answers[current.id] != null && (() => { const rel = relatedMcqs(current, activeMcqs, answers); return rel.length ? <div className="mt-4 rounded-2xl border border-border bg-card p-4 pf-edit" data-testid="related-mcqs"><div className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[.14em] text-muted-foreground"><Sparkles size={12} className="text-primary" /> Related questions in this set</div><div className="grid gap-2">{rel.map((m) => <button key={m.id} onClick={() => { const at = activeMcqs.findIndex((x) => x.id === m.id); if (at >= 0) { setIndex(at); setPanel(null); } }} className="line-clamp-2 rounded-xl bg-muted/60 px-3 py-2 text-left text-xs font-semibold transition-colors hover:bg-muted">{m.question}</button>)}</div></div> : null; })()}
+
 
         <div className="mt-5 flex items-center justify-between gap-3">
           <button disabled={index === 0} onClick={() => goTo(index - 1)} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-5 py-2.5 text-xs font-bold disabled:opacity-40" data-testid="button-prev-question"><ArrowLeft size={14} /> Prev</button>
@@ -545,6 +558,20 @@ function Practice() {
       <div className="order-2">{controlPanel}</div>
     </div>
   </div>;
+}
+
+// Picks `count` random items from `items` (a different subset every call) and
+// returns them in their ORIGINAL relative order, so the curated/syllabus order
+// survives unless the student also turns on "Shuffle question order". Returns
+// a copy of everything when count >= items.length. Never mutates its input.
+function randomSample<T>(items: T[], count: number): T[] {
+  if (count >= items.length) return [...items];
+  const idx = items.map((_, i) => i);
+  for (let i = idx.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [idx[i], idx[j]] = [idx[j], idx[i]];
+  }
+  return idx.slice(0, Math.max(0, count)).sort((a, b) => a - b).map((i) => items[i]);
 }
 
 // Fisher–Yates shuffle for the setup screen's "Shuffle question order"

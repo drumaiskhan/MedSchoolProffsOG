@@ -168,7 +168,7 @@ function AdminSettings() {
             className={cn('group relative flex shrink-0 items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-all lg:w-full', tab === t.id ? 'border-primary/40 bg-card shadow-sm' : 'border-transparent hover:bg-card/70')} data-testid={`tab-settings-${t.id}`}>
             <span className={cn('grid size-9 shrink-0 place-items-center rounded-lg transition-colors', tab === t.id ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground group-hover:text-foreground')}><t.icon size={16} /></span>
             <span className="min-w-0"><span className="block text-xs font-extrabold">{t.label}</span><span className="mt-0.5 hidden truncate text-[10px] text-muted-foreground lg:block">{t.blurb}</span></span>
-            {t.badge && <span className="absolute right-2.5 top-2.5 size-2 rounded-full bg-[#e5a952]" title="Needs attention" />}
+            {t.badge && <span className="absolute right-2.5 top-2.5 size-2 rounded-full bg-accent" title="Needs attention" />}
           </button>)}
         </div>
       </nav>
@@ -300,10 +300,10 @@ function AdminSettings() {
                     const Icon = FEATURE_ICON[o.key] ?? Sparkles;
                     const on = trialFeatures.includes(o.key);
                     return <button key={o.key} type="button" onClick={() => toggleTrialFeature(o.key)} aria-pressed={on} data-testid={`toggle-trial-feature-${o.key}`}
-                      className={cn('flex items-start gap-3 rounded-xl border p-3.5 text-left transition-all', on ? 'border-[#d9982f] bg-white shadow-sm ring-2 ring-[#e5a952]/25' : 'border-border bg-background/60 hover:border-[#e5a952]/60')}>
-                      <span className={cn('grid size-9 shrink-0 place-items-center rounded-lg', on ? 'bg-[#e5a952] text-[#183844]' : 'bg-muted text-muted-foreground')}><Icon size={16} /></span>
+                      className={cn('flex items-start gap-3 rounded-xl border p-3.5 text-left transition-all', on ? 'border-accent bg-card shadow-sm ring-2 ring-accent/25' : 'border-border bg-background/60 hover:border-accent/60')}>
+                      <span className={cn('grid size-9 shrink-0 place-items-center rounded-lg', on ? 'bg-accent text-accent-foreground' : 'bg-muted text-muted-foreground')}><Icon size={16} /></span>
                       <span className="min-w-0 flex-1"><span className="flex items-center gap-2 text-xs font-extrabold">{o.label}{!o.defaultOn && <StatusPill tone="red">Paid content</StatusPill>}</span><span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">{o.description}</span></span>
-                      <span className={cn('mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border text-[10px] font-black', on ? 'border-[#d9982f] bg-[#d9982f] text-white' : 'border-border text-transparent')}>✓</span>
+                      <span className={cn('mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border text-[10px] font-black', on ? 'border-accent bg-accent text-accent-foreground' : 'border-border text-transparent')}>✓</span>
                     </button>;
                   })}
                 </div>
@@ -408,7 +408,7 @@ function AdminSettings() {
                 const key = slotKey(n);
                 const marked = values[key] === CLEAR_SECRET;
                 const result = emailTests[String(n)];
-                return <div key={n} className={cn('rounded-xl border p-4', marked ? 'border-[#efc7bc] bg-[#fff5f0]' : slotFilled(n) ? 'border-primary/30 bg-background/60' : 'border-dashed border-border')} data-testid={`brevo-slot-${n}`}>
+                return <div key={n} className={cn('rounded-xl border p-4', marked ? 'border-destructive/30 bg-destructive/10' : slotFilled(n) ? 'border-primary/30 bg-background/60' : 'border-dashed border-border')} data-testid={`brevo-slot-${n}`}>
                   <div className="mb-3 flex flex-wrap items-center gap-2.5">
                     <span className={cn('grid size-8 place-items-center rounded-lg text-[11px] font-black', slotFilled(n) && !marked ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground')}>{n}</span>
                     <div className="text-xs font-extrabold">{n === 1 ? 'Primary account' : `Backup account ${n - 1}`}</div>
@@ -425,7 +425,7 @@ function AdminSettings() {
                     <Field label="API key"><SecretInput value={values[key] || ''} onChange={(v) => set(key, v)} isSet={slotSaved(n)} masked={values[`${key}_MASKED`]} placeholder="xkeysib-..." testId={n === 1 ? 'input-brevo-api-key' : `input-brevo-api-key-${n}`} /></Field>
                     {n > 1 && <Field label={<>Sender email <span className="font-normal text-muted-foreground">(optional)</span></>} hint={<>Only if this account&apos;s verified sender differs from the “From” email above.</>}><TextInput type="email" value={values[slotSenderKey(n)] || ''} onChange={(e) => set(slotSenderKey(n), e.target.value)} placeholder="Uses the “From” email" data-testid={`input-brevo-sender-${n}`} /></Field>}
                   </div>}
-                  {result && !result.ok && <p className="mt-3 rounded-lg bg-[#fff5f0] p-3 text-[11px] leading-4 text-[#9e4c39]" data-testid={`text-brevo-slot-error-${n}`}>{result.error}</p>}
+                  {result && !result.ok && <p className="mt-3 rounded-lg bg-destructive/10 p-3 text-[11px] leading-4 text-destructive" data-testid={`text-brevo-slot-error-${n}`}>{result.error}</p>}
                 </div>;
               })}
             </div>
@@ -457,7 +457,7 @@ function AdminSettings() {
               {emailTests.all && <StatusPill tone={emailTests.all.ok ? 'green' : 'red'}>{emailTests.all.ok ? 'Sent' : 'Failed'}</StatusPill>}
             </div>
             {dirty && <p className="mt-2 text-[11px] text-muted-foreground">You have unsaved changes — save them before testing, since tests use what's saved.</p>}
-            {emailTests.all && !emailTests.all.ok && <p className="mt-3 rounded-xl bg-[#fff5f0] p-3 text-[11px] leading-4 text-[#9e4c39]" data-testid="text-email-test-error">{emailTests.all.error}</p>}
+            {emailTests.all && !emailTests.all.ok && <p className="mt-3 rounded-xl bg-destructive/10 p-3 text-[11px] leading-4 text-destructive" data-testid="text-email-test-error">{emailTests.all.error}</p>}
           </Panel>
         </>}
 
@@ -473,7 +473,7 @@ function AdminSettings() {
             {values.CLOUDINARY_CONFIGURED === 'true' && <StatusPill tone="green">Saved</StatusPill>}
             {testStorage.data && <StatusPill tone={testStorage.data.cloudinary.ok ? 'green' : 'red'}>{testStorage.data.cloudinary.ok ? 'Connected' : 'Not working'}</StatusPill>}
           </>} description="Used for large files — book PDFs, resource files, and anything over ~5MB regardless of type.">
-            {testStorage.data && !testStorage.data.cloudinary.ok && <p className="mb-4 rounded-xl bg-[#fff5f0] p-3 text-[11px] text-[#9e4c39]" data-testid="text-cloudinary-test-error">{testStorage.data.cloudinary.error}</p>}
+            {testStorage.data && !testStorage.data.cloudinary.ok && <p className="mb-4 rounded-xl bg-destructive/10 p-3 text-[11px] text-destructive" data-testid="text-cloudinary-test-error">{testStorage.data.cloudinary.error}</p>}
             <div className={inputRow}>
               <Field label="Cloud name"><TextInput value={values.CLOUDINARY_CLOUD_NAME || ''} onChange={(e) => set('CLOUDINARY_CLOUD_NAME', e.target.value)} placeholder="my-cloud-name" data-testid="input-cloudinary-cloud-name" /></Field>
               <Field label="API key"><TextInput value={values.CLOUDINARY_API_KEY || ''} onChange={(e) => set('CLOUDINARY_API_KEY', e.target.value)} placeholder="123456789012345" data-testid="input-cloudinary-api-key" /></Field>
@@ -486,7 +486,7 @@ function AdminSettings() {
             {values.CLOUDINARY_BACKUP_CONFIGURED === 'true' && <StatusPill tone="green">Saved</StatusPill>}
             {testStorage.data && values.CLOUDINARY_BACKUP_CONFIGURED === 'true' && <StatusPill tone={testStorage.data.cloudinaryBackup.ok ? 'green' : 'red'}>{testStorage.data.cloudinaryBackup.ok ? 'Connected' : 'Not working'}</StatusPill>}
           </>} description="A second account, tried automatically whenever the primary's upload fails — plan quota full, bad key, outage. Uploads still try the primary first. Existing files aren't moved; re-upload anything affected by a past storage issue.">
-            {testStorage.data && values.CLOUDINARY_BACKUP_CONFIGURED === 'true' && !testStorage.data.cloudinaryBackup.ok && <p className="mb-4 rounded-xl bg-[#fff5f0] p-3 text-[11px] text-[#9e4c39]" data-testid="text-cloudinary-backup-test-error">{testStorage.data.cloudinaryBackup.error}</p>}
+            {testStorage.data && values.CLOUDINARY_BACKUP_CONFIGURED === 'true' && !testStorage.data.cloudinaryBackup.ok && <p className="mb-4 rounded-xl bg-destructive/10 p-3 text-[11px] text-destructive" data-testid="text-cloudinary-backup-test-error">{testStorage.data.cloudinaryBackup.error}</p>}
             <div className={inputRow}>
               <Field label="Cloud name"><TextInput value={values.CLOUDINARY_CLOUD_NAME_2 || ''} onChange={(e) => set('CLOUDINARY_CLOUD_NAME_2', e.target.value)} placeholder="my-backup-cloud-name" data-testid="input-cloudinary-backup-cloud-name" /></Field>
               <Field label="API key"><TextInput value={values.CLOUDINARY_API_KEY_2 || ''} onChange={(e) => set('CLOUDINARY_API_KEY_2', e.target.value)} placeholder="123456789012345" data-testid="input-cloudinary-backup-api-key" /></Field>

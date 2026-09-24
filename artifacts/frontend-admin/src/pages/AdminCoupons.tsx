@@ -75,7 +75,7 @@ function AdminCoupons() {
           <td className="px-5 py-4">{c.discountType === 'percent' ? `${c.discountValue}%` : `Rs. ${c.discountValue}`} off</td>
           <td className="px-5 py-4">{c.usedCount}{c.maxUses != null ? ` / ${c.maxUses}` : ''}</td>
           <td className="px-5 py-4 text-muted-foreground">{c.expiresAt ? new Date(c.expiresAt).toLocaleDateString() : 'Never'}</td>
-          <td className="px-5 py-4"><button onClick={() => toggleActive.mutate({ id: c.id, active: !c.active })} className={cn('rounded-full px-2 py-0.5 text-[10px] font-extrabold', c.active ? 'bg-[#d7eee4] text-[#164b4b]' : 'bg-muted text-muted-foreground')} data-testid={`button-toggle-coupon-${c.id}`}>{c.active ? 'Active' : 'Disabled'}</button></td>
+          <td className="px-5 py-4"><button onClick={() => toggleActive.mutate({ id: c.id, active: !c.active })} className={cn('rounded-full px-2 py-0.5 text-[10px] font-extrabold', c.active ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground')} data-testid={`button-toggle-coupon-${c.id}`}>{c.active ? 'Active' : 'Disabled'}</button></td>
           <td className="px-5 py-4"><button onClick={() => setDeletingId(c.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Delete coupon" data-testid={`button-delete-coupon-${c.id}`}><Trash2 size={14} /></button></td>
         </tr>)}</tbody>
       </table>

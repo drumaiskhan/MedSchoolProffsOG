@@ -125,7 +125,7 @@ function AdminTopicsPage() {
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5">
                   <MoveButtons canUp={!filtering && i > 0 && !reorderTopics.isPending} canDown={!filtering && i >= 0 && i < all.length - 1 && !reorderTopics.isPending} onUp={() => move(subject.id, t.id, -1)} onDown={() => move(subject.id, t.id, 1)} testIdSuffix={`topic-${t.id}`} />
                   <span className="min-w-[8rem] flex-1 text-xs font-bold">{t.name}</span>
-                  <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${t.questionCount ? 'bg-[#d7eee4] text-[#287058]' : 'bg-muted text-muted-foreground'}`}>{t.questionCount} MCQ{t.questionCount === 1 ? '' : 's'}</span>
+                  <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${t.questionCount ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'}`}>{t.questionCount} MCQ{t.questionCount === 1 ? '' : 's'}</span>
                   <button onClick={() => { setEditingId(t.id); setEditName(t.name); }} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" aria-label="Rename topic" data-testid={`button-edit-topic-${t.id}`}><Pencil size={14} /></button>
                   <button onClick={() => setDeletingId(t.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Delete topic" data-testid={`button-delete-topic-${t.id}`}><Trash2 size={14} /></button>
                 </div>

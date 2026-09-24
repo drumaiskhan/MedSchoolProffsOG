@@ -52,6 +52,7 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // invalidateQueries after a save) already set their own options, which
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
+import { ReviewTabs } from '@/components/study/ReviewTabs';
 import { EmptyState, NotebookCard, SectionHeader, SkeletonPage, cn } from '@/lib/shared';
 import { queryClient } from '@/lib/query-client';
 
@@ -71,6 +72,7 @@ function Notebook() {
   }).sort((a, b) => sortOrder === 'newest' ? b.updatedAt.localeCompare(a.updatedAt) : a.updatedAt.localeCompare(b.updatedAt));
 
   return <div><SectionHeader eyebrow="Your tools" title="My Notebook" description="Your personal notes on questions — private to you." />
+    <ReviewTabs />
     <form onSubmit={(e) => { e.preventDefault(); if (content.trim()) create.mutate({ title: title.trim() || undefined, content: content.trim() }); }} className="rounded-2xl border border-border bg-card p-4"><input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title (optional)" className="h-10 w-full rounded-xl border border-border bg-background px-3 text-sm" data-testid="input-note-title" /><textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder="Write a note…" className="mt-2 min-h-24 w-full rounded-xl border border-border bg-background p-3 text-sm" data-testid="input-note-content" /><button disabled={create.isPending} className="mt-2 rounded-xl bg-primary px-4 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50" data-testid="button-add-note">{create.isPending ? 'Saving…' : 'Add note'}</button></form>
 
     {!!entries.data?.length && <div className="mt-4 flex flex-wrap items-center gap-2"><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search notes…" className="h-9 min-w-0 flex-1 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-search-notes" /><div className="flex overflow-hidden rounded-xl border border-border text-[11px] font-bold"><button onClick={() => setSortOrder('newest')} className={cn('px-3 py-2', sortOrder === 'newest' ? 'bg-primary text-primary-foreground' : 'bg-card')} data-testid="button-sort-newest">Newest</button><button onClick={() => setSortOrder('oldest')} className={cn('px-3 py-2', sortOrder === 'oldest' ? 'bg-primary text-primary-foreground' : 'bg-card')} data-testid="button-sort-oldest">Oldest</button></div></div>}

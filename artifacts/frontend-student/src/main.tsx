@@ -5,6 +5,7 @@ import App from './App';
 import { ErrorBoundary } from '@/components/error-boundary';
 
 import './index.css';
+import './profile3d.css';
 import { initFx } from '@/lib/fx';
 
 // v43: stamps <html data-fx="full|lite"> before first paint (see lib/fx.ts).

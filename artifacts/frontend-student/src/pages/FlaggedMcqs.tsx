@@ -53,10 +53,13 @@ import { ExplanationPanel } from '@/components/visualizer/ExplanationPanel';
 // override these defaults per-query — this only changes the fallback for
 // queries that didn't specify anything.
 import { EmptyState, SectionHeader, cn } from '@/lib/shared';
+import { ReviewTabs } from '@/components/study/ReviewTabs';
 import { queryClient } from '@/lib/query-client';
 
 function FlaggedMcqs() {
   const [, navigate] = useLocation();
+  const [filter, setFilter] = useState<'all' | 'open' | 'resolved'>('all');
+  const [term, setTerm] = useState('');
   const flags = useQuery({ queryKey: ['flagged-mcqs'], queryFn: flaggedMcqsApi.list });
   // Bug fix: "Remove" used to call the mutation and just hope — no toast on
   // success, and the old backend route silently returned {ok:true} even
@@ -70,8 +73,14 @@ function FlaggedMcqs() {
   });
   return <div>
     <SectionHeader eyebrow="Your tools" title="Flagged MCQs" description="Questions you bookmarked or flagged for review." />
+    <ReviewTabs />
+    {!!flags.data?.length && <div className="mb-4 flex flex-wrap items-center gap-2" data-testid="flag-toolbar">
+      <div className="flex overflow-hidden rounded-xl border border-border bg-card text-xs font-extrabold">{(['all', 'open', 'resolved'] as const).map((f) => <button key={f} onClick={() => setFilter(f)} className={cn('px-3 py-2 capitalize transition-colors', filter === f ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}>{f}{f !== 'all' && ` · ${flags.data!.filter((x) => x.status === f).length}`}</button>)}</div>
+      <input value={term} onChange={(e) => setTerm(e.target.value)} placeholder="Search flagged questions…" className="h-9 min-w-0 flex-1 rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-search-flags" />
+      {flags.data.some((f) => f.status === 'open' && !f.mcqDeleted) && <button onClick={() => navigate('/practice?set=flagged&count=20')} className="rounded-xl bg-primary px-3.5 py-2 text-xs font-extrabold text-primary-foreground transition-transform active:scale-95" data-testid="button-practice-flagged">Practice flagged</button>}
+    </div>}
     <div className="space-y-3">
-      {(flags.data || []).map((flag: FlaggedMcq) => <div key={flag.id} className="rounded-2xl border border-border bg-card p-4" data-testid={`card-flag-${flag.id}`}>
+      {(flags.data || []).filter((f) => (filter === 'all' || f.status === filter) && (!term.trim() || `${f.question ?? ''} ${f.path ?? ''} ${f.reason}`.toLowerCase().includes(term.trim().toLowerCase()))).map((flag: FlaggedMcq) => <div key={flag.id} className="rounded-2xl border border-border bg-card p-4 transition-all hover:-translate-y-0.5 hover:shadow-md pf-edit" data-testid={`card-flag-${flag.id}`}>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             {/* Block > Module > Subject > Topic breadcrumb — null when the

@@ -125,6 +125,11 @@ export interface StudentDetail {
   currentStreak: number; longestStreak: number; lastLoginAt: string | null; joinedAt: string;
   payments: PaymentRow[]; activeMembership: { expiresAt: string; isTrial: boolean } | null;
 }
+export interface StudentChallengeRow {
+  id: number; role: 'challenger' | 'opponent'; opponent: { id: number; name: string } | null;
+  totalQuestions: number; status: 'PENDING' | 'DECLINED' | 'COMPLETED' | 'EXPIRED'; createdAt: string;
+  myScorePercent: number | null; opponentScorePercent: number | null; iHavePlayed: boolean;
+}
 export interface PaymentRow { id: number; studentName: string; institution: string; program: string; academicYear: string; batch: string; rollNumber: string; planName: string; amount: number; currency: string; method: string; reference: string; paymentDate: string; proofPath: string | null; status: string; submittedAt: string }
 export interface StudentDevice { id: number; label: string; ip: string | null; signedInAt: string; lastSeenAt: string }
 // limit = what applies now (0 = unlimited); override = this student's own setting (null = follows the platform default).
@@ -291,13 +296,13 @@ export interface OspeBlock {
 }
 export interface OspeModule extends OspeBlock { blockId: number | null; blockName: string | null }
 export interface OspeLearningMaterial {
-  id: number; moduleId: number | null; examType: OspeExamType; title: string; description: string; bodyText: string;
+  id: number; moduleId: number | null; blockId: number | null; examType: OspeExamType; title: string; description: string; bodyText: string;
   imagePath: string | null; attachmentPath: string | null; externalUrl: string | null; active: boolean; archived: boolean;
   displayOrder: number; programTargetKind: string | null; yearTargetNumber: number | null; targetingLabel: string;
 }
 export interface OspeLabelPoint { id: string; x: number; y: number; label: string; marks?: number | null }
 export interface OspeStation {
-  id: number; moduleId: number | null; examType: OspeExamType; title: string; instructions: string; imagePath: string | null;
+  id: number; moduleId: number | null; blockId: number | null; examType: OspeExamType; title: string; instructions: string; imagePath: string | null;
   attachmentPath: string | null; answerType: 'MCQ' | 'WRITTEN' | 'LABELING'; options: string[] | null; correctAnswer: string | null;
   modelAnswer: string | null; labelPoints: OspeLabelPoint[] | null; marks: number; timeLimitSeconds: number | null; active: boolean; archived: boolean;
   displayOrder: number; programTargetKind: string | null; yearTargetNumber: number | null; targetingLabel: string;
@@ -430,6 +435,7 @@ export const examsApi = {
 
 export const studentsAdminApi = {
   detail: (id: number) => request<StudentDetail>(`/students/${id}`),
+  challenges: (id: number) => request<{ sent: StudentChallengeRow[]; received: StudentChallengeRow[] }>(`/students/${id}/challenges`),
   update: (id: number, body: Partial<{ name: string; phone: string; rollNumber: string }>) => request<{ ok: true }>(`/students/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   updateStatus: (id: number, status: string, emailVerified?: boolean, message?: string) => request<{ ok: true; status: string; emailVerified: boolean; statusMessage: string | null }>(`/students/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status, ...(emailVerified !== undefined ? { emailVerified } : {}), ...(message !== undefined ? { message } : {}) }) }),
   verifyEmail: (id: number) => request<{ ok: true; status: string; emailVerified: boolean }>(`/students/${id}/verify-email`, { method: 'POST' }),
@@ -471,6 +477,7 @@ export interface AdminMcqRow {
 export const mcqAdminApi = {
   remove: (id: number) => request<{ ok: true }>(`/mcqs/${id}`, { method: 'DELETE' }),
   list: () => request<AdminMcqRow[]>('/admin/mcqs'),
+  publish: (id: number) => request<AdminMcqRow>(`/mcqs/${id}/publish`, { method: 'POST' }),
   update: (id: number, body: Partial<{ question: string; options: string[]; correctAnswer: string | null; explanation: string | null; optionExplanations: (string | null)[] | null; reference: string | null; difficulty: string; status: string; moduleId: number; subjectId: number; topicId: number }>) =>
     request<AdminMcqRow>(`/mcqs/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   bulkRemove: (body: { ids: number[] } | { all: true; filters?: { search?: string; moduleId?: number; subjectId?: number; topicId?: number; difficulty?: string } }) =>

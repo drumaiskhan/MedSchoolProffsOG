@@ -165,7 +165,7 @@ function AdminBooks() {
           {b.coverImagePath && <img src={resolveUploadUrl(b.coverImagePath) ?? undefined} alt="" loading="lazy" decoding="async" className="mb-3 h-32 w-full rounded-lg object-cover" />}
           <div className="flex items-start justify-between gap-2">
             <div><p className="text-sm font-bold leading-5">{b.title}</p>{b.author && <p className="mt-1 text-xs text-muted-foreground">{b.author}</p>}</div>
-            <span className={cn('shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold', b.isFree ? 'bg-[#d7eee4] text-[#164b4b]' : 'bg-muted text-muted-foreground')} data-testid={`text-book-tier-${b.id}`}>{b.isFree ? 'Free' : b.price != null ? `${b.currency ?? ''} ${b.price}`.trim() : 'Paid'}</span>
+            <span className={cn('shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold', b.isFree ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground')} data-testid={`text-book-tier-${b.id}`}>{b.isFree ? 'Free' : b.price != null ? `${b.currency ?? ''} ${b.price}`.trim() : 'Paid'}</span>
           </div>
           {editingId === b.id ? <BookEditForm book={b} onSave={(body) => update.mutate({ id: b.id, body })} onCancel={() => setEditingId(null)} pending={update.isPending} /> : <div className="mt-3 flex items-center justify-between">
             {resolveUploadUrl(b.storagePath) ? <a href={resolveUploadUrl(b.storagePath)!} target="_blank" rel="noreferrer" className="text-xs font-bold text-primary" data-testid={`link-open-book-${b.id}`}>Open PDF <ArrowRight size={12} className="ml-1 inline" /></a> : <span className="text-[11px] font-bold text-destructive" data-testid={`text-book-unavailable-${b.id}`}>Link broken — try "Fix broken links"</span>}

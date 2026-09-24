@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { and, desc, eq, ilike, inArray, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, usersTable, mcqsTable, modulesTable, programsTable, academicYearsTable, challengesTable, challengeAttemptsTable, notificationsTable } from "@workspace/db";
-import { requireAuth, requireMembershipFor } from "../middlewares/auth";
+import { requireAdmin, requireAuth, requireMembershipFor } from "../middlewares/auth";
 import { sendEmail, challengeInviteEmailHtml, challengeResultEmailHtml } from "../lib/email";
 import { getPublicAppUrl } from "../lib/publicAppUrl";
 import { getStudentTargeting, type StudentTargeting } from "../lib/contentVisibility";
@@ -185,6 +185,20 @@ async function summarize(rows: (typeof challengesTable.$inferSelect)[], myId: nu
     };
   });
 }
+
+// Admin Student 360° — the same summary shape as /challenges/mine, but for
+// any one student, so the admin achievement catalog can score challenge
+// badges without a new data model.
+router.get("/students/:id/challenges", requireAdmin, async (req, res): Promise<void> => {
+  const studentId = Number(req.params.id);
+  if (!Number.isInteger(studentId) || studentId <= 0) { res.status(400).json({ error: "Invalid student id" }); return; }
+  const rows = await db.select().from(challengesTable).where(or(eq(challengesTable.challengerId, studentId), eq(challengesTable.opponentId, studentId))).orderBy(desc(challengesTable.createdAt));
+  const summarized = await summarize(rows, studentId);
+  res.json({
+    sent: summarized.filter((c) => c.role === "challenger"),
+    received: summarized.filter((c) => c.role === "opponent"),
+  });
+});
 
 router.get("/challenges/mine", requireAuth, async (req, res): Promise<void> => {
   const rows = await db.select().from(challengesTable).where(or(eq(challengesTable.challengerId, req.user!.id), eq(challengesTable.opponentId, req.user!.id))).orderBy(desc(challengesTable.createdAt));

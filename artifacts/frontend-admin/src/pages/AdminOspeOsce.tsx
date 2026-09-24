@@ -145,7 +145,7 @@ function BlocksModulesTab({ examType }: { examType: OspeExamType }) {
     <div className="flex items-center justify-between gap-2">
       <div><p className="text-xs font-bold">{b.name}</p>{b.subtitle && <p className="text-[11px] text-muted-foreground">{b.subtitle}</p>}<p className="mt-0.5 text-[10px] font-semibold text-primary">{b.targetingLabel}</p></div>
       <div className="flex items-center gap-1">
-        <button onClick={() => updateBlock.mutate({ id: b.id, body: { active: !b.active } })} className={cn('rounded-lg px-2 py-1 text-[10px] font-extrabold', b.active ? 'bg-[#d7eee4] text-[#164b4b]' : 'bg-muted text-muted-foreground')} data-testid={`button-toggle-block-${b.id}`}>{b.active ? 'Active' : 'Hidden'}</button>
+        <button onClick={() => updateBlock.mutate({ id: b.id, body: { active: !b.active } })} className={cn('rounded-lg px-2 py-1 text-[10px] font-extrabold', b.active ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground')} data-testid={`button-toggle-block-${b.id}`}>{b.active ? 'Active' : 'Hidden'}</button>
         <button onClick={() => setEditingBlock(editingBlock === b.id ? null : b.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" data-testid={`button-edit-block-${b.id}`}><Pencil size={13} /></button>
         <button onClick={() => setDeletingBlock(b.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-block-${b.id}`}><Trash2 size={13} /></button>
       </div>
@@ -157,7 +157,7 @@ function BlocksModulesTab({ examType }: { examType: OspeExamType }) {
     <div className="flex items-center justify-between gap-2">
       <div><p className="text-xs font-bold">{m.name}</p><p className="text-[11px] text-muted-foreground">{m.blockName || 'Unassigned'}{m.subtitle ? ` · ${m.subtitle}` : ''}</p><p className="mt-0.5 text-[10px] font-semibold text-primary">{m.targetingLabel}</p></div>
       <div className="flex items-center gap-1">
-        <button onClick={() => updateModule.mutate({ id: m.id, body: { active: !m.active } })} className={cn('rounded-lg px-2 py-1 text-[10px] font-extrabold', m.active ? 'bg-[#d7eee4] text-[#164b4b]' : 'bg-muted text-muted-foreground')} data-testid={`button-toggle-module-${m.id}`}>{m.active ? 'Active' : 'Hidden'}</button>
+        <button onClick={() => updateModule.mutate({ id: m.id, body: { active: !m.active } })} className={cn('rounded-lg px-2 py-1 text-[10px] font-extrabold', m.active ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground')} data-testid={`button-toggle-module-${m.id}`}>{m.active ? 'Active' : 'Hidden'}</button>
         <button onClick={() => setEditingModule(editingModule === m.id ? null : m.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" data-testid={`button-edit-module-${m.id}`}><Pencil size={13} /></button>
         <button onClick={() => setDeletingModule(m.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-module-${m.id}`}><Trash2 size={13} /></button>
       </div>
@@ -193,11 +193,42 @@ function BlocksModulesTab({ examType }: { examType: OspeExamType }) {
 // Learning materials
 // ---------------------------------------------------------------------------
 
-function LearningMaterialForm({ initial, onSave, onCancel, pending, examType, modules }: { initial?: OspeLearningMaterial; onSave: (body: Partial<OspeLearningMaterial>) => void; onCancel: () => void; pending: boolean; examType: OspeExamType; modules: OspeModule[] }) {
+// Block + (optional) Module picker shared by the station and learning-material
+// forms. A block is enough on its own — modules are an optional finer layer.
+// Picking a module that belongs to a block also sets that block; changing the
+// block clears a module that belongs to a different one.
+function BlockModulePicker({ blocks, modules, blockId, moduleId, onChange, idPrefix }: {
+  blocks: OspeBlock[]; modules: OspeModule[]; blockId: number | null; moduleId: number | null;
+  onChange: (next: { blockId: number | null; moduleId: number | null }) => void; idPrefix: string;
+}) {
+  const visibleModules = blockId ? modules.filter((m) => m.blockId === blockId || m.id === moduleId) : modules;
+  const selectCls = 'h-10 w-full rounded-xl border border-border bg-card px-3 text-xs';
+  return <div className="grid gap-2 sm:grid-cols-2">
+    <select value={blockId ?? ''} onChange={(e) => {
+      const nextBlock = e.target.value ? Number(e.target.value) : null;
+      const mod = modules.find((m) => m.id === moduleId);
+      onChange({ blockId: nextBlock, moduleId: mod && nextBlock && mod.blockId !== nextBlock ? null : moduleId });
+    }} className={selectCls} data-testid={`select-${idPrefix}-block`}>
+      <option value="">No block (Unassigned)</option>
+      {blocks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+    </select>
+    <select value={moduleId ?? ''} onChange={(e) => {
+      const nextModule = e.target.value ? Number(e.target.value) : null;
+      const mod = modules.find((m) => m.id === nextModule);
+      onChange({ blockId: mod?.blockId ?? blockId, moduleId: nextModule });
+    }} className={selectCls} data-testid={`select-${idPrefix}-module`}>
+      <option value="">No module (optional)</option>
+      {visibleModules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+    </select>
+  </div>;
+}
+
+function LearningMaterialForm({ initial, onSave, onCancel, pending, examType, modules, blocks }: { initial?: OspeLearningMaterial; onSave: (body: Partial<OspeLearningMaterial>) => void; onCancel: () => void; pending: boolean; examType: OspeExamType; modules: OspeModule[]; blocks: OspeBlock[] }) {
   const [title, setTitle] = useState(initial?.title || '');
   const [description, setDescription] = useState(initial?.description || '');
   const [bodyText, setBodyText] = useState(initial?.bodyText || '');
   const [moduleId, setModuleId] = useState<number | null>(initial?.moduleId ?? null);
+  const [blockId, setBlockId] = useState<number | null>(initial?.blockId ?? null);
   const [imagePath, setImagePath] = useState<string | null>(initial?.imagePath ?? null);
   const [attachmentPath, setAttachmentPath] = useState<string | null>(initial?.attachmentPath ?? null);
   const [externalUrl, setExternalUrl] = useState(initial?.externalUrl || '');
@@ -207,10 +238,7 @@ function LearningMaterialForm({ initial, onSave, onCancel, pending, examType, mo
     <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" className="h-10 w-full rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-material-title" />
     <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Short description (optional)" className="h-10 w-full rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-material-description" />
     <textarea value={bodyText} onChange={(e) => setBodyText(e.target.value)} placeholder="Full text / notes students will read (optional)" rows={4} className="w-full rounded-xl border border-border bg-card p-3 text-xs" data-testid="textarea-material-body" />
-    <select value={moduleId ?? ''} onChange={(e) => setModuleId(e.target.value ? Number(e.target.value) : null)} className="h-10 w-full rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-material-module">
-      <option value="">No module (Unassigned)</option>
-      {modules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-    </select>
+    <BlockModulePicker blocks={blocks} modules={modules} blockId={blockId} moduleId={moduleId} onChange={(n) => { setBlockId(n.blockId); setModuleId(n.moduleId); }} idPrefix="material" />
     <div className="grid gap-2 sm:grid-cols-2">
       <FileField label="Photo" icon={ImageIcon} accept="image/*" path={imagePath} onUpload={setImagePath} testId="input-material-image" />
       <FileField label="File (PDF, doc, whatever)" icon={Paperclip} path={attachmentPath} onUpload={setAttachmentPath} testId="input-material-attachment" />
@@ -220,7 +248,7 @@ function LearningMaterialForm({ initial, onSave, onCancel, pending, examType, mo
     <TargetingSelect programTargetKind={kind} yearTargetNumber={year} onChange={(k, y) => { setKind(k); setYear(y); }} idPrefix="material" />
     <div className="flex justify-end gap-2">
       <button onClick={onCancel} className="rounded-lg px-3 py-1.5 text-[11px] font-bold text-muted-foreground hover:bg-muted" data-testid="button-cancel-material">Cancel</button>
-      <button onClick={() => onSave({ title, description, bodyText, moduleId, examType, imagePath, attachmentPath, externalUrl: externalUrl || null, programTargetKind: kind, yearTargetNumber: year })} disabled={pending || !title.trim()} className="rounded-lg bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground disabled:opacity-50" data-testid="button-save-material">{pending ? 'Saving…' : 'Save'}</button>
+      <button onClick={() => onSave({ title, description, bodyText, moduleId, blockId, examType, imagePath, attachmentPath, externalUrl: externalUrl || null, programTargetKind: kind, yearTargetNumber: year })} disabled={pending || !title.trim()} className="rounded-lg bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground disabled:opacity-50" data-testid="button-save-material">{pending ? 'Saving…' : 'Save'}</button>
     </div>
   </div>;
 }
@@ -228,6 +256,7 @@ function LearningMaterialForm({ initial, onSave, onCancel, pending, examType, mo
 function LearningMaterialsTab({ examType }: { examType: OspeExamType }) {
   const materialsQ = useQuery({ queryKey: ['ospe-admin-materials', examType], queryFn: () => ospeAdminApi.learningMaterials.list(examType) });
   const modulesQ = useQuery({ queryKey: ['ospe-admin-modules', examType], queryFn: () => ospeAdminApi.modules.list(examType) });
+  const blocksQ = useQuery({ queryKey: ['ospe-admin-blocks', examType], queryFn: () => ospeAdminApi.blocks.list(examType) });
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['ospe-admin-materials'] });
   const create = useMutation({ mutationFn: ospeAdminApi.learningMaterials.create, onSuccess: () => { invalidate(); setAdding(false); } });
   const update = useMutation({ mutationFn: ({ id, body }: { id: number; body: Partial<OspeLearningMaterial> }) => ospeAdminApi.learningMaterials.update(id, body), onSuccess: () => { invalidate(); setEditingId(null); } });
@@ -238,21 +267,22 @@ function LearningMaterialsTab({ examType }: { examType: OspeExamType }) {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const materials = materialsQ.data || [];
   const modules = modulesQ.data || [];
+  const blocks = blocksQ.data || [];
 
   return <div>
     <div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-extrabold">Learning material</h3><button onClick={() => setAdding((v) => !v)} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-toggle-add-material"><Plus size={15} /> {adding ? 'Close' : 'Add material'}</button></div>
-    {adding && <LearningMaterialForm examType={examType} modules={modules} onCancel={() => setAdding(false)} pending={create.isPending} onSave={(body) => create.mutate(body)} />}
+    {adding && <LearningMaterialForm examType={examType} modules={modules} blocks={blocks} onCancel={() => setAdding(false)} pending={create.isPending} onSave={(body) => create.mutate(body)} />}
     {!materials.length && !adding ? <EmptyState icon={BookOpen} title="No learning material yet" body="Upload a photo, notes, a file, or a link — students see it before they attempt the exam." /> : <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{materials.map((m) => <div key={m.id} className="rounded-2xl border border-border bg-card p-4" data-testid={`card-material-${m.id}`}>
       {m.imagePath && <img src={resolveUploadUrl(m.imagePath) ?? undefined} alt="" loading="lazy" className="mb-3 h-28 w-full rounded-lg object-cover" />}
       <div className="flex items-start justify-between gap-2"><p className="text-sm font-bold leading-5">{m.title}</p><span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-extrabold text-muted-foreground">{m.examType}</span></div>
       {m.description && <p className="mt-1 text-xs text-muted-foreground">{m.description}</p>}
-      <p className="mt-1 text-[10px] font-semibold text-primary">{m.targetingLabel}</p>
+      <p className="mt-1 text-[10px] font-semibold text-primary">{m.targetingLabel}{(m.blockId || m.moduleId) ? ` · ${[blocks.find((b) => b.id === m.blockId)?.name, modules.find((mod) => mod.id === m.moduleId)?.name].filter(Boolean).join(' › ')}` : ''}</p>
       <div className="mt-2 flex flex-wrap gap-2 text-[10px]">
         {m.attachmentPath && <a href={resolveUploadUrl(m.attachmentPath)!} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-bold text-primary"><Paperclip size={10} /> File</a>}
         {m.externalUrl && <a href={m.externalUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-bold text-primary"><Link2 size={10} /> Link</a>}
       </div>
-      {editingId === m.id ? <LearningMaterialForm initial={m} examType={examType} modules={modules} onCancel={() => setEditingId(null)} pending={update.isPending} onSave={(body) => update.mutate({ id: m.id, body })} /> : <div className="mt-3 flex items-center justify-between">
-        <button onClick={() => update.mutate({ id: m.id, body: { active: !m.active } })} className={cn('rounded-lg px-2 py-1 text-[10px] font-extrabold', m.active ? 'bg-[#d7eee4] text-[#164b4b]' : 'bg-muted text-muted-foreground')} data-testid={`button-toggle-material-${m.id}`}>{m.active ? 'Published' : 'Hidden'}</button>
+      {editingId === m.id ? <LearningMaterialForm initial={m} examType={examType} modules={modules} blocks={blocks} onCancel={() => setEditingId(null)} pending={update.isPending} onSave={(body) => update.mutate({ id: m.id, body })} /> : <div className="mt-3 flex items-center justify-between">
+        <button onClick={() => update.mutate({ id: m.id, body: { active: !m.active } })} className={cn('rounded-lg px-2 py-1 text-[10px] font-extrabold', m.active ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground')} data-testid={`button-toggle-material-${m.id}`}>{m.active ? 'Published' : 'Hidden'}</button>
         <div className="flex items-center gap-1">
           <button onClick={() => setEditingId(m.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" data-testid={`button-edit-material-${m.id}`}><Pencil size={14} /></button>
           <button onClick={() => setDeletingId(m.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-material-${m.id}`}><Trash2 size={14} /></button>
@@ -331,10 +361,11 @@ function IdentificationEditor({ imagePath, points, onChange }: { imagePath: stri
   </div>;
 }
 
-function StationForm({ initial, onSave, onCancel, pending, examType, modules }: { initial?: OspeStation; onSave: (body: Partial<OspeStation>) => void; onCancel: () => void; pending: boolean; examType: OspeExamType; modules: OspeModule[] }) {
+function StationForm({ initial, onSave, onCancel, pending, examType, modules, blocks }: { initial?: OspeStation; onSave: (body: Partial<OspeStation>) => void; onCancel: () => void; pending: boolean; examType: OspeExamType; modules: OspeModule[]; blocks: OspeBlock[] }) {
   const [title, setTitle] = useState(initial?.title || '');
   const [instructions, setInstructions] = useState(initial?.instructions || '');
   const [moduleId, setModuleId] = useState<number | null>(initial?.moduleId ?? null);
+  const [blockId, setBlockId] = useState<number | null>(initial?.blockId ?? null);
   const [imagePath, setImagePath] = useState<string | null>(initial?.imagePath ?? null);
   const [attachmentPath, setAttachmentPath] = useState<string | null>(initial?.attachmentPath ?? null);
   const [answerType, setAnswerType] = useState<'MCQ' | 'WRITTEN' | 'LABELING'>(initial?.answerType || 'WRITTEN');
@@ -350,10 +381,7 @@ function StationForm({ initial, onSave, onCancel, pending, examType, modules }: 
   return <div className="mt-3 space-y-2 rounded-xl border border-border bg-background p-3">
     <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={'Station title (e.g. "Specimen 4 — identify this bone")'} className="h-10 w-full rounded-xl border border-border bg-card px-3 text-xs" data-testid="input-station-title" />
     <textarea value={instructions} onChange={(e) => setInstructions(e.target.value)} placeholder="Instructions / scenario shown to the student" rows={3} className="w-full rounded-xl border border-border bg-card p-3 text-xs" data-testid="textarea-station-instructions" />
-    <select value={moduleId ?? ''} onChange={(e) => setModuleId(e.target.value ? Number(e.target.value) : null)} className="h-10 w-full rounded-xl border border-border bg-card px-3 text-xs" data-testid="select-station-module">
-      <option value="">No module (Unassigned)</option>
-      {modules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-    </select>
+    <BlockModulePicker blocks={blocks} modules={modules} blockId={blockId} moduleId={moduleId} onChange={(n) => { setBlockId(n.blockId); setModuleId(n.moduleId); }} idPrefix="station" />
     <div className="grid gap-2 sm:grid-cols-2">
       <FileField label="Photo / specimen image" icon={ImageIcon} accept="image/*" path={imagePath} onUpload={setImagePath} testId="input-station-image" />
       <FileField label="Attachment (optional)" icon={Paperclip} path={attachmentPath} onUpload={setAttachmentPath} testId="input-station-attachment" />
@@ -386,7 +414,7 @@ function StationForm({ initial, onSave, onCancel, pending, examType, modules }: 
       <button onClick={onCancel} className="rounded-lg px-3 py-1.5 text-[11px] font-bold text-muted-foreground hover:bg-muted" data-testid="button-cancel-station">Cancel</button>
       <button
         onClick={() => onSave({
-          title, instructions, moduleId, examType, imagePath, attachmentPath, answerType,
+          title, instructions, moduleId, blockId, examType, imagePath, attachmentPath, answerType,
           options: answerType === 'MCQ' ? options.filter((o) => o.trim()) : null,
           correctAnswer: answerType === 'MCQ' ? correctAnswer || null : null,
           modelAnswer: answerType === 'WRITTEN' ? modelAnswer || null : null,
@@ -406,6 +434,7 @@ function StationForm({ initial, onSave, onCancel, pending, examType, modules }: 
 function StationsTab({ examType }: { examType: OspeExamType }) {
   const stationsQ = useQuery({ queryKey: ['ospe-admin-stations', examType], queryFn: () => ospeAdminApi.stations.list(examType) });
   const modulesQ = useQuery({ queryKey: ['ospe-admin-modules', examType], queryFn: () => ospeAdminApi.modules.list(examType) });
+  const blocksQ = useQuery({ queryKey: ['ospe-admin-blocks', examType], queryFn: () => ospeAdminApi.blocks.list(examType) });
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['ospe-admin-stations'] });
   const create = useMutation({ mutationFn: ospeAdminApi.stations.create, onSuccess: () => { invalidate(); setAdding(false); } });
   const update = useMutation({ mutationFn: ({ id, body }: { id: number; body: Partial<OspeStation> }) => ospeAdminApi.stations.update(id, body), onSuccess: () => { invalidate(); setEditingId(null); } });
@@ -416,24 +445,25 @@ function StationsTab({ examType }: { examType: OspeExamType }) {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const stations = stationsQ.data || [];
   const modules = modulesQ.data || [];
+  const blocks = blocksQ.data || [];
   const stationGroups = groupTargetable(stations);
 
   const stationRow = (s: OspeStation) => <div key={s.id} className="border-b border-border p-4 last:border-0" data-testid={`row-station-${s.id}`}>
     <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap">
       {s.imagePath ? <img src={resolveUploadUrl(s.imagePath) ?? undefined} alt="" className="size-12 shrink-0 rounded-lg object-cover" /> : <div className="grid size-12 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground"><Stethoscope size={18} /></div>}
-      <div className="min-w-[160px] flex-1"><p className="text-sm font-bold leading-5">{s.title}</p><p className="mt-1 text-xs text-muted-foreground">{s.answerType === 'MCQ' ? 'Multiple choice' : s.answerType === 'LABELING' ? `Identification · ${(s.labelPoints || []).length} pin${(s.labelPoints || []).length === 1 ? '' : 's'}` : 'Written (AI graded)'} · {s.marks} mark{s.marks === 1 ? '' : 's'} · {s.targetingLabel}</p></div>
+      <div className="min-w-[160px] flex-1"><p className="text-sm font-bold leading-5">{s.title}</p><p className="mt-1 text-xs text-muted-foreground">{s.answerType === 'MCQ' ? 'Multiple choice' : s.answerType === 'LABELING' ? `Identification · ${(s.labelPoints || []).length} pin${(s.labelPoints || []).length === 1 ? '' : 's'}` : 'Written (AI graded)'} · {s.marks} mark{s.marks === 1 ? '' : 's'} · {s.targetingLabel}</p>{(s.blockId || s.moduleId) && <p className="mt-0.5 text-[10px] font-semibold text-primary">{[blocks.find((b) => b.id === s.blockId)?.name, modules.find((m) => m.id === s.moduleId)?.name].filter(Boolean).join(' › ')}</p>}</div>
       <div className="flex flex-wrap items-center gap-2">
-        <button onClick={() => update.mutate({ id: s.id, body: { active: !s.active } })} className={cn('rounded-lg px-2 py-1 text-[10px] font-extrabold', s.active ? 'bg-[#d7eee4] text-[#164b4b]' : 'bg-muted text-muted-foreground')} data-testid={`button-toggle-station-${s.id}`}>{s.active ? 'Active' : 'Hidden'}</button>
+        <button onClick={() => update.mutate({ id: s.id, body: { active: !s.active } })} className={cn('rounded-lg px-2 py-1 text-[10px] font-extrabold', s.active ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground')} data-testid={`button-toggle-station-${s.id}`}>{s.active ? 'Active' : 'Hidden'}</button>
         <button onClick={() => setEditingId(editingId === s.id ? null : s.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" data-testid={`button-edit-station-${s.id}`}><Pencil size={14} /></button>
         <button onClick={() => setDeletingId(s.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" data-testid={`button-delete-station-${s.id}`}><Trash2 size={14} /></button>
       </div>
     </div>
-    {editingId === s.id && <StationForm initial={s} examType={examType} modules={modules} onCancel={() => setEditingId(null)} pending={update.isPending} onSave={(body) => update.mutate({ id: s.id, body })} />}
+    {editingId === s.id && <StationForm initial={s} examType={examType} modules={modules} blocks={blocks} onCancel={() => setEditingId(null)} pending={update.isPending} onSave={(body) => update.mutate({ id: s.id, body })} />}
   </div>;
 
   return <div>
     <div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-extrabold">Station bank</h3><button onClick={() => setAdding((v) => !v)} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground" data-testid="button-toggle-add-station"><Plus size={15} /> {adding ? 'Close' : 'Add station'}</button></div>
-    {adding && <StationForm examType={examType} modules={modules} onCancel={() => setAdding(false)} pending={create.isPending} onSave={(body) => create.mutate(body)} />}
+    {adding && <StationForm examType={examType} modules={modules} blocks={blocks} onCancel={() => setAdding(false)} pending={create.isPending} onSave={(body) => create.mutate(body)} />}
     {!stations.length && !adding ? <EmptyState icon={Stethoscope} title="No stations yet" body="Build up a bank of stations here, then attach a set of them to an exam under the Exams tab." /> : <div className="mt-3">{stationGroups.map((g) => <CollapsibleGroup key={g.degree || 'unspecified'} defaultOpen icon={<GraduationCap size={14} />} title={g.degree === 'MBBS' || g.degree === 'BDS' ? `${g.degree} colleges` : 'Unspecified degree'} count={g.groups.reduce((sum, yg) => sum + yg.items.length, 0)} testId={`stations-degree-${g.degree || 'unspecified'}`}>
       {g.groups.map((yg) => <CollapsibleGroup key={yg.year || 'no-year'} defaultOpen nested title={yg.year ? [yg.year, (g.degree === 'MBBS' || g.degree === 'BDS') ? g.degree : ''].filter(Boolean).join(' ') : 'No year set'} count={yg.items.length} testId={`stations-year-${g.degree || 'unspecified'}-${yg.year || 'no-year'}`}>
         <div className="rounded-2xl border border-border bg-card">{yg.items.map(stationRow)}</div>
@@ -583,12 +613,12 @@ function ExamsTab({ examType }: { examType: OspeExamType }) {
 
   const examRow = (ex: OspeAdminExam) => <div key={ex.id} className="border-b border-border p-4 last:border-0" data-testid={`row-exam-${ex.id}`}>
     <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap">
-      <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#dceaf1] text-[#32647b]"><ClipboardCheck size={17} /></div>
+      <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-info/15 text-info"><ClipboardCheck size={17} /></div>
       <div className="min-w-[160px] flex-1"><p className="text-sm font-bold">{ex.title}</p><p className="mt-1 text-xs text-muted-foreground">{ex.stationCount} station{ex.stationCount === 1 ? '' : 's'} · {ex.attemptCount} attempt{ex.attemptCount === 1 ? '' : 's'} · {new Date(ex.startAt).toLocaleString()} – {new Date(ex.endAt).toLocaleString()}</p></div>
       <div className="flex flex-wrap items-center gap-2">
-        <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-extrabold', ex.status === 'published' ? 'bg-[#d7eee4] text-[#164b4b]' : ex.status === 'archived' ? 'bg-muted text-muted-foreground' : 'bg-[#fdf1d9] text-[#8a5a12]')} data-testid={`text-exam-status-${ex.id}`}>{ex.status}</span>
-        <button onClick={() => setStationsPanelId(stationsPanelId === ex.id ? null : ex.id)} className={cn('rounded-lg px-3 py-1.5 text-[11px] font-bold', stationsPanelId === ex.id ? 'bg-[#eef7f1] text-primary' : 'border border-border text-muted-foreground hover:bg-muted')} data-testid={`button-manage-stations-${ex.id}`}>Stations</button>
-        <button onClick={() => setAttemptsPanelId(attemptsPanelId === ex.id ? null : ex.id)} className={cn('rounded-lg px-3 py-1.5 text-[11px] font-bold', attemptsPanelId === ex.id ? 'bg-[#eef7f1] text-primary' : 'border border-border text-muted-foreground hover:bg-muted')} data-testid={`button-view-attempts-${ex.id}`}>Attempts</button>
+        <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-extrabold', ex.status === 'published' ? 'bg-primary/15 text-primary' : ex.status === 'archived' ? 'bg-muted text-muted-foreground' : 'bg-accent/15 text-accent-text')} data-testid={`text-exam-status-${ex.id}`}>{ex.status}</span>
+        <button onClick={() => setStationsPanelId(stationsPanelId === ex.id ? null : ex.id)} className={cn('rounded-lg px-3 py-1.5 text-[11px] font-bold', stationsPanelId === ex.id ? 'bg-primary/10 text-primary' : 'border border-border text-muted-foreground hover:bg-muted')} data-testid={`button-manage-stations-${ex.id}`}>Stations</button>
+        <button onClick={() => setAttemptsPanelId(attemptsPanelId === ex.id ? null : ex.id)} className={cn('rounded-lg px-3 py-1.5 text-[11px] font-bold', attemptsPanelId === ex.id ? 'bg-primary/10 text-primary' : 'border border-border text-muted-foreground hover:bg-muted')} data-testid={`button-view-attempts-${ex.id}`}>Attempts</button>
         <button onClick={() => setEditingId(editingId === ex.id ? null : ex.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" data-testid={`button-edit-exam-${ex.id}`}><Pencil size={14} /></button>
         {ex.status !== 'archived' ? <button onClick={() => archive.mutate(ex.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted" title="Archive" data-testid={`button-archive-exam-${ex.id}`}><RotateCcw size={14} /></button> : null}
         <button onClick={() => setDeletingId(ex.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" title="Delete forever" data-testid={`button-delete-exam-${ex.id}`}><Trash2 size={14} /></button>

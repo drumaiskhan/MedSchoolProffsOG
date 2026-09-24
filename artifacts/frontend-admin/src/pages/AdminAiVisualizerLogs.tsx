@@ -50,7 +50,7 @@ function AdminAiVisualizerLogs() {
           <div className="flex items-start justify-between gap-4">
             <div className="flex-1">
               <div className="flex items-center gap-2">
-                <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold capitalize', log.status === 'success' ? 'bg-[#d7eee4] text-[#164b4b]' : 'bg-[#f9ddd6] text-[#a34c3e]')}>{log.status}</span>
+                <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold capitalize', log.status === 'success' ? 'bg-primary/15 text-primary' : 'bg-destructive/15 text-destructive')}>{log.status}</span>
                 {log.visualizationType && <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold capitalize">{log.visualizationType}</span>}
               </div>
               <p className="mt-2 text-sm leading-6">{log.prompt}</p>

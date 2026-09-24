@@ -926,6 +926,9 @@ export const ospeModulesTable = pgTable("med_ospe_modules", {
 export const ospeLearningMaterialsTable = pgTable("med_ospe_learning_materials", {
   id: serial("id").primaryKey(),
   moduleId: integer("module_id"),
+  // Optional direct link to a block (med_ospe_blocks) so content can live
+  // under a block with no module layer at all. Null = not filed under a block.
+  blockId: integer("block_id"),
   examType: text("exam_type").notNull().default("OSPE"),
   programTargetKind: text("program_target_kind"),
   yearTargetNumber: integer("year_target_number"),
@@ -951,6 +954,9 @@ export const ospeLearningMaterialsTable = pgTable("med_ospe_learning_materials",
 export const ospeStationsTable = pgTable("med_ospe_stations", {
   id: serial("id").primaryKey(),
   moduleId: integer("module_id"),
+  // Optional direct link to a block (med_ospe_blocks) so content can live
+  // under a block with no module layer at all. Null = not filed under a block.
+  blockId: integer("block_id"),
   examType: text("exam_type").notNull().default("OSPE"),
   programTargetKind: text("program_target_kind"),
   yearTargetNumber: integer("year_target_number"),

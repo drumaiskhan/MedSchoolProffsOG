@@ -1,3 +1,11 @@
+## v58 — OSPE/OSCE stations & learning material can sit under a Block (no Module needed)
+- New nullable `block_id` on `med_ospe_stations` and `med_ospe_learning_materials` (added by `ensureSchema.ts` on boot; also in `schema/medschool.ts`). API accepts/saves `blockId` on create + update.
+- Admin station and learning-material forms: a **Block** dropdown plus an optional **Module** dropdown (`BlockModulePicker`). Picking a module fills its block; changing the block clears a module from a different block. Rows show "Block › Module".
+- Deleting a block un-files any stations/material directly under it (not deleted), same as modules.
+
+## v57 — practice sets are a random sample, not the first N
+- Practice setup (`Practice.tsx`): choosing e.g. 10 questions always gave the first 10 of the (difficulty-filtered) pool. It now draws a fresh random sample of that size each time Start is pressed (also applies to the trial daily cap). The sample keeps syllabus order unless "Shuffle question order" is on.
+
 ## v56 — moon after sunset on the dashboard greeting
 - `dayPartForHour`: the sunset ("evening") glyph now covers 17:00-18:00 only; from 18:00 the hero shows the night glyph (greeting text stays "Good evening"). Previously it stayed a sun until 21:00.
 - `DayPartIcon`: night is now a proper crescent moon with stars instead of a dimmed sun-like disc.
@@ -1012,3 +1020,33 @@ full manual trace of the affected code paths, plus a global TypeScript
 `pnpm install && pnpm run typecheck` against the actual monorepo — which
 resolves real dependency types instead of the sandbox's bare-bones
 approximation — is still worth running before deploying this.
+
+## v59 — 3D student profile, membership pass, smoother student panel
+- Profile: new `ProfileHero` (aurora gradient card, ringed avatar, count-up streak/progress/days-left) and `MembershipPass` (credit-card style pass with days-left ring, expiry, Manage link) in `components/profile/ProfileVisuals.tsx`; details rows lift on hover.
+- Payments: status card replaced by `MembershipPass`; plan cards now use the shared tilt (`TiltDiv`) with a glowing selected state and animated check.
+- Whole student panel: staggered entrance for the first blocks of every page, and route chunks are prefetched on hover/focus/touch (`usePrefetchRoutes` in App.tsx) so navigation lands instantly.
+- Styles: `src/profile3d.css`. Same rules as v34–v44 (only the small hover tilt is 3D; no preserve-3d); all motion off under prefers-reduced-motion.
+- Not run: `pnpm typecheck` / build (no node_modules in the upload) — files were syntax-checked only.
+
+## v60 — Study hub, smarter results, spaced repetition, admin Content Quality Center
+No backend / schema / auth changes. New routes are additive front-end pages only: student `/study`, admin `/admin/quality`.
+Student
+- `/study` (pages/StudyHub.tsx): Daily plan (mistakes + weak topics + resume topic + due cards, tick-off + progress ring), Mistake review (recent / repeated / by topic), Weak areas with 10/20/50 mixed practice.
+- Practice: `?set=weak|mistakes&count=10|20|50` builds a mixed set from existing GET /mcqs; every finished session feeds the mistake ledger; "Related questions in this set" appears after answering.
+- MCQ results: accuracy by difficulty, weak-concept terms, recommended next actions (components/study/ResultInsights.tsx).
+- Flashcards: Again / Hard / Good / Easy with next-interval preview (Leitner boxes).
+- lib/study.ts holds the ledger + spaced-repetition state in localStorage (per device) — see limits below.
+Admin
+- `/admin/quality`: Content health score, invalid / no-explanation / no-reference / reported lists with one-click fixes (draft with AI, resolve flag), near-duplicate finder with side-by-side compare + delete, Draft → Review → Approved → Published board.
+- Workflow stages are derived from existing fields: `status` + `explanationStatus` (PENDING/AI_GENERATED = Draft, REVIEWED = Review, APPROVED = Approved, status=published = Published). PATCH /mcqs/:id does not accept `status`/`tags`, so no new column or route was needed.
+Limits / not done
+- Mistake ledger + flashcard schedule are per device (no server table for per-question history). A read-only `GET /student/mistakes` would make them cross-device and backfill history.
+- Not built this round: global-search extension (MCQs stay excluded by design in v40), Student 360 profile, question analytics (needs per-question attempt aggregates the API doesn't expose), bookmarks/notes polish.
+- Not run: pnpm typecheck / build / browser. Files were syntax-checked with esbuild only.
+
+## v61 — Student 360° (admin) + review area polish (student)
+No backend / schema / route changes.
+- Admin: `components/Student360.tsx` mounted inside the existing StudentDrawer (drawer widened to max-w-xl, slides in). Tabs: Overview (membership, last seen, streak, exams, total paid, reports + "Worth a look" flags such as membership ending, paying-but-inactive, pending payments, low exam average) · Exams (trend sparkline + recent attempts) · Payments · Reports (flagged questions + feedback). Exam attempts are fetched once (only exams that have attempts) and cached 5 min.
+- Not included: practice-session accuracy per student (no admin endpoint exposes it).
+- Student: `components/study/ReviewTabs.tsx` links Flagged · Notes · Saved · Mistakes with live counts, shown on all three pages. Flagged MCQs gets All/Open/Resolved filter, search, and "Practice flagged" (`/practice?set=flagged&count=20`, built in lib/study.ts from existing GET /mcqs?mcqId=). `/study?tab=mistakes` opens the Mistakes tab.
+- Not run: typecheck / build / browser (esbuild syntax check only).

@@ -96,6 +96,7 @@ const AiVisualizer = lazy(() => import('@/pages/AiVisualizer'));
 const Books = lazy(() => import('@/pages/Books'));
 const Notebook = lazy(() => import('@/pages/Notebook'));
 const SavedSessions = lazy(() => import('@/pages/SavedSessions'));
+const StudyHub = lazy(() => import('@/pages/StudyHub'));
 const FlaggedMcqs = lazy(() => import('@/pages/FlaggedMcqs'));
 const Leaderboard = lazy(() => import('@/pages/Leaderboard'));
 const Challenge = lazy(() => import('@/pages/Challenge'));
@@ -106,7 +107,60 @@ const BookReader = lazy(() => import('@/pages/BookReader'));
 const Feedback = lazy(() => import('@/pages/Feedback'));
 const Profile = lazy(() => import('@/pages/Profile'));
 
+// v59 — warm the route chunk the moment a student hovers, focuses or touches a
+// link, so the click lands on an already-downloaded page (no Suspense flash).
+const ROUTE_PREFETCH: Array<[string, () => Promise<unknown>]> = [
+  ['/dashboard', () => import('@/pages/Dashboard')],
+  ['/blocks', () => import('@/pages/Blocks')],
+  ['/modules', () => import('@/pages/ModulesRedirect')],
+  ['/subjects', () => import('@/pages/Subjects')],
+  ['/topics', () => import('@/pages/Subjects')],
+  ['/practice', () => import('@/pages/Practice')],
+  ['/exams', () => import('@/pages/Exams')],
+  ['/ospe-osce', () => import('@/pages/OspeOsce')],
+  ['/past-papers', () => import('@/pages/PastPapers')],
+  ['/flashcards', () => import('@/pages/Flashcards')],
+  ['/ai-visualizer', () => import('@/pages/AiVisualizer')],
+  ['/books', () => import('@/pages/Books')],
+  ['/notebook', () => import('@/pages/Notebook')],
+  ['/saved-sessions', () => import('@/pages/SavedSessions')],
+  ['/flagged-mcqs', () => import('@/pages/FlaggedMcqs')],
+  ['/study', () => import('@/pages/StudyHub')],
+  ['/progress', () => import('@/pages/Progress')],
+  ['/leaderboard', () => import('@/pages/Leaderboard')],
+  ['/challenge', () => import('@/pages/Challenge')],
+  ['/notifications', () => import('@/pages/Notifications')],
+  ['/payments', () => import('@/pages/Payments')],
+  ['/feedback', () => import('@/pages/Feedback')],
+  ['/profile', () => import('@/pages/Profile')],
+];
+function usePrefetchRoutes() {
+  useEffect(() => {
+    const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+    const seen = new Set<string>();
+    const warm = (e: Event) => {
+      const a = (e.target as HTMLElement | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
+      if (!a || a.origin !== window.location.origin) return;
+      const path = a.pathname.startsWith(base) ? a.pathname.slice(base.length) : a.pathname;
+      const hit = ROUTE_PREFETCH.find(([prefix]) => path === prefix || path.startsWith(prefix + '/'));
+      if (!hit || seen.has(hit[0])) return;
+      seen.add(hit[0]);
+      hit[1]().catch(() => seen.delete(hit[0]));
+    };
+    const opts = { passive: true, capture: true } as const;
+    document.addEventListener('pointerover', warm, opts);
+    document.addEventListener('focusin', warm, opts);
+    document.addEventListener('touchstart', warm, opts);
+    return () => {
+      document.removeEventListener('pointerover', warm, opts);
+      document.removeEventListener('focusin', warm, opts);
+      document.removeEventListener('touchstart', warm, opts);
+    };
+  }, []);
+}
+
 function AppRoutes() {
+ usePrefetchRoutes();
  useFaviconSync();
  useThemeSync();
  // Was <SkeletonPage /> here — that's meant to sit inside Shell's padded
@@ -117,7 +171,7 @@ function AppRoutes() {
  // its own background) and is already what every other loading gap in
  // this app uses, so route transitions now look the same as the initial
  // boot / session-restore loaders instead of flashing blank white.
- return <Suspense fallback={<BrandedLoadingScreen />}><Switch><Route path="/login" component={Login} /><Route path="/register" component={Register} /><Route path="/forgot-password" component={ForgotPassword} /><Route path="/reset-password" component={ResetPassword} /><Route path="/verify-email" component={VerifyEmail} /><Route path="/" component={Home} /><Route path="/about" component={About} /><Route path="/pricing" component={Pricing} /><Route path="/contact" component={Contact} /><Route path="/faq" component={Faq} /><Route path="/dashboard"><Shell><Dashboard /></Shell></Route><Route path="/blocks"><Shell><Blocks /></Shell></Route><Route path="/blocks/:id"><Shell><BlockDetail /></Shell></Route><Route path="/modules"><Shell><ModulesRedirect /></Shell></Route><Route path="/modules/:id"><Shell><Subjects /></Shell></Route><Route path="/subjects"><Shell><Subjects /></Shell></Route><Route path="/subjects/:id"><Shell><Subjects topics /></Shell></Route><Route path="/topics"><Shell><Subjects topics /></Shell></Route><Route path="/practice"><Shell><Practice /></Shell></Route><Route path="/exams"><Shell><Exams /></Shell></Route><Route path="/exams/take/:attemptId"><Shell><TakeExam /></Shell></Route><Route path="/exams/result/:attemptId"><Shell><ExamResult /></Shell></Route><Route path="/ospe-osce"><Shell><OspeOsce /></Shell></Route><Route path="/ospe-osce/take/:attemptId"><Shell><TakeOspeExam /></Shell></Route><Route path="/ospe-osce/result/:attemptId"><Shell><OspeExamResult /></Shell></Route><Route path="/past-papers"><Shell><PastPapers /></Shell></Route><Route path="/flashcards"><Shell><Flashcards /></Shell></Route><Route path="/ai-visualizer"><Shell><AiVisualizer /></Shell></Route><Route path="/books"><Shell><Books /></Shell></Route><Route path="/books/:id/read"><Shell><BookReader /></Shell></Route><Route path="/notebook"><Shell><Notebook /></Shell></Route><Route path="/saved-sessions"><Shell><SavedSessions /></Shell></Route><Route path="/flagged-mcqs"><Shell><FlaggedMcqs /></Shell></Route><Route path="/progress"><Shell><MyProgress /></Shell></Route><Route path="/leaderboard"><Shell><Leaderboard /></Shell></Route><Route path="/challenge"><Shell><Challenge /></Shell></Route><Route path="/notifications"><Shell><Notifications /></Shell></Route><Route path="/payments"><Shell><Payments /></Shell></Route><Route path="/feedback"><Shell><Feedback /></Shell></Route><Route path="/profile"><Shell><Profile /></Shell></Route><Route component={NotFound} /></Switch></Suspense>; }
+ return <Suspense fallback={<BrandedLoadingScreen />}><Switch><Route path="/login" component={Login} /><Route path="/register" component={Register} /><Route path="/forgot-password" component={ForgotPassword} /><Route path="/reset-password" component={ResetPassword} /><Route path="/verify-email" component={VerifyEmail} /><Route path="/" component={Home} /><Route path="/about" component={About} /><Route path="/pricing" component={Pricing} /><Route path="/contact" component={Contact} /><Route path="/faq" component={Faq} /><Route path="/dashboard"><Shell><Dashboard /></Shell></Route><Route path="/blocks"><Shell><Blocks /></Shell></Route><Route path="/blocks/:id"><Shell><BlockDetail /></Shell></Route><Route path="/modules"><Shell><ModulesRedirect /></Shell></Route><Route path="/modules/:id"><Shell><Subjects /></Shell></Route><Route path="/subjects"><Shell><Subjects /></Shell></Route><Route path="/subjects/:id"><Shell><Subjects topics /></Shell></Route><Route path="/topics"><Shell><Subjects topics /></Shell></Route><Route path="/practice"><Shell><Practice /></Shell></Route><Route path="/exams"><Shell><Exams /></Shell></Route><Route path="/exams/take/:attemptId"><Shell><TakeExam /></Shell></Route><Route path="/exams/result/:attemptId"><Shell><ExamResult /></Shell></Route><Route path="/ospe-osce"><Shell><OspeOsce /></Shell></Route><Route path="/ospe-osce/take/:attemptId"><Shell><TakeOspeExam /></Shell></Route><Route path="/ospe-osce/result/:attemptId"><Shell><OspeExamResult /></Shell></Route><Route path="/past-papers"><Shell><PastPapers /></Shell></Route><Route path="/flashcards"><Shell><Flashcards /></Shell></Route><Route path="/ai-visualizer"><Shell><AiVisualizer /></Shell></Route><Route path="/books"><Shell><Books /></Shell></Route><Route path="/books/:id/read"><Shell><BookReader /></Shell></Route><Route path="/notebook"><Shell><Notebook /></Shell></Route><Route path="/saved-sessions"><Shell><SavedSessions /></Shell></Route><Route path="/study"><Shell><StudyHub /></Shell></Route><Route path="/flagged-mcqs"><Shell><FlaggedMcqs /></Shell></Route><Route path="/progress"><Shell><MyProgress /></Shell></Route><Route path="/leaderboard"><Shell><Leaderboard /></Shell></Route><Route path="/challenge"><Shell><Challenge /></Shell></Route><Route path="/notifications"><Shell><Notifications /></Shell></Route><Route path="/payments"><Shell><Payments /></Shell></Route><Route path="/feedback"><Shell><Feedback /></Shell></Route><Route path="/profile"><Shell><Profile /></Shell></Route><Route component={NotFound} /></Switch></Suspense>; }
 function App() {
   const [focusMode, setFocusMode] = useState(false);
   const [strictFocusMode, setStrictFocusMode] = useState(false);
